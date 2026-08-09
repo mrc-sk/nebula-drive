@@ -1,0 +1,27 @@
+name: nebuladrive
+arch: amd64
+platform: linux
+version: 1.0.0
+section: net
+priority: optional
+maintainer: NebulaDrive Team
+description: |
+  NebulaDrive - 新一代毛玻璃风格云存储系统
+  支持本地/S3/OSS/COS 多存储后端、WebDAV、离线下载、
+  文件分享、协作编辑、插件系统。
+vendor: NebulaDrive Team
+homepage: https://github.com/nebula-drive/nebula
+license: MIT
+depends:
+  - libc6
+contents:
+  - src: ./nebula
+    dst: /usr/bin/nebuladrive
+  - src: ./nebuladrive.service
+    dst: /usr/lib/systemd/system/nebuladrive.service
+  - src: ./data
+    dst: /var/lib/nebuladrive
+    type: dir
+scripts:
+  postinstall: ./postinstall.sh
+  preremove: ./preremove.sh

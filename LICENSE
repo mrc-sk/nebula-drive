@@ -1,0 +1,118 @@
+================================================================================
+                NebulaDrive 组合开源协议（MIT + 署名保留条款 v1.0）
+================================================================================
+
+Copyright (c) 2026 mrc-sk（作者名保留，禁止移除）
+Repository: https://github.com/mrc-sk/nebula-drive（仓库名保留，禁止移除）
+
+================================================================================
+第一部分：MIT 许可证（授权商用、修改、分发）
+================================================================================
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+================================================================================
+第二部分：署名保留附加条款（本部分为所有权保留声明，与 MIT 并行生效）
+================================================================================
+
+作为本软件的版权所有人 mrc-sk，在 MIT 开源授权的基础上，附加以下
+不可撤销的署名保留要求。任何使用、复制、修改、分发或商用本软件的
+个人或实体，必须严格遵守以下条款。违反任何一条均视为授权终止。
+
+条款 1 —— 至少 3 处保留作者名与仓库名
+----------------------------------------
+
+在任何分发或商用的副本中，必须至少保留以下 3 处完整的署名：
+
+    1) 在源代码目录根下的本 LICENSE 文件中，完整保留本文件顶部的
+       声明（Copyright (c) 2026 mrc-sk，以及
+       Repository: https://github.com/mrc-sk/nebula-drive）。
+
+    2) 在用户可见的软件界面（即网页、桌面端、移动端、命令行帮助）
+       的「关于 / About / Powered by / Footer 页脚」区域中，必须
+       包含以下其中之一的文本，字体大小不得小于周围文字的 70%：
+
+           "Powered by NebulaDrive · 作者 mrc-sk ·
+            仓库 github.com/mrc-sk/nebula-drive"
+
+       或英文：
+
+           "Powered by NebulaDrive · Author mrc-sk ·
+            Repository github.com/mrc-sk/nebula-drive"
+
+       若为 API / SDK / 无头服务，至少在响应头 X-Powered-By
+       或 --version 输出中包含 "mrc-sk / nebula-drive"。
+
+    3) 在分发本软件的任何 README、文档、官网、产品介绍页面中，
+       必须包含一处明确的项目来源声明，例如：
+
+           "本项目基于 NebulaDrive
+            (https://github.com/mrc-sk/nebula-drive) 开发，
+            原作者：mrc-sk"
+
+条款 2 —— 禁止移除或修改署名
+----------------------------------------
+
+不得通过 CSS 隐藏、颜色透明、字体大小为 0、注释删除、字符串混淆、
+编译裁剪等任何技术手段隐藏或移除上述 3 处署名。
+不得将 "mrc-sk" 替换为其他作者名，不得将 "nebula-drive" 替换为
+其他仓库名。
+如果对本软件做了大幅度二次开发（重写代码量 > 60% 并独立发布新产品），
+仍需保留上述 3 处署名，但可以在旁边补充 "基于 NebulaDrive 二次开发"
+的文字。
+
+条款 3 —— 商用声明（允许商用，但须署名）
+----------------------------------------
+
+商用完全允许，无需联系作者付费，无需报备，无需申请授权。
+商用的唯一前提是严格遵守条款 1、2。
+如果商用产品的年营收超过 100 万美元，作者鼓励（非强制）捐赠一部分
+收入以支持该项目的维护。
+
+条款 4 —— 商标与品牌
+----------------------------------------
+
+"NebulaDrive" 及自定义 Logo 是项目品牌，不得用作商业竞品的名称
+或品牌标识。你可以把自己的产品叫 "基于 NebulaDrive 的 XX 网盘"，
+但不能直接叫 "NebulaDrive Pro / NebulaDrive 商业版"
+（除非你就是作者 mrc-sk 本人，或获得作者书面授权）。
+
+条款 5 —— 插件库
+----------------------------------------
+
+plugins 分支（公共插件库）中的插件代码，默认采用与本主仓库相同的
+组合开源协议，除非插件的 LICENSE 文件另行声明。
+社区贡献者向 plugins 分支提交 PR 即视为同意其代码采用本协议。
+
+条款 6 —— 协议一致性
+----------------------------------------
+
+如果 MIT 许可证与本附加条款发生冲突，以附加条款为准。
+如果附加条款中的某条被司法机构判定为不可执行，其余条款仍然有效。
+
+================================================================================
+完整署名检查清单（发布前自检）
+================================================================================
+
+[ ] 1. LICENSE 文件中保留了 "Copyright (c) 2026 mrc-sk" 与仓库链接
+[ ] 2. 用户界面关于/页脚中显示了作者名 mrc-sk 与仓库名 nebula-drive
+[ ] 3. README 或产品介绍页中包含了原作者声明
+
+以上 3 项必须全部满足才符合协议。
+================================================================================

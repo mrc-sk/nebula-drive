@@ -1,0 +1,35 @@
+# NebulaDrive 后端运行产物
+backend/nebula
+backend/nebula.exe
+backend/data/
+backend/data.db
+backend/*.db
+backend/*.log
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.coverprofile
+coverage.out
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# nfpm
+*.deb
+*.rpm
+*.apk
