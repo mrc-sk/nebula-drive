@@ -56,6 +56,8 @@ func Install(c *gin.Context) {
 	}
 	// 5. 创建默认本地存储策略
 	ensureDefaultPolicy(req.System.UploadPath)
+	// 5.5 创建默认套餐（Ultra/Pro/Pro Max）
+	SeedDefaultPlans()
 	// 6. 持久化配置（敏感字段加密 env + ini 辅助）
 	cfg := &conf.Config{
 		DB:     req.DB,

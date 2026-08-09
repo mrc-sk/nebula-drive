@@ -140,6 +140,8 @@ func bootstrap() {
 	}
 	// 回填遗留 FileObject 引用计数（V1-0.0.1 升级用户秒传/复制共享物理文件，没有 FileObject）
 	storage.BackfillFileObjects()
+	// 初始化默认套餐（Ultra/Pro/Pro Max）
+	controllers.SeedDefaultPlans()
 	if err := migrations.Run(db.Get()); err != nil {
 		log.Printf("[WARN] 版本化迁移失败: %v", err)
 	}

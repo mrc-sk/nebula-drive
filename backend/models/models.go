@@ -25,6 +25,8 @@ type User struct {
 	LogoEgg         bool           `gorm:"default:false" json:"logoEgg"`
 	SelectMode      string         `gorm:"size:16;default:'context'" json:"selectMode"`
 	IsAdmin         bool           `gorm:"default:false" json:"isAdmin"`
+	PlanID          uint           `gorm:"default:0" json:"planId"`          // 当前套餐 0=免费
+	PlanExpireAt    *time.Time     `json:"planExpireAt"`                     // 套餐到期时间
 	CreatedAt       time.Time      `json:"createdAt"`
 	UpdatedAt       time.Time      `json:"updatedAt"`
 	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
@@ -233,6 +235,72 @@ type IPBan struct {
 	CreatedAt time.Time  `json:"createdAt"`
 }
 
+// ---- 付费体系 ----
+
+// Plan 套餐定义
+type Plan struct {
+	ID             uint      `gorm:"primarykey" json:"id"`
+	Name           string    `gorm:"size:64;not null" json:"name"`            // ultra|pro|promax
+	DisplayName    string    `gorm:"size:128" json:"displayName"`              // Ultra / Pro / Pro Max
+	Price          int       `gorm:"not null" json:"price"`                    // 分为单位：5900=59元
+	Currency       string    `gorm:"size:8;default:'CNY'" json:"currency"`
+	DurationMonths int       `gorm:"not null" json:"durationMonths"`           // 12 / 12 / 36
+	MaxStorage     int64     `gorm:"default:-1" json:"maxStorage"`             // -1 无限
+	ShareEnabled   bool      `gorm:"default:true" json:"shareEnabled"`
+	WebDAVEnabled  bool      `gorm:"default:true" json:"webdavEnabled"`
+	SpeedLimit     int       `gorm:"default:0" json:"speedLimit"`              // KB/s 0 不限
+	Features       string    `gorm:"type:text" json:"-"`                      // JSON: 功能列表
+	IsActive       bool      `gorm:"default:true" json:"isActive"`
+	SortOrder      int       `gorm:"default:0" json:"sortOrder"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+// RedemptionCode 兑换码
+type RedemptionCode struct {
+	ID        uint       `gorm:"primarykey" json:"id"`
+	Code      string     `gorm:"uniqueIndex;size:32;not null" json:"code"` // NB-XXXX-XXXX-XXXX
+	PlanID    uint       `gorm:"index;not null" json:"planId"`
+	MaxUses   int        `gorm:"default:0" json:"maxUses"`  // 0=不限次数
+	UsedCount int        `gorm:"default:0" json:"usedCount"`
+	IsActive  bool       `gorm:"default:true" json:"isActive"`
+	CreatedBy uint       `json:"createdBy"`
+	Note      string     `gorm:"size:255" json:"note"`
+	ExpiresAt *time.Time `json:"expiresAt"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+}
+
+// Subscription 用户订阅（一次兑换一条记录）
+type Subscription struct {
+	ID        uint       `gorm:"primarykey" json:"id"`
+	UserID    uint       `gorm:"index;not null" json:"userId"`
+	UserName  string     `gorm:"size:64" json:"userName"`
+	PlanID    uint       `gorm:"index;not null" json:"planId"`
+	PlanName  string     `gorm:"size:64" json:"planName"`
+	CodeID    uint       `gorm:"index" json:"codeId"`
+	Code      string     `gorm:"size:32" json:"code"`
+	StartTime time.Time  `json:"startTime"`
+	EndTime   time.Time  `json:"endTime"`
+	Status    string     `gorm:"size:16;default:'active'" json:"status"` // active|expired|cancelled
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+}
+
+// RedemptionLog 兑换审计日志
+type RedemptionLog struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	CodeID    uint      `gorm:"index" json:"codeId"`
+	Code      string    `gorm:"size:32;index" json:"code"`
+	UserID    uint      `gorm:"index" json:"userId"`
+	UserName  string    `gorm:"size:64" json:"userName"`
+	PlanID    uint      `json:"planId"`
+	PlanName  string    `gorm:"size:64" json:"planName"`
+	IP        string    `gorm:"size:64" json:"ip"`
+	UA        string    `gorm:"size:256" json:"ua"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // AutoMigrate 自动建表
 func AutoMigrate() error {
 	if db.DB == nil {
@@ -243,6 +311,7 @@ func AutoMigrate() error {
 		&Session{}, &EmailCode{}, &Plugin{}, &AuditLog{},
 		&Notification{}, &OAuthApp{}, &OAuthCode{}, &AccessToken{}, &PersonalAccessToken{},
 		&IPBan{},
+		&Plan{}, &RedemptionCode{}, &Subscription{}, &RedemptionLog{},
 	); err != nil {
 		return err
 	}

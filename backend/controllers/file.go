@@ -65,20 +65,38 @@ func groupOf(userID uint) models.Group {
 	return models.Group{ID: 1, Name: "default", MaxStorage: -1, ShareEnabled: true, WebDAVEnabled: true, SpeedLimit: 0}
 }
 
-// ensureQuota 校验 user 再写入 additionalBytes 后是否仍在组配额内。
-// MaxStorage == -1 视为无限。超出时返回带错误信息。
-func ensureQuota(userID uint, additionalBytes int64) error {
+// effectiveMaxStorage 取用户有效存储上限：有活跃套餐优先用套餐额度，否则用用户组额度
+func effectiveMaxStorage(userID uint) (int64, string) {
+	var u models.User
+	if err := db.Get().Select("storage, plan_id, plan_expire_at").First(&u, userID).Error; err != nil {
+		return -1, "group"
+	}
+	// 检查是否有活跃套餐
+	if u.PlanID > 0 && u.PlanExpireAt != nil && u.PlanExpireAt.After(time.Now()) {
+		var plan models.Plan
+		if db.Get().Select("max_storage, display_name").First(&plan, u.PlanID).Error == nil {
+			return plan.MaxStorage, "plan:" + plan.DisplayName
+		}
+	}
+	// 回退到用户组
 	g := groupOf(userID)
-	if g.MaxStorage == -1 {
+	return g.MaxStorage, "group:" + g.Name
+}
+
+// ensureQuota 校验 user 再写入 additionalBytes 后是否仍在配额内。
+// 优先检查用户套餐额度，无套餐则用用户组额度。MaxStorage == -1 视为无限。
+func ensureQuota(userID uint, additionalBytes int64) error {
+	maxStorage, source := effectiveMaxStorage(userID)
+	if maxStorage == -1 {
 		return nil
 	}
 	var u models.User
 	if err := db.Get().Select("storage").First(&u, userID).Error; err != nil {
 		return err
 	}
-	if u.Storage+additionalBytes > g.MaxStorage {
-		return fmt.Errorf("quota exceeded: have %d bytes, limit %d bytes, tried to add %d bytes",
-			u.Storage, g.MaxStorage, additionalBytes)
+	if u.Storage+additionalBytes > maxStorage {
+		return fmt.Errorf("quota exceeded: have %d bytes, limit %d bytes (%s), tried to add %d bytes",
+			u.Storage, maxStorage, source, additionalBytes)
 	}
 	return nil
 }

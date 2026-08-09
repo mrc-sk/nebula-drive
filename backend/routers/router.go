@@ -90,6 +90,17 @@ func Setup() *gin.Engine {
 			admin.GET("/ip-bans", controllers.ListIPBans)
 			admin.POST("/ip-bans", controllers.AddIPBan)
 			admin.DELETE("/ip-bans/:id", controllers.DeleteIPBan)
+			// 付费体系
+			admin.GET("/plans", controllers.ListPlans)
+			admin.POST("/plans", controllers.CreatePlan)
+			admin.PUT("/plans/:id", controllers.UpdatePlan)
+			admin.DELETE("/plans/:id", controllers.DeletePlan)
+			admin.GET("/codes", controllers.ListCodes)
+			admin.POST("/codes/generate", controllers.GenerateCodes)
+			admin.PUT("/codes/:id/disable", controllers.DisableCode)
+			admin.DELETE("/codes/:id", controllers.DeleteCode)
+			admin.GET("/subscriptions", controllers.ListSubscriptions)
+			admin.GET("/redemption-logs", controllers.ListRedemptionLogs)
 		}
 
 		files := api.Group("/files", middleware.Auth(true))
@@ -178,6 +189,14 @@ func Setup() *gin.Engine {
 			pat.POST("", controllers.CreatePAT)
 			pat.GET("", controllers.ListPATs)
 			pat.DELETE("/:id", controllers.DeletePAT)
+		}
+
+		// 付费体系（用户端）
+		api.GET("/plans", controllers.GetPlans)
+		planUser := api.Group("/plan", middleware.Auth(true))
+		{
+			planUser.GET("/my", controllers.GetMySubscription)
+			planUser.POST("/redeem", controllers.RedeemCode)
 		}
 
 		// 开放 API v1（OAuth Token / PAT 鉴权）
