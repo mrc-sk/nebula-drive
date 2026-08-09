@@ -135,6 +135,10 @@ func New(policyType, configJSON string) (Handler, error) {
 		return newOSSHandler(configJSON)
 	case "cos":
 		return newCOSHandler(configJSON)
+	case "sftp":
+		return newSFTPHandler(configJSON)
+	case "webdav_remote", "remote_webdav":
+		return newWebDAVRemoteHandler(configJSON)
 	}
 	return nil, errors.New("unsupported policy type: " + policyType)
 }
