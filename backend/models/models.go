@@ -301,6 +301,15 @@ type RedemptionLog struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// SearchHistory 搜索历史记录
+type SearchHistory struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	UserID    uint      `gorm:"index;not null" json:"userId"`
+	Keyword   string    `gorm:"size:255" json:"keyword"`
+	Filters   string    `gorm:"type:text" json:"filters"` // JSON
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // AutoMigrate 自动建表
 func AutoMigrate() error {
 	if db.DB == nil {
@@ -312,6 +321,7 @@ func AutoMigrate() error {
 		&Notification{}, &OAuthApp{}, &OAuthCode{}, &AccessToken{}, &PersonalAccessToken{},
 		&IPBan{},
 		&Plan{}, &RedemptionCode{}, &Subscription{}, &RedemptionLog{},
+		&SearchHistory{},
 	); err != nil {
 		return err
 	}

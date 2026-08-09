@@ -106,11 +106,18 @@ func Setup() *gin.Engine {
 		files := api.Group("/files", middleware.Auth(true))
 		{
 			files.GET("", controllers.List)
+			files.GET("/search", controllers.Search)
 			files.GET("/tags", controllers.ListTags)
+			files.PUT("/tags", controllers.UpdateTag)
 			files.POST("/batch-move", controllers.BatchMove)
 			files.POST("/batch-copy", controllers.BatchCopy)
 			files.POST("/batch-policy", controllers.BatchPolicy)
 			files.POST("/batch-delete", middleware.RequireConfirm(), controllers.BatchDelete)
+			files.POST("/batch-rename", controllers.BatchRename)
+			files.POST("/batch-tag", controllers.BatchAddTag)
+			files.GET("/search-history", controllers.ListSearchHistory)
+			files.POST("/search-history", controllers.SaveSearchHistory)
+			files.DELETE("/search-history", controllers.ClearSearchHistory)
 			files.GET("/breadcrumb/:id", controllers.Breadcrumb)
 			files.POST("/mkdir", controllers.Mkdir)
 			files.POST("/rapid", controllers.Rapid)
@@ -135,6 +142,7 @@ func Setup() *gin.Engine {
 			// 文件标签
 			files.POST("/:id/tags", controllers.AddTag)
 			files.DELETE("/:id/tags/:tag", controllers.RemoveTag)
+			files.GET("/:id/tags", controllers.ListFileTags)
 			// 协作编辑
 			files.GET("/:id/collab", controllers.CollabOpen)
 			files.POST("/:id/collab/save", controllers.CollabSave)
