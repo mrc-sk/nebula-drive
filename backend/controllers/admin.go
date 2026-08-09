@@ -174,11 +174,11 @@ func UpdateGroup(c *gin.Context) {
 		return
 	}
 	tx := db.Get().Model(&models.Group{}).Where("id = ?", uint(id)).Updates(map[string]any{
-		"name":           req.Name,
-		"max_storage":    req.MaxStorage,
-		"share_enabled":  req.ShareEnabled,
-		"webdav_enabled": req.WebDAVEnabled,
-		"speed_limit":    req.SpeedLimit,
+		"name":            req.Name,
+		"max_storage":     req.MaxStorage,
+		"share_enabled":   req.ShareEnabled,
+		"web_dav_enabled": req.WebDAVEnabled,
+		"speed_limit":     req.SpeedLimit,
 	})
 	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "update failed: " + tx.Error.Error()})
