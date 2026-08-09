@@ -5,6 +5,11 @@ backend/data/
 backend/data.db
 backend/*.db
 backend/*.log
+# 敏感文件：密钥、前端依赖产物、本地设置
+backend/data/secret.key
+backend/data/*.ini
+backend/data/*.json
+frontend/dist/
 
 # 前端
 frontend/node_modules/
