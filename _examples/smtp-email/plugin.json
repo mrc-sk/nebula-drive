@@ -1,0 +1,19 @@
+{
+  "id": "smtp-email",
+  "name": "SMTP 邮件插件",
+  "version": "1.0.0",
+  "author": "mrc-sk",
+  "homepage": "https://github.com/mrc-sk/nebula-drive/tree/plugins/_examples/smtp-email",
+  "description": "通过 SMTP 协议发送邮件通知。支持 QQ/163/Gmail/SendCloud。触发 onEmail 钩子。",
+  "tags": ["email", "smtp", "notification"],
+  "hooks": ["onEmail"],
+  "minAppVersion": "1.0.0",
+  "dependencies": [],
+  "settings": [
+    {"key": "smtp_host", "type": "string", "label": "SMTP 地址", "default": "smtp.qq.com"},
+    {"key": "smtp_port", "type": "number", "label": "SMTP 端口", "default": 465},
+    {"key": "smtp_user", "type": "string", "label": "发件账号", "default": ""},
+    {"key": "smtp_pass", "type": "password", "label": "授权码/密码", "default": ""},
+    {"key": "smtp_ssl", "type": "boolean", "label": "启用 SSL", "default": true}
+  ]
+}

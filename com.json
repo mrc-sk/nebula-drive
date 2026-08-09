@@ -1,0 +1,116 @@
+{
+  "storeName": "NebulaDrive 官方插件商店",
+  "storeOwner": "mrc-sk",
+  "storeRepo": "https://github.com/mrc-sk/nebula-drive",
+  "updatedAt": "2026-08-09T00:00:00Z",
+  "plugins": [
+    {
+      "id": "smtp-email",
+      "name": "SMTP 邮件插件",
+      "version": "1.0.0",
+      "author": "mrc-sk",
+      "homepage": "https://github.com/mrc-sk/nebula-drive/tree/plugins/_examples/smtp-email",
+      "downloadUrl": "https://github.com/mrc-sk/nebula-drive/archive/refs/heads/plugins.zip",
+      "archiveSubdir": "nebula-drive-plugins/_examples/smtp-email",
+      "description": "通过 SMTP 协议发送邮件通知。支持 QQ/163/Gmail/SendCloud。触发 onEmail 钩子。",
+      "tags": ["email", "smtp", "notification"],
+      "hooks": ["onEmail"],
+      "icon": "",
+      "minAppVersion": "1.0.0",
+      "settings": [
+        {"key": "smtp_host", "type": "string", "label": "SMTP 地址", "default": "smtp.qq.com"},
+        {"key": "smtp_port", "type": "number", "label": "SMTP 端口", "default": 465},
+        {"key": "smtp_user", "type": "string", "label": "发件账号", "default": ""},
+        {"key": "smtp_pass", "type": "password", "label": "授权码/密码", "default": ""},
+        {"key": "smtp_ssl", "type": "boolean", "label": "启用 SSL", "default": true}
+      ]
+    },
+    {
+      "id": "backup-local",
+      "name": "本地一键备份插件",
+      "version": "1.0.0",
+      "author": "mrc-sk",
+      "homepage": "https://github.com/mrc-sk/nebula-drive/tree/plugins/_examples/backup-local",
+      "downloadUrl": "https://github.com/mrc-sk/nebula-drive/archive/refs/heads/plugins.zip",
+      "archiveSubdir": "nebula-drive-plugins/_examples/backup-local",
+      "description": "导出 SQLite/配置 + 打包下载；恢复时导入数据包。触发 onBackup/onRestore 钩子。",
+      "tags": ["backup", "restore", "admin"],
+      "hooks": ["onBackup", "onRestore"],
+      "icon": "",
+      "minAppVersion": "1.0.0",
+      "settings": [
+        {"key": "encryption", "type": "boolean", "label": "启用 AES 加密备份包", "default": true},
+        {"key": "schedule_hour", "type": "number", "label": "每日自动备份小时（-1 关闭）", "default": -1}
+      ]
+    },
+    {
+      "id": "onlyoffice",
+      "name": "OnlyOffice 协作编辑插件",
+      "version": "1.0.0",
+      "author": "mrc-sk",
+      "homepage": "https://github.com/mrc-sk/nebula-drive/tree/plugins/_examples/onlyoffice",
+      "downloadUrl": "https://github.com/mrc-sk/nebula-drive/archive/refs/heads/plugins.zip",
+      "archiveSubdir": "nebula-drive-plugins/_examples/onlyoffice",
+      "description": "对接 OnlyOffice 文档服务器，实现 docx/xlsx/pptx 多人实时协作编辑。触发 onCollabOpen/onCollabSave 钩子。",
+      "tags": ["collab", "onlyoffice", "office"],
+      "hooks": ["onCollabOpen", "onCollabSave"],
+      "icon": "",
+      "minAppVersion": "1.0.0",
+      "settings": [
+        {"key": "docserver_url", "type": "string", "label": "OnlyOffice Document Server URL", "default": "http://localhost:8080/"},
+        {"key": "jwt_secret", "type": "password", "label": "JWT 密钥", "default": ""}
+      ]
+    },
+    {
+      "id": "referer-guard",
+      "name": "Referer 防盗链插件",
+      "version": "1.0.0",
+      "author": "mrc-sk",
+      "homepage": "https://github.com/mrc-sk/nebula-drive/tree/plugins/_examples/referer-guard",
+      "downloadUrl": "https://github.com/mrc-sk/nebula-drive/archive/refs/heads/plugins.zip",
+      "archiveSubdir": "nebula-drive-plugins/_examples/referer-guard",
+      "description": "在签名 URL 基础上再加 Referer 白名单防护。触发 onAntiLeech 钩子。",
+      "tags": ["antileech", "referer", "security"],
+      "hooks": ["onAntiLeech"],
+      "icon": "",
+      "minAppVersion": "1.0.0",
+      "settings": [
+        {"key": "allow_empty_referer", "type": "boolean", "label": "允许空 Referer", "default": true},
+        {"key": "whitelist_domains", "type": "textarea", "label": "白名单域名（每行一个）", "default": ""}
+      ]
+    },
+    {
+      "id": "hcaptcha",
+      "name": "hCaptcha 人机验证插件",
+      "version": "1.0.0",
+      "author": "mrc-sk",
+      "homepage": "https://github.com/mrc-sk/nebula-drive/tree/plugins/_examples/hcaptcha",
+      "downloadUrl": "https://github.com/mrc-sk/nebula-drive/archive/refs/heads/plugins.zip",
+      "archiveSubdir": "nebula-drive-plugins/_examples/hcaptcha",
+      "description": "登录/注册/创建管理员账号启用 hCaptcha 人机验证。触发 onApiAuth 钩子。",
+      "tags": ["captcha", "hcaptcha", "security"],
+      "hooks": ["onApiAuth"],
+      "icon": "",
+      "minAppVersion": "1.0.0",
+      "settings": [
+        {"key": "site_key", "type": "string", "label": "hCaptcha Site Key", "default": ""},
+        {"key": "secret_key", "type": "password", "label": "hCaptcha Secret", "default": ""}
+      ]
+    },
+    {
+      "id": "cli-utilities",
+      "name": "命令行工具插件",
+      "version": "1.0.0",
+      "author": "mrc-sk",
+      "homepage": "https://github.com/mrc-sk/nebula-drive/tree/plugins/_examples/cli-utilities",
+      "downloadUrl": "https://github.com/mrc-sk/nebula-drive/archive/refs/heads/plugins.zip",
+      "archiveSubdir": "nebula-drive-plugins/_examples/cli-utilities",
+      "description": "提供 nebula CLI 子命令：login/cp/ls/sync。触发 onCLI 钩子。",
+      "tags": ["cli", "tool", "rclone"],
+      "hooks": ["onCLI"],
+      "icon": "",
+      "minAppVersion": "1.0.0",
+      "settings": []
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "backup-local",
+  "name": "本地一键备份插件",
+  "version": "1.0.0",
+  "author": "mrc-sk",
+  "homepage": "https://github.com/mrc-sk/nebula-drive/tree/plugins/_examples/backup-local",
+  "description": "导出 SQLite/配置 加密打包下载；恢复时导入数据包。触发 onBackup/onRestore 钩子。",
+  "tags": ["backup", "restore", "admin"],
+  "hooks": ["onBackup", "onRestore"],
+  "minAppVersion": "1.0.0",
+  "dependencies": [],
+  "settings": [
+    {"key": "encryption", "type": "boolean", "label": "启用 AES-GCM 加密备份包", "default": true},
+    {"key": "schedule_hour", "type": "number", "label": "每日自动备份小时（-1 关闭）", "default": -1}
+  ]
+}
