@@ -8,6 +8,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"path"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"github.com/nebula-drive/nebula/filesystem"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
+	"github.com/nebula-drive/nebula/pkg/storage"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -222,6 +224,10 @@ func Handler() gin.HandlerFunc {
 			reqPath = reqPath[len(prefix):]
 		}
 		reqPath, _ = url.PathUnescape(reqPath)
+		// 归一化：剥离前缀后变成空串表示 DAV 根目录，补成 "/" 才能走 resolvePath 根逻辑
+		if reqPath == "" {
+			reqPath = "/"
+		}
 		serveDAV(c, user, reqPath)
 	}
 }
@@ -416,6 +422,9 @@ func getOrHead(c *gin.Context, u *models.User, p string, head bool) {
 	}
 	if !head {
 		io.Copy(c.Writer, rc)
+	} else {
+		// HEAD 必须显式写入 200，否则 Gin 在没有任何 Write 调用的情况下可能不刷响应头，导致客户端等待挂起。
+		c.Status(http.StatusOK)
 	}
 }
 
@@ -437,11 +446,25 @@ func put(c *gin.Context, u *models.User, p string) {
 		return
 	}
 	parentID := parentOf(node)
+	size := c.Request.ContentLength
 	// 用默认策略写入
 	var pol models.Policy
 	db.Get().Where("is_default = ?", true).First(&pol)
 	if pol.ID == 0 {
 		db.Get().First(&pol, 1)
+	}
+	// 配额预检
+	if size > 0 {
+		var g models.Group
+		_ = db.Get().First(&g, u.GroupID).Error
+		if g.MaxStorage != -1 {
+			var u2 models.User
+			db.Get().Select("storage").First(&u2, u.ID)
+			if u2.Storage+size > g.MaxStorage {
+				c.String(507, "Quota Exceeded")
+				return
+			}
+		}
 	}
 	h, err := filesystem.New(pol.Type, pol.Config)
 	if err != nil {
@@ -450,7 +473,6 @@ func put(c *gin.Context, u *models.User, p string) {
 	}
 	ext := path.Ext(remaining)
 	srcName := fmt.Sprintf("dav-%d-%s", time.Now().Unix(), remaining)
-	size := c.Request.ContentLength
 	if err := h.Put(c.Request.Body, srcName, size); err != nil {
 		c.String(500, err.Error())
 		return
@@ -465,6 +487,8 @@ func put(c *gin.Context, u *models.User, p string) {
 		c.String(500, err.Error())
 		return
 	}
+	// 新物理文件：refs=1
+	_ = storage.RetainObject(pol.ID, srcName, size, "")
 	// 更新用户存储
 	db.Get().Model(&models.User{}).Where("id = ?", u.ID).UpdateColumn("storage",
 		db.DB.Raw("storage + ?", size))
@@ -479,7 +503,7 @@ func delete_(c *gin.Context, u *models.User, p string) {
 	}
 	if !node.IsDir {
 		if h, err := handlerForFile(node); err == nil {
-			h.Delete(node.SourceName)
+			_, _ = storage.ReleaseObject(node.PolicyID, node.SourceName, h)
 		}
 	}
 	db.Get().Delete(node)

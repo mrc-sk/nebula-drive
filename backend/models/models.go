@@ -50,13 +50,26 @@ type File struct {
 	IsDir      bool           `gorm:"default:false" json:"isDir"`
 	Size       int64          `gorm:"default:0" json:"size"`
 	PolicyID   uint           `gorm:"default:1" json:"policyId"`  // 存储策略
-	SourceName string         `gorm:"size:255" json:"sourceName"` // 实际存储名
+	SourceName string         `gorm:"size:255" json:"sourceName"` // 实际存储名（指向 FileObject.SourceName）
 	Extension  string         `gorm:"size:32" json:"extension"`
 	MimeType   string         `gorm:"size:128" json:"mimeType"`
 	Hash       string         `gorm:"index;size:64" json:"-"` // 用于秒传
 	CreatedAt  time.Time      `json:"createdAt"`
 	UpdatedAt  time.Time      `json:"updatedAt"`
 	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+// FileObject 物理文件对象：唯一由 (PolicyID, SourceName) 确定，维护引用计数。
+// 当多条 File 记录（秒传/复制）共享同一物理存储时，refs>1；删除时仅减计数，到 0 才真正删物理文件。
+type FileObject struct {
+	ID         uint      `gorm:"primarykey" json:"id"`
+	PolicyID   uint      `gorm:"index:idx_obj_policy_src,unique;not null" json:"policyId"`
+	SourceName string    `gorm:"index:idx_obj_policy_src,unique;size:255;not null" json:"sourceName"`
+	Size       int64     `gorm:"default:0" json:"size"`
+	Hash       string    `gorm:"index;size:64" json:"hash"` // 用于创建时的快速查找
+	Refs       int64     `gorm:"default:1" json:"refs"`     // 引用计数
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 // Folder 目录（与 File 分离，便于目录树查询）—— 这里用 File.IsDir 统一，Folder 仅作元数据
@@ -226,7 +239,7 @@ func AutoMigrate() error {
 		return errDBNotReady
 	}
 	if err := db.DB.AutoMigrate(
-		&User{}, &Group{}, &File{}, &Folder{}, &FileVersion{}, &FileTag{}, &Share{}, &Policy{}, &Setting{}, &Task{},
+		&User{}, &Group{}, &File{}, &FileObject{}, &Folder{}, &FileVersion{}, &FileTag{}, &Share{}, &Policy{}, &Setting{}, &Task{},
 		&Session{}, &EmailCode{}, &Plugin{}, &AuditLog{},
 		&Notification{}, &OAuthApp{}, &OAuthCode{}, &AccessToken{}, &PersonalAccessToken{},
 		&IPBan{},

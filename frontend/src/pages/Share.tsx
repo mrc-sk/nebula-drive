@@ -22,6 +22,7 @@ import {
   X,
   AlertCircle,
   Check,
+  ServerCrash,
 } from 'lucide-react'
 import { api } from '../api/client'
 
@@ -35,6 +36,8 @@ interface ShareNode {
   open?: boolean
 }
 
+type Stage = 'loading' | 'pwd' | 'extract' | 'ready' | 'error'
+
 export default function Share() {
   const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
@@ -42,23 +45,41 @@ export default function Share() {
   const [sel, setSel] = useState<ShareNode | null>(null)
   const [meta, setMeta] = useState<any>(null)
   const [copyOk, setCopyOk] = useState(false)
+  const [errMsg, setErrMsg] = useState<string>('')
 
-  const [stage, setStage] = useState<'loading' | 'pwd' | 'extract' | 'ready'>('loading')
+  const [stage, setStage] = useState<Stage>('loading')
   const [pwd, setPwd] = useState('')
   const [extractCode, setExtractCode] = useState('')
   const [pwdErr, setPwdErr] = useState('')
   const [extractErr, setExtractErr] = useState('')
   const [verifying, setVerifying] = useState(false)
 
+  const pickFirst = (nodes: ShareNode[]): ShareNode | null => {
+    if (!Array.isArray(nodes)) return null
+    for (const n of nodes) {
+      if (n.type === 'file') return n
+      if (Array.isArray(n.children) && n.children.length) {
+        const f: ShareNode | null = pickFirst(n.children)
+        if (f) return f
+      }
+    }
+    return null
+  }
+
   const tryLoadData = useCallback(async (password?: string, extract?: string) => {
-    const shareId = id || (new URLSearchParams(location.search).get('token')) || 'demo-share-token'
-    setVerifying(true)
+    const shareId = id || (new URLSearchParams(location.search).get('token')) || ''
+    if (!shareId) {
+      setStage('error'); setErrMsg('缺少分享标识')
+      return
+    }
+    setVerifying(true); setErrMsg('')
     try {
       const r = await api.shares.detail(shareId, password, extract)
       if (r?.code === 0) {
-        setMeta(r.data?.meta || r.data)
-        setTree(r.data?.tree || buildMockTree())
-        const first = findFirst(r.data?.tree || buildMockTree())
+        const gotTree: ShareNode[] = Array.isArray(r.data?.tree) ? r.data.tree : []
+        setMeta(r.data?.meta || r.data || null)
+        setTree(gotTree)
+        const first = pickFirst(gotTree)
         if (first) setSel(first)
         setStage('ready')
       } else if (r?.code === 2) {
@@ -66,18 +87,12 @@ export default function Share() {
       } else if (r?.code === 3) {
         setStage('extract')
       } else {
-        setStage('ready')
-        setMeta(buildMockMeta())
-        setTree(buildMockTree())
-        const first = findFirst(buildMockTree())
-        if (first) setSel(first)
+        setStage('error')
+        setErrMsg(r?.message || '加载分享失败')
       }
-    } catch {
-      setStage('ready')
-      setMeta(buildMockMeta())
-      setTree(buildMockTree())
-      const first = findFirst(buildMockTree())
-      if (first) setSel(first)
+    } catch (e: any) {
+      setStage('error')
+      setErrMsg(e?.response?.data?.message || e?.message || '加载失败，稍后重试')
     } finally {
       setVerifying(false)
     }
@@ -90,14 +105,15 @@ export default function Share() {
   const submitPwd = async () => {
     if (!pwd.trim()) { setPwdErr('请输入访问密码'); return }
     setPwdErr('')
-    const shareId = id || (new URLSearchParams(location.search).get('token')) || 'demo-share-token'
-    setVerifying(true)
+    const shareId = id || (new URLSearchParams(location.search).get('token')) || ''
+    setVerifying(true); setErrMsg('')
     try {
       const r = await api.shares.detail(shareId, pwd, undefined)
       if (r?.code === 0) {
-        setMeta(r.data?.meta || r.data)
-        setTree(r.data?.tree || buildMockTree())
-        const first = findFirst(r.data?.tree || buildMockTree())
+        const gotTree: ShareNode[] = Array.isArray(r.data?.tree) ? r.data.tree : []
+        setMeta(r.data?.meta || r.data || null)
+        setTree(gotTree)
+        const first = pickFirst(gotTree)
         if (first) setSel(first)
         setStage('ready')
       } else if (r?.code === 2) {
@@ -105,18 +121,12 @@ export default function Share() {
       } else if (r?.code === 3) {
         setStage('extract')
       } else {
-        setMeta(r?.data?.meta || buildMockMeta())
-        setTree(r?.data?.tree || buildMockTree())
-        const first = findFirst(r?.data?.tree || buildMockTree())
-        if (first) setSel(first)
-        setStage('ready')
+        setStage('error')
+        setErrMsg(r?.message || '加载分享失败')
       }
-    } catch {
-      setStage('ready')
-      setMeta(buildMockMeta())
-      setTree(buildMockTree())
-      const first = findFirst(buildMockTree())
-      if (first) setSel(first)
+    } catch (e: any) {
+      setStage('error')
+      setErrMsg(e?.response?.data?.message || e?.message || '加载失败，稍后重试')
     } finally {
       setVerifying(false)
     }
@@ -125,45 +135,29 @@ export default function Share() {
   const submitExtract = async () => {
     if (!extractCode.trim() || extractCode.length < 4) { setExtractErr('请输入4位提取码'); return }
     setExtractErr('')
-    const shareId = id || (new URLSearchParams(location.search).get('token')) || 'demo-share-token'
-    setVerifying(true)
+    const shareId = id || (new URLSearchParams(location.search).get('token')) || ''
+    setVerifying(true); setErrMsg('')
     try {
       const r = await api.shares.detail(shareId, pwd, extractCode)
       if (r?.code === 0) {
-        setMeta(r.data?.meta || r.data)
-        setTree(r.data?.tree || buildMockTree())
-        const first = findFirst(r.data?.tree || buildMockTree())
+        const gotTree: ShareNode[] = Array.isArray(r.data?.tree) ? r.data.tree : []
+        setMeta(r.data?.meta || r.data || null)
+        setTree(gotTree)
+        const first = pickFirst(gotTree)
         if (first) setSel(first)
         setStage('ready')
       } else if (r?.code === 3) {
         setExtractErr('提取码错误')
       } else {
-        setMeta(r?.data?.meta || buildMockMeta())
-        setTree(r?.data?.tree || buildMockTree())
-        const first = findFirst(r?.data?.tree || buildMockTree())
-        if (first) setSel(first)
-        setStage('ready')
+        setStage('error')
+        setErrMsg(r?.message || '加载分享失败')
       }
-    } catch {
-      setStage('ready')
-      setMeta(buildMockMeta())
-      setTree(buildMockTree())
-      const first = findFirst(buildMockTree())
-      if (first) setSel(first)
+    } catch (e: any) {
+      setStage('error')
+      setErrMsg(e?.response?.data?.message || e?.message || '加载失败，稍后重试')
     } finally {
       setVerifying(false)
     }
-  }
-
-  const findFirst = (nodes: ShareNode[]): ShareNode | null => {
-    for (const n of nodes) {
-      if (n.type === 'file') return n
-      if (n.children?.length) {
-        const f = findFirst(n.children)
-        if (f) return f
-      }
-    }
-    return null
   }
 
   const toggle = (node: ShareNode) => {
@@ -190,34 +184,6 @@ export default function Share() {
     }
   }
 
-  const buildMockMeta = () => ({
-    title: 'NebulaDrive Share',
-    expireAt: new Date(Date.now() + 7 * 86400 * 1000).toISOString(),
-    viewTimes: 12,
-    downloadTimes: 4,
-    size: 42 * 1024 * 1024,
-  })
-
-  const buildMockTree = (): ShareNode[] => ([
-    {
-      id: 1, name: 'Projects', type: 'dir', open: true,
-      children: [
-        { id: 11, name: 'Frontend', type: 'dir', open: false, children: [
-          { id: 111, name: 'Login.tsx', type: 'file', size: 12 * 1024, mime: 'text/x-tsx' },
-          { id: 112, name: 'Files.tsx', type: 'file', size: 28 * 1024, mime: 'text/x-tsx' },
-        ] },
-        { id: 12, name: 'README.md', type: 'file', size: 4 * 1024, mime: 'text/markdown' },
-        { id: 13, name: 'demo.png', type: 'file', size: 2.1 * 1024 * 1024, mime: 'image/png' },
-      ],
-    },
-    { id: 2, name: 'Assets', type: 'dir', open: false, children: [
-      { id: 21, name: 'logo.svg', type: 'file', size: 8 * 1024, mime: 'image/svg+xml' },
-      { id: 22, name: 'bg-video.mp4', type: 'file', size: 28 * 1024 * 1024, mime: 'video/mp4' },
-      { id: 23, name: 'bgm.mp3', type: 'file', size: 4 * 1024 * 1024, mime: 'audio/mpeg' },
-    ] },
-    { id: 3, name: 'release-v1.0.zip', type: 'file', size: 62 * 1024 * 1024, mime: 'application/zip' },
-  ])
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-[#0f172a] to-[#1e1b4b] px-3 py-4 text-slate-100 md:px-8 md:py-6">
       <div className="mx-auto mb-4 flex max-w-6xl items-center justify-between">
@@ -236,53 +202,77 @@ export default function Share() {
         </div>
       </div>
 
-      <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
-        <aside className="glass rounded-2xl p-3">
-          <div className="mb-2 flex items-center justify-between px-1">
-            <div className="text-xs font-semibold uppercase text-slate-400">{t('files')}</div>
-            {meta?.size && <div className="text-xs text-slate-500">{fmtSize(meta.size)}</div>}
-          </div>
-          <div className="max-h-[70vh] overflow-auto pr-1">
-            {stage === 'ready' || stage === 'loading' ? (
-              <Tree level={0} nodes={tree} sel={sel} onSel={select} onToggle={toggle} />
-            ) : (
-              <div className="p-3 text-center text-xs text-slate-400">请先完成验证</div>
-            )}
-          </div>
-        </aside>
-
-        <section className="glass rounded-2xl p-4 min-h-[70vh] flex flex-col">
-          {!sel ? (
-            <div className="flex flex-1 flex-col items-center justify-center text-slate-400">
-              <FolderOpen className="mb-3 h-12 w-12 opacity-60" />
-              <div className="text-sm">{t('ns_share.selectPreview') || 'Select a file to preview'}</div>
+      {stage === 'error' ? (
+        <div className="mx-auto grid max-w-6xl place-items-center py-20">
+          <div className="glass rounded-3xl p-10 text-center shadow-glass-lg">
+            <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-rose-500/30 to-rose-700/20 border border-rose-400/30">
+              <ServerCrash className="h-8 w-8 text-rose-300" />
             </div>
-          ) : (
-            <>
-              <div className="mb-3 flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-medium">{sel.name}</div>
-                  <div className="text-xs text-slate-400">
-                    {sel.type === 'file' ? fmtSize(sel.size || 0) : '-'} · {sel.mime || 'dir'}
+            <div className="text-lg font-semibold">{t('ns_share.loadFailed') || '分享加载失败'}</div>
+            <div className="mt-2 break-all text-sm text-slate-400">
+              {errMsg || t('ns_share.loadFailedHint') || '分享不存在、已过期、或网络错误，请检查后重试'}
+            </div>
+            <button
+              type="button"
+              onClick={() => tryLoadData()}
+              className="btn-primary mt-6"
+            >
+              {t('retry') || '重试'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
+          <aside className="glass rounded-2xl p-3">
+            <div className="mb-2 flex items-center justify-between px-1">
+              <div className="text-xs font-semibold uppercase text-slate-400">{t('files')}</div>
+              {meta?.size && <div className="text-xs text-slate-500">{fmtSize(meta.size)}</div>}
+            </div>
+            <div className="max-h-[70vh] overflow-auto pr-1">
+              {stage === 'ready' || stage === 'loading' ? (
+                <Tree level={0} nodes={tree} sel={sel} onSel={select} onToggle={toggle} />
+              ) : (
+                <div className="p-3 text-center text-xs text-slate-400">请先完成验证</div>
+              )}
+              {stage === 'ready' && tree.length === 0 && (
+                <div className="p-5 text-center text-xs text-slate-500">此分享目录为空</div>
+              )}
+            </div>
+          </aside>
+
+          <section className="glass rounded-2xl p-4 min-h-[70vh] flex flex-col">
+            {!sel ? (
+              <div className="flex flex-1 flex-col items-center justify-center text-slate-400">
+                <FolderOpen className="mb-3 h-12 w-12 opacity-60" />
+                <div className="text-sm">{t('ns_share.selectPreview') || 'Select a file to preview'}</div>
+              </div>
+            ) : (
+              <>
+                <div className="mb-3 flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium">{sel.name}</div>
+                    <div className="text-xs text-slate-400">
+                      {sel.type === 'file' ? fmtSize(sel.size || 0) : '-'} · {sel.mime || 'dir'}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={copyLink} className="btn-ghost !py-1.5 text-xs">
+                      {copyOk ? <span className="text-emerald-400">OK</span> : <Copy className="h-3.5 w-3.5" />}
+                      {t('copyLink')}
+                    </button>
+                    <button type="button" className="btn-primary !py-1.5 text-xs">
+                      <Download className="h-3.5 w-3.5" />
+                      {t('download')}
+                    </button>
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <button type="button" onClick={copyLink} className="btn-ghost !py-1.5 text-xs">
-                    {copyOk ? <span className="text-emerald-400">OK</span> : <Copy className="h-3.5 w-3.5" />}
-                    {t('copyLink')}
-                  </button>
-                  <button type="button" className="btn-primary !py-1.5 text-xs">
-                    <Download className="h-3.5 w-3.5" />
-                    {t('download')}
-                  </button>
-                </div>
-              </div>
 
-              <Preview node={sel} />
-            </>
-          )}
-        </section>
-      </div>
+                <Preview node={sel} />
+              </>
+            )}
+          </section>
+        </div>
+      )}
 
       {stage === 'pwd' && (
         <GlassModal onClose={() => {}} hideClose>

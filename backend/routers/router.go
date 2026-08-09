@@ -14,7 +14,13 @@ import (
 	"github.com/nebula-drive/nebula/webdav"
 )
 
-// Setup 构建路由
+// davAllMethods Gin r.Any 只覆盖 9 个 HTTP 方法，不含 WebDAV 扩展方法（PROPFIND/MKCOL/MOVE/COPY/LOCK/UNLOCK/PROPPATCH）。
+// 这里显式列出所有方法，确保 WebDAV 客户端（Windows/Finder/RaiDrive）能真实挂载。
+var davAllMethods = []string{
+	"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS",
+	"PROPFIND", "PROPPATCH", "MKCOL", "MOVE", "COPY", "LOCK", "UNLOCK",
+}
+
 func Setup() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -23,7 +29,7 @@ func Setup() *gin.Engine {
 	r.Use(middleware.GzipMiddleware())
 	r.Use(cors.New(cors.Config{
 		AllowAllOrigins:  true,
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "PROPFIND", "PROPPATCH", "MKCOL", "MOVE", "COPY", "LOCK", "UNLOCK", "HEAD"},
+		AllowMethods:     append([]string{}, davAllMethods...),
 		AllowHeaders:     []string{"*"},
 		AllowCredentials: false,
 	}))
@@ -132,7 +138,9 @@ func Setup() *gin.Engine {
 			shares.POST("", controllers.CreateShare)
 			shares.DELETE("/:id", controllers.DeleteShare)
 		}
+		// 公开分享页读取：既支持前端 GET query 参数，也兼容前端 POST body（password/extractCode）
 		api.GET("/shares/:id", controllers.GetShare)
+		api.POST("/shares/:id", controllers.GetShare)
 
 		tasks := api.Group("/tasks", middleware.Auth(true))
 		{
@@ -181,7 +189,7 @@ func Setup() *gin.Engine {
 		}
 	}
 
-	r.Any("/dav/*p", func(c *gin.Context) {
+	r.Match(davAllMethods, "/dav/*p", func(c *gin.Context) {
 		if !conf.IsInstalled() {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "system not installed"})
 			return
@@ -204,7 +212,7 @@ func InitWebDAVRoutes(r *gin.Engine) {
 			p += "/"
 		}
 		p += "*p"
-		r.Any(p, func(c *gin.Context) {
+		r.Match(davAllMethods, p, func(c *gin.Context) {
 			if !conf.IsInstalled() {
 				c.JSON(http.StatusServiceUnavailable, gin.H{"code": 503})
 				return

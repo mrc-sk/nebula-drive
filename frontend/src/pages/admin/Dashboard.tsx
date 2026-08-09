@@ -1,56 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Users, FileText, Share2, HardDrive, Loader2 } from 'lucide-react'
+import { Users, FileText, Share2, HardDrive, Loader2, Inbox } from 'lucide-react'
 import ReactECharts from 'echarts-for-react'
 import type { EChartsOption } from 'echarts'
 import { api } from '../../api/client'
 
 type TrafficRange = 7 | 30 | 365
-
-/* ---------- mock 数据生成（后端 API 缺失时使用） ---------- */
-function mockTraffic(days: number) {
-  const out: { date: string; upload: number; download: number }[] = []
-  const today = new Date()
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(today)
-    d.setDate(today.getDate() - i)
-    out.push({
-      date: `${d.getMonth() + 1}/${d.getDate()}`,
-      upload: Math.round(50 + Math.random() * 950),
-      download: Math.round(80 + Math.random() * 1200),
-    })
-  }
-  return out
-}
-
-function mockFileTypes() {
-  return [
-    { name: 'image', value: Math.round(200 + Math.random() * 400) },
-    { name: 'video', value: Math.round(80 + Math.random() * 200) },
-    { name: 'audio', value: Math.round(40 + Math.random() * 120) },
-    { name: 'document', value: Math.round(300 + Math.random() * 500) },
-    { name: 'archive', value: Math.round(60 + Math.random() * 180) },
-    { name: 'other', value: Math.round(120 + Math.random() * 260) },
-  ]
-}
-
-function mockActivity(days: number) {
-  const out: { date: string; count: number }[] = []
-  const today = new Date()
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(today)
-    d.setDate(today.getDate() - i)
-    const y = d.getFullYear()
-    const m = String(d.getMonth() + 1).padStart(2, '0')
-    const da = String(d.getDate()).padStart(2, '0')
-    const r = Math.random()
-    out.push({
-      date: `${y}-${m}-${da}`,
-      count: r < 0.45 ? 0 : Math.floor(r * 24),
-    })
-  }
-  return out
-}
 
 /* ---------- 工具 ---------- */
 function formatSize(b: number) {
@@ -132,9 +87,8 @@ export default function Dashboard() {
           }))
         }
       } catch {
-        // 后端无 API
+        // 后端无 API：空数组 → 图表空态
       }
-      if (alive && rows.length === 0) rows = mockTraffic(trafficRange)
       if (alive) setTraffic(rows)
     })()
     return () => {
@@ -158,7 +112,6 @@ export default function Dashboard() {
       } catch {
         // ignore
       }
-      if (alive && rows.length === 0) rows = mockFileTypes()
       if (alive) setFileTypes(rows)
     })()
     return () => {
@@ -182,7 +135,6 @@ export default function Dashboard() {
       } catch {
         // ignore
       }
-      if (alive && rows.length === 0) rows = mockActivity(365)
       if (alive) setActivity(rows)
     })()
     return () => {
@@ -318,6 +270,7 @@ export default function Dashboard() {
 /* ============================== 上传/下载趋势折线图 ============================== */
 function TrafficChart({ data }: { data: { date: string; upload: number; download: number }[] }) {
   const { t } = useTranslation()
+  if (!data || data.length === 0) return <EmptyChart hint={t('noTrafficData') || '暂无流量数据'} />
   const option = useMemo<EChartsOption>(() => {
     return {
       tooltip: {
@@ -403,6 +356,8 @@ function TrafficChart({ data }: { data: { date: string; upload: number; download
 /* ============================== 文件类型分布饼图 ============================== */
 function FileTypesChart({ data }: { data: { name: string; value: number }[] }) {
   const { t } = useTranslation()
+  const total = data.reduce((s, d) => s + Number(d.value || 0), 0)
+  if (!data || data.length === 0 || total <= 0) return <EmptyChart hint={t('noFileTypeData') || '暂无文件类型数据'} />
   const palette = ['#22d3ee', '#f97316', '#facc15', '#60a5fa', '#a855f7', '#94a3b8']
   const option = useMemo<EChartsOption>(() => {
     return {
@@ -457,6 +412,7 @@ function FileTypesChart({ data }: { data: { name: string; value: number }[] }) {
 /* ============================== 用户活跃度热力图 ============================== */
 function ActivityHeatmap({ data }: { data: { date: string; count: number }[] }) {
   const { t } = useTranslation()
+  if (!data || data.length === 0) return <EmptyChart hint={t('noActivityData') || '暂无活跃度数据'} />
   const option = useMemo<EChartsOption>(() => {
     const cells = data.map((d) => [d.date, d.count])
     const range =
@@ -507,6 +463,19 @@ function ActivityHeatmap({ data }: { data: { date: string; count: number }[] }) 
   return (
     <div className="overflow-x-auto">
       <ReactECharts option={option} style={{ height: 200, minWidth: 560 }} notMerge />
+    </div>
+  )
+}
+
+function EmptyChart({ hint }: { hint: string }) {
+  return (
+    <div className="grid h-[280px] place-items-center text-slate-500">
+      <div className="flex flex-col items-center gap-3 opacity-80">
+        <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/5 border border-white/5">
+          <Inbox className="h-6 w-6" />
+        </div>
+        <div className="text-xs">{hint}</div>
+      </div>
     </div>
   )
 }

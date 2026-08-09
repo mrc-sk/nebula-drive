@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/nebula-drive/nebula/conf"
+	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )

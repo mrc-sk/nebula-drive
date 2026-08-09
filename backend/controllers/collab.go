@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -15,6 +16,7 @@ import (
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
 	"github.com/nebula-drive/nebula/pkg/plugin"
+	"github.com/nebula-drive/nebula/pkg/storage"
 	"github.com/nebula-drive/nebula/pkg/util"
 )
 
@@ -96,6 +98,15 @@ func CollabSave(c *gin.Context) {
 		return
 	}
 
+	// 协作保存大小差过配额
+	delta := int64(len(req.Content)) - f.Size
+	if delta > 0 {
+		if err := ensureQuota(f.OwnerID, delta); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
+			return
+		}
+	}
+
 	plugin.Fire(plugin.HookCollabSave, map[string]any{
 		"userId":   u.ID,
 		"userName": u.UserName,
@@ -140,6 +151,8 @@ func CollabSave(c *gin.Context) {
 		"size": f.Size, "hash": newHash, "source_name": newSource,
 	})
 	addStorage(f.OwnerID, f.Size-oldSize)
+	// 协作新内容写新物理文件：refs=1
+	_ = storage.RetainObject(f.PolicyID, newSource, f.Size, newHash)
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": f})
 }
@@ -201,13 +214,54 @@ func (h *collabWSHub) broadcast(docID string, sender *websocket.Conn, msgType in
 	}
 }
 
-// CollabWS Yjs CRDT 同步：接收 update 消息广播给同 docId 的其他连接
+// CollabWS Yjs CRDT 同步：接收 update 消息广播给同 docId 的其他连接。
+// 加严校验：docId 是 fileId（见 collabDocID），当前用户必须是文件 owner / 管理员 / 或该文件存在有效公开分享（不限权限），
+// 否则返回 403，避免任意登录用户遍历文件 ID 窃听/篡改其他用户的私有文档。
 func CollabWS(c *gin.Context) {
 	docID := c.Param("docId")
 	if docID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "docId required"})
 		return
 	}
+	// docId → fileId（与 collabDocID 对称）
+	fileIDNum, pErr := strconv.ParseUint(docID, 10, 64)
+	if pErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "invalid docId"})
+		return
+	}
+	fileID := uint(fileIDNum)
+
+	u := middleware.CurrentUser(c)
+	if u == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "unauthorized"})
+		return
+	}
+
+	// 归属 & 授权校验
+	var f models.File
+	if err := db.Get().Where("id = ?", fileID).First(&f).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "document not found"})
+		return
+	}
+	isOwnerOrAdmin := u.IsAdmin || f.OwnerID == u.ID
+	// 若不是 owner/admin，也允许存在未过期、无密码、无提取码的公开分享让访客协作
+	canViaShare := false
+	if !isOwnerOrAdmin {
+		var share models.Share
+		q := db.Get().Where("file_id = ?", f.ID)
+		if e := q.First(&share).Error; e == nil {
+			notExpired := share.ExpireAt == nil || share.ExpireAt.After(time.Now())
+			noGate := share.Password == "" && share.ExtractCode == ""
+			if notExpired && noGate {
+				canViaShare = true
+			}
+		}
+	}
+	if !isOwnerOrAdmin && !canViaShare {
+		c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": "forbidden"})
+		return
+	}
+
 	conn, err := collabHub.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		return

@@ -22,6 +22,7 @@ import (
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
 	"github.com/nebula-drive/nebula/pkg/plugin"
+	"github.com/nebula-drive/nebula/pkg/storage"
 	"github.com/nebula-drive/nebula/pkg/util"
 	"gorm.io/gorm"
 )
@@ -49,6 +50,37 @@ func handlerForPolicyID(pid uint) (filesystem.Handler, *models.Policy, error) {
 func ownOrAdmin(c *gin.Context, f *models.File) bool {
 	u := middleware.CurrentUser(c)
 	return u != nil && (u.IsAdmin || f.OwnerID == u.ID)
+}
+
+// groupOf 通过 userId 取到对应 Group，不存在时返回默认组（MaxStorage=-1 无限）
+func groupOf(userID uint) models.Group {
+	var u models.User
+	if db.Get().Select("group_id").First(&u, userID).Error != nil {
+		return models.Group{ID: 0, Name: "fallback", MaxStorage: -1, ShareEnabled: true, WebDAVEnabled: true, SpeedLimit: 0}
+	}
+	var g models.Group
+	if db.Get().First(&g, u.GroupID).Error == nil {
+		return g
+	}
+	return models.Group{ID: 1, Name: "default", MaxStorage: -1, ShareEnabled: true, WebDAVEnabled: true, SpeedLimit: 0}
+}
+
+// ensureQuota 校验 user 再写入 additionalBytes 后是否仍在组配额内。
+// MaxStorage == -1 视为无限。超出时返回带错误信息。
+func ensureQuota(userID uint, additionalBytes int64) error {
+	g := groupOf(userID)
+	if g.MaxStorage == -1 {
+		return nil
+	}
+	var u models.User
+	if err := db.Get().Select("storage").First(&u, userID).Error; err != nil {
+		return err
+	}
+	if u.Storage+additionalBytes > g.MaxStorage {
+		return fmt.Errorf("quota exceeded: have %d bytes, limit %d bytes, tried to add %d bytes",
+			u.Storage, g.MaxStorage, additionalBytes)
+	}
+	return nil
 }
 
 // List 列目录
@@ -115,6 +147,13 @@ func Rapid(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
 		return
 	}
+	// 秒传也是“新增一份文件记录 + 计占用”，先过配额
+	if req.Size > 0 {
+		if err := ensureQuota(u.ID, req.Size); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
+			return
+		}
+	}
 	var exist models.File
 	err := db.Get().Where("hash = ? AND owner_id = ? AND is_dir = ?", req.Hash, u.ID, false).First(&exist).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -132,6 +171,8 @@ func Rapid(c *gin.Context) {
 	}
 	db.Get().Create(&f)
 	addStorage(u.ID, f.Size)
+	// 秒传命中：复用已有物理文件，引用计数 +1
+	_ = storage.RetainObject(exist.PolicyID, exist.SourceName, exist.Size, exist.Hash)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": f, "rapid": true})
 }
 
@@ -142,6 +183,13 @@ func Upload(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "未接收到文件"})
 		return
+	}
+	// 配额预检：在整文件读之前先挡住超配额请求
+	if file.Size > 0 {
+		if err := ensureQuota(u.ID, file.Size); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
+			return
+		}
 	}
 	hash := c.PostForm("hash")
 	parentStr := c.PostForm("parentId")
@@ -170,6 +218,8 @@ func Upload(c *gin.Context) {
 			}
 			db.Get().Create(&f)
 			addStorage(u.ID, f.Size)
+			// 秒传：引用计数 +1
+			_ = storage.RetainObject(exist.PolicyID, exist.SourceName, exist.Size, exist.Hash)
 			c.JSON(http.StatusOK, gin.H{"code": 0, "data": f, "rapid": true})
 			return
 		}
@@ -235,6 +285,8 @@ func Upload(c *gin.Context) {
 	}
 	db.Get().Create(&f)
 	addStorage(u.ID, f.Size)
+	// 新物理文件：建立 FileObject refs=1
+	_ = storage.RetainObject(p.ID, sourceName, file.Size, hash)
 
 	uctx := map[string]any{
 		"userId":   u.ID,
@@ -528,7 +580,8 @@ func Purge(c *gin.Context) {
 	}
 	if !f.IsDir {
 		if h, err := handlerForFile(&f); err == nil {
-			h.Delete(f.SourceName)
+			// 引用计数减 1，到 0 才真正删物理文件
+			_, _ = storage.ReleaseObject(f.PolicyID, f.SourceName, h)
 		}
 	}
 	addStorage(f.OwnerID, -f.Size)
@@ -726,6 +779,13 @@ func ChunkMerge(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": fmt.Sprintf("chunk incomplete: %d/%d", len(meta.Chunks), meta.ChunkCount)})
 		return
 	}
+	// 配额预检（用 meta.Size）
+	if meta.Size > 0 {
+		if err := ensureQuota(u.ID, meta.Size); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
+			return
+		}
+	}
 	h, p, err := handlerForPolicyID(1)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": err.Error()})
@@ -779,6 +839,8 @@ func ChunkMerge(c *gin.Context) {
 	}
 	db.Get().Create(&f)
 	addStorage(u.ID, f.Size)
+	// 分片合并：新物理文件 refs=1
+	_ = storage.RetainObject(p.ID, sourceName, mergedSize, finalHash)
 	for _, cp := range meta.Chunks {
 		os.Remove(cp)
 	}
@@ -887,6 +949,14 @@ func UploadVersion(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "未接收到文件"})
 		return
 	}
+	// 配额：版本上传只计「新旧大小差」，若差为正则先预检
+	delta := file.Size - f.Size
+	if delta > 0 {
+		if err := ensureQuota(u.ID, delta); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
+			return
+		}
+	}
 
 	// 选择存储 handler：可选 policyId 表单字段，否则用文件当前策略
 	var h filesystem.Handler
@@ -937,6 +1007,8 @@ func UploadVersion(c *gin.Context) {
 	}
 
 	oldSize := f.Size
+	oldPol := f.PolicyID
+	oldSrc := f.SourceName
 	f.Size = file.Size
 	f.Hash = realHash
 	f.SourceName = sourceName
@@ -945,6 +1017,10 @@ func UploadVersion(c *gin.Context) {
 		"size": f.Size, "hash": realHash, "source_name": sourceName, "policy_id": newPolicyID,
 	})
 	addStorage(f.OwnerID, f.Size-oldSize)
+	// 新版本文件：refs=1
+	_ = storage.RetainObject(newPolicyID, sourceName, file.Size, realHash)
+	// 原文件的 Source 交给版本归档（hv 持有），引用计数不变（File→FileVersion 等价交接），
+	// 版本被删时走 DeleteVersion Release；此处释放旧 Source 若其 FileObject 还被复用（不应出现）也安全。
 
 	// 淘汰超出 max_versions 的最旧版本
 	maxVersions := getSettingInt("file.max_versions", 10)
@@ -955,12 +1031,15 @@ func UploadVersion(c *gin.Context) {
 			for i := 0; i < len(versions)-maxVersions; i++ {
 				v := versions[i]
 				if hh, e := handlerForVersion(&v); e == nil {
-					hh.Delete(v.SourceName)
+					_, _ = storage.ReleaseObject(v.PolicyID, v.SourceName, hh)
 				}
 				db.Get().Delete(&v)
 			}
 		}
 	}
+	// 占位用（避免 oldPol/oldSrc 不被用到告警，保留便于未来细粒度逻辑）
+	_ = oldPol
+	_ = oldSrc
 
 	db.Get().Create(&models.AuditLog{
 		UserID: u.ID, UserName: u.UserName,
@@ -1066,6 +1145,8 @@ func RestoreVersion(c *gin.Context) {
 		"size": v.Size, "hash": v.Hash, "source_name": v.SourceName, "policy_id": v.PolicyID,
 	})
 	addStorage(f.OwnerID, f.Size-oldSize)
+	// v.SourceName 之前仅被版本持有；现在 File 也持有它，引用计数 +1
+	_ = storage.RetainObject(v.PolicyID, v.SourceName, v.Size, v.Hash)
 	// 从历史中移除已恢复的版本（其存储现由当前文件引用，不可删）
 	db.Get().Delete(&v)
 
@@ -1096,7 +1177,7 @@ func DeleteVersion(c *gin.Context) {
 		return
 	}
 	if h, err := handlerForVersion(&v); err == nil {
-		h.Delete(v.SourceName)
+		_, _ = storage.ReleaseObject(v.PolicyID, v.SourceName, h)
 	}
 	db.Get().Delete(&v)
 	c.JSON(http.StatusOK, gin.H{"code": 0})
@@ -1243,6 +1324,12 @@ func BatchCopy(c *gin.Context) {
 		if err != nil {
 			continue
 		}
+		// 复制新增一份占用，先过配额
+		if f.Size > 0 {
+			if err := ensureQuota(u.ID, f.Size); err != nil {
+				continue
+			}
+		}
 		newSource := util.UUID() + filepath.Ext(f.SourceName)
 		if err := h.Copy(f.SourceName, newSource); err != nil {
 			continue
@@ -1253,6 +1340,8 @@ func BatchCopy(c *gin.Context) {
 		nf.ParentID = pid
 		if err := db.Get().Create(&nf).Error; err == nil {
 			addStorage(u.ID, nf.Size)
+			// 复制产生的新物理文件：refs=1
+			_ = storage.RetainObject(nf.PolicyID, newSource, nf.Size, nf.Hash)
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0})
@@ -1320,10 +1409,16 @@ func batchPolicyMigrate(ids []uint, policyID uint) {
 		}
 		rc.Close()
 		oldSource := f.SourceName
+		oldPolicy := f.PolicyID
 		db.Get().Model(&f).Updates(map[string]any{
 			"source_name": newSource, "policy_id": policyID,
 		})
-		oldH.Delete(oldSource)
+		// 新物理文件
+		_ = storage.RetainObject(policyID, newSource, f.Size, f.Hash)
+		// 旧物理文件：引用减 1
+		if oldH != nil {
+			_, _ = storage.ReleaseObject(oldPolicy, oldSource, oldH)
+		}
 	}
 }
 
@@ -1385,7 +1480,7 @@ func cleanupTrash() {
 	for _, f := range files {
 		if !f.IsDir {
 			if h, err := handlerForFile(&f); err == nil {
-				h.Delete(f.SourceName)
+				_, _ = storage.ReleaseObject(f.PolicyID, f.SourceName, h)
 			}
 		}
 		addStorage(f.OwnerID, -f.Size)
