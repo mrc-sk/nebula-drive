@@ -16,6 +16,7 @@ import (
 	"github.com/nebula-drive/nebula/pkg/aria2"
 	"github.com/nebula-drive/nebula/pkg/db"
 	"github.com/nebula-drive/nebula/pkg/jwt"
+	"github.com/nebula-drive/nebula/pkg/storage"
 	tlspkg "github.com/nebula-drive/nebula/pkg/tls"
 	"github.com/nebula-drive/nebula/routers"
 	"gorm.io/gorm"
@@ -137,6 +138,8 @@ func bootstrap() {
 	if err := models.AutoMigrate(); err != nil {
 		log.Printf("[WARN] 数据库迁移失败: %v", err)
 	}
+	// 回填遗留 FileObject 引用计数（V1-0.0.1 升级用户秒传/复制共享物理文件，没有 FileObject）
+	storage.BackfillFileObjects()
 	if err := migrations.Run(db.Get()); err != nil {
 		log.Printf("[WARN] 版本化迁移失败: %v", err)
 	}

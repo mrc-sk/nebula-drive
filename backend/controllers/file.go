@@ -172,7 +172,7 @@ func Rapid(c *gin.Context) {
 	db.Get().Create(&f)
 	addStorage(u.ID, f.Size)
 	// 秒传命中：复用已有物理文件，引用计数 +1
-	_ = storage.RetainObject(exist.PolicyID, exist.SourceName, exist.Size, exist.Hash)
+	storage.Retain(exist.PolicyID, exist.SourceName, exist.Size, exist.Hash, "rapid")
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": f, "rapid": true})
 }
 
@@ -219,7 +219,7 @@ func Upload(c *gin.Context) {
 			db.Get().Create(&f)
 			addStorage(u.ID, f.Size)
 			// 秒传：引用计数 +1
-			_ = storage.RetainObject(exist.PolicyID, exist.SourceName, exist.Size, exist.Hash)
+			storage.Retain(exist.PolicyID, exist.SourceName, exist.Size, exist.Hash, "upload-rapid")
 			c.JSON(http.StatusOK, gin.H{"code": 0, "data": f, "rapid": true})
 			return
 		}
@@ -286,7 +286,7 @@ func Upload(c *gin.Context) {
 	db.Get().Create(&f)
 	addStorage(u.ID, f.Size)
 	// 新物理文件：建立 FileObject refs=1
-	_ = storage.RetainObject(p.ID, sourceName, file.Size, hash)
+	storage.Retain(p.ID, sourceName, file.Size, hash, "upload")
 
 	uctx := map[string]any{
 		"userId":   u.ID,
@@ -840,7 +840,7 @@ func ChunkMerge(c *gin.Context) {
 	db.Get().Create(&f)
 	addStorage(u.ID, f.Size)
 	// 分片合并：新物理文件 refs=1
-	_ = storage.RetainObject(p.ID, sourceName, mergedSize, finalHash)
+	storage.Retain(p.ID, sourceName, mergedSize, finalHash, "chunk-merge")
 	for _, cp := range meta.Chunks {
 		os.Remove(cp)
 	}
@@ -1018,7 +1018,7 @@ func UploadVersion(c *gin.Context) {
 	})
 	addStorage(f.OwnerID, f.Size-oldSize)
 	// 新版本文件：refs=1
-	_ = storage.RetainObject(newPolicyID, sourceName, file.Size, realHash)
+	storage.Retain(newPolicyID, sourceName, file.Size, realHash, "upload-version")
 	// 原文件的 Source 交给版本归档（hv 持有），引用计数不变（File→FileVersion 等价交接），
 	// 版本被删时走 DeleteVersion Release；此处释放旧 Source 若其 FileObject 还被复用（不应出现）也安全。
 
@@ -1146,7 +1146,7 @@ func RestoreVersion(c *gin.Context) {
 	})
 	addStorage(f.OwnerID, f.Size-oldSize)
 	// v.SourceName 之前仅被版本持有；现在 File 也持有它，引用计数 +1
-	_ = storage.RetainObject(v.PolicyID, v.SourceName, v.Size, v.Hash)
+	storage.Retain(v.PolicyID, v.SourceName, v.Size, v.Hash, "rollback-version")
 	// 从历史中移除已恢复的版本（其存储现由当前文件引用，不可删）
 	db.Get().Delete(&v)
 
@@ -1341,7 +1341,7 @@ func BatchCopy(c *gin.Context) {
 		if err := db.Get().Create(&nf).Error; err == nil {
 			addStorage(u.ID, nf.Size)
 			// 复制产生的新物理文件：refs=1
-			_ = storage.RetainObject(nf.PolicyID, newSource, nf.Size, nf.Hash)
+			storage.Retain(nf.PolicyID, newSource, nf.Size, nf.Hash, "batch-copy")
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0})
@@ -1414,7 +1414,7 @@ func batchPolicyMigrate(ids []uint, policyID uint) {
 			"source_name": newSource, "policy_id": policyID,
 		})
 		// 新物理文件
-		_ = storage.RetainObject(policyID, newSource, f.Size, f.Hash)
+		storage.Retain(policyID, newSource, f.Size, f.Hash, "move-copy-fallback")
 		// 旧物理文件：引用减 1
 		if oldH != nil {
 			_, _ = storage.ReleaseObject(oldPolicy, oldSource, oldH)

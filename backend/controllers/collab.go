@@ -152,7 +152,7 @@ func CollabSave(c *gin.Context) {
 	})
 	addStorage(f.OwnerID, f.Size-oldSize)
 	// 协作新内容写新物理文件：refs=1
-	_ = storage.RetainObject(f.PolicyID, newSource, f.Size, newHash)
+	storage.Retain(f.PolicyID, newSource, f.Size, newHash, "collab-save-new")
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": f})
 }

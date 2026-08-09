@@ -488,7 +488,7 @@ func put(c *gin.Context, u *models.User, p string) {
 		return
 	}
 	// 新物理文件：refs=1
-	_ = storage.RetainObject(pol.ID, srcName, size, "")
+	storage.Retain(pol.ID, srcName, size, "", "webdav-put")
 	// 更新用户存储
 	db.Get().Model(&models.User{}).Where("id = ?", u.ID).UpdateColumn("storage",
 		db.DB.Raw("storage + ?", size))

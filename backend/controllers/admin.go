@@ -161,18 +161,37 @@ func CreateGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": g})
 }
 
-// UpdateGroup 更新用户组
+// UpdateGroup 更新用户组：严格校验 ID、返回真实错误、零行影响返回 code=1（避免"假成功"）
 func UpdateGroup(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "invalid group id"})
+		return
+	}
 	var req groupReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
 		return
 	}
-	db.Get().Model(&models.Group{}).Where("id = ?", id).Updates(map[string]any{
-		"name": req.Name, "max_storage": req.MaxStorage,
-		"share_enabled": req.ShareEnabled, "webdav_enabled": req.WebDAVEnabled, "speed_limit": req.SpeedLimit,
+	tx := db.Get().Model(&models.Group{}).Where("id = ?", uint(id)).Updates(map[string]any{
+		"name":           req.Name,
+		"max_storage":    req.MaxStorage,
+		"share_enabled":  req.ShareEnabled,
+		"webdav_enabled": req.WebDAVEnabled,
+		"speed_limit":    req.SpeedLimit,
 	})
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "update failed: " + tx.Error.Error()})
+		return
+	}
+	if tx.RowsAffected == 0 {
+		// 可能：组不存在，或者新值与旧值完全一致 → 校验存在性后再决定返回
+		var cnt int64
+		if db.Get().Model(&models.Group{}).Where("id = ?", uint(id)).Count(&cnt).Error != nil || cnt == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "group not found"})
+			return
+		}
+	}
 
 	cur := middleware.CurrentUser(c)
 	detail, _ := json.Marshal(req)
@@ -180,7 +199,7 @@ func UpdateGroup(c *gin.Context) {
 		UserID:   cur.ID,
 		UserName: cur.UserName,
 		Action:   "admin_update_group",
-		Target:   strconv.Itoa(id),
+		Target:   c.Param("id"),
 		IP:       c.ClientIP(),
 		UA:       c.Request.UserAgent(),
 		Detail:   string(detail),
