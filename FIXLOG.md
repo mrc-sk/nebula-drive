@@ -24,13 +24,17 @@
 | P1-7 | `CancelTask` 重复 close channel panic | P1 | ✅ 已修 | `controllers/task.go` |
 | P2-2 | `Purge` / `cleanupTrash` 重复扣减配额 | P2 | ✅ 已修 | `controllers/file.go` |
 | P2-7 | 敏感字段明文入库 | P1 | ✅ 已修 | `internal/cryptox`、`models/encrypted.go`、`models/migrate_sensitive.go` |
+| S-1 | 改密码不吊销会话（旧 token 仍可用 7 天） | P1 | ✅ 已修 | `controllers/auth.go` |
+| S-2 | `CreateUser` 缺密码强度校验（可建弱密码账号） | P1 | ✅ 已修 | `controllers/admin.go` |
+| S-3 | JWT `Parse` 未显式限定签名算法 | P2 | ✅ 已修 | `pkg/jwt/jwt.go` |
 | — | 测试驱动与生产不一致（且需 CGO，测试跑不起来） | 严重 | ✅ 已修 | `pkg/testutil/db.go` |
 | — | 测试连接不关闭，Windows 上清理失败致误判 FAIL | 中 | ✅ 已修 | `pkg/testutil/db.go`、`pkg/db/db_test.go`、`controllers/install_test.go` |
 | — | `db.Init` 覆盖全局实例时泄漏旧连接池 | 中 | ✅ 已修 | `pkg/db/db.go` |
 
 > 验证状态：`go build ./...` ✅ ｜ `go vet ./...` ✅ ｜ `go test ./...` ✅ 全部通过（12 个包）
+> ｜ GitHub Actions `go test -race` 双平台（ubuntu + windows）✅
 >
-> **审查清单 15 项已全部完成。** 剩余的可选改进见文末「后续建议」。
+> **审查清单 15 项 + 追加加固 3 项已全部完成。** 剩余的可选改进见文末「后续建议」。
 
 ---
 
@@ -726,3 +730,100 @@ DB = g
 **修复**：覆盖前先 `DB.DB().Close()`，并新增导出的 `db.Close()` 供测试清理与进程优雅退出使用。
 
 ---
+
+## 6. 追加加固（S-1 ~ S-3）
+
+上一轮 15 项修完后做了一轮针对性复查，又找出 3 处。共同特征：
+**都属于「机制已存在但某个入口漏了接上」**，而不是缺功能。
+
+### 6.1 S-1 改密码不吊销会话（最严重）
+
+`ChangePassword` 改完密码就 `return`，**不碰 `sessions` 表**。
+
+而会话有效性判定在 `middleware/auth.go:40`：
+
+```go
+db.Get().Where("session_id = ? AND expires_at > ?", claims.SessionID, time.Now()).First(&sess)
+```
+
+只查 `session_id` + 过期时间，**与密码完全解耦**。后果：
+
+> 用户发现账号被入侵 → 改密码 → 攻击者手上的 token 在「记住登录」的 **7 天里照常可用**。
+
+「我改密码了」这个补救动作对已入侵场景**完全无效**。项目的单设备登录机制
+（登录时 `Delete(user_id)` 清旧会话）做得不错，但改密码这条路没接上。
+
+**修复**：新增 `revokeAllSessions()`，删掉该用户全部会话 + 为当前浏览器签发新
+token 并重设 cookie。**全删而不是只删其他会话**——保留任何旧 token 都等于留后门。
+当前浏览器通过新 token 无感续上，前端无需改动（`ProfileSettings.tsx` 改完只提示 OK）。
+
+配套动作：
+- 写 `AuditLog`（`action: change_password`）——这类操作必须可追溯
+- 吊销失败时返回 500 而非 200。不能假装成功——密码已改但旧 token 仍有效，
+  报个错比给个假成功安全
+
+**测试有效性做了变异验证**：把 `Delete` 那行注释掉后重跑，
+`TestChangePasswordRevokesAllSessions` 报「实际 4 个 —— 旧会话未吊销」并 FAIL。
+若只断言「密码改了」而不查 session，删掉整个吊销逻辑测试照样通过 —— 漏洞仍在。
+
+另加两个反向测试：原密码错误、新密码不达标时**都不得吊销会话**
+（否则可被用来强制把受害者踢下线）。
+
+### 6.2 S-2 `CreateUser` 缺密码强度校验
+
+密码策略 `validatePassword()` 有两个调用点（注册、改密码），但**第三个入口漏了**：
+
+| 入口 | 修复前 | 修复后 |
+|---|---|---|
+| `auth.go Register` | ✅ 校验 | ✅ |
+| `auth.go ChangePassword` | ✅ 校验 | ✅ |
+| `admin.go CreateUser` | ❌ 只有 `binding:"required"`（非空） | ✅ 校验 |
+| `install.go` 初始管理员 | ✅（安装期，走默认值） | ✅ |
+
+意味着管理端可以创建 `123` 这种弱密码账号，绕过系统自身策略。
+
+**修复**：在 `bcrypt.GenerateFromPassword` 之前插入 `validatePassword`。
+
+这个漏洞的**副作用帮了忙**：`handlers_test.go` 的 `TestCreateUser` 原本用
+`"Secret1"`（7 位）当密码，修复后立刻被拒报 400。这正是修复生效的直接证据 ——
+改完测试数据为 `Secret123` 后恢复。全仓其他测试密码（`Abcdefg1`）本来就合规。
+
+### 6.3 S-3 JWT `Parse` 未显式限定签名算法
+
+`keyfunc` 只 `return secret`，没检查 `t.Method`：
+
+```go
+// 修复后
+if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+    return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+}
+```
+
+**当前并无实际漏洞** —— `golang-jwt/v5` 对非对称算法会因密钥类型不匹配
+（`[]byte` vs 公钥）而拒绝。但这属于「依赖库的隐式行为做安全保证」，
+显式白名单是不换库版本、不重构就不失守的第二道防线。补了两个伪造 token 测试
+（`alg=none` 与 `alg=RS256`）锁住行为。
+
+### 6.4 顺带确认没问题的地方
+
+复查时也排除了几个**看起来可疑但实际正确**的点，避免误改：
+
+- **IP 封禁是否共享**：`IsIPBanned` 查的是 `models.IPBan` **数据库表**，多副本共享 ✓。
+  内存的只有 `loginFailures` 触发计数（凑满 10 次才写 DB）。
+  README 的「部署形态」小节已按这个准确语义写。
+- **路由鉴权**：`admin := api.Group("/admin", middleware.Auth(true), middleware.AdminOnly())` ✓
+- **`UpdateUser` 能否改密码**：结构体里**没有**密码字段 ✓
+- **自助删除保护**：`DeleteUser:124` 有 `if cur != nil && uint(id) == cur.ID` ✓
+
+---
+
+## 7. 遗留项
+
+均为**非缺陷**的改进建议：
+
+1. **`UpdateUser` 无自操作保护** —— 管理员可把自己 `is_admin` 置 false 或改 `status`，
+   导致误操作后无法进入后台（`DeleteUser` 有保护，`UpdateUser` 没有）。
+   属自我锁定而非越权，危害低。
+2. **5 项进程内存状态** —— WebDAV 锁、登录失败计数、验证码阈值、通用限流、分片会话。
+   多副本部署需外置到 Redis，README「部署形态」已列明。
+3. **CI 目前只跑后端** —— 前端（React + Vite）无 lint / 类型检查 / 测试。

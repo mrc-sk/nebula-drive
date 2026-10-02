@@ -255,7 +255,55 @@ func ChangePassword(c *gin.Context) {
 	}
 	hash, _ := bcrypt.GenerateFromPassword([]byte(req.New), bcrypt.DefaultCost)
 	db.Get().Model(u).Update("password", string(hash))
+
+	// 改密码必须吊销所有已签发的会话。
+	// 原因：会话有效性只由 sessions 表决定（middleware/auth.go 只查
+	// session_id + expires_at），与密码完全解耦。不吊销的话，
+	// 「我账号被入侵了所以改密码」这个补救动作对攻击者无效 ——
+	// 他手上的 token 在「记住登录」的 7 天里照常可用。
+	// 这是本项目里「单设备登录」机制的一个此前被忽略的入口。
+	newToken, err := revokeAllSessions(c, u.ID, u.UserName)
+	if err != nil {
+		// 会话没清干净：密码已改但旧 token 仍有效，如实报错而不是假装成功
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": "密码已修改，但吊销其他登录会话失败，请检查服务端日志"})
+		return
+	}
+	// 给当前浏览器换发新 token，使其在清空会话后继续可用（无感）
+	if newToken != "" {
+		c.SetCookie("nebula_token", newToken, int((7 * 24 * time.Hour).Seconds()), "/", "", false, true)
+	}
 	c.JSON(http.StatusOK, gin.H{"code": 0})
+}
+
+// revokeAllSessions 删除该用户全部会话并为当前请求签发一个新会话。
+// 返回新 token；失败时返回 error 且新 token 为空。
+//
+// 为什么全删而不是「只删其他会话」：改密码的语义是「我认为账号可能已泄露」。
+// 保留任何旧 token 都留了后门。当前请求通过新签发的 token 续上，用户无感。
+func revokeAllSessions(c *gin.Context, userID uint, userName string) (string, error) {
+	if err := db.Get().Where("user_id = ?", userID).Delete(&models.Session{}).Error; err != nil {
+		return "", err
+	}
+	sessID := util.UUID()
+	tok, err := jwt.Sign(userID, sessID, 7*24*time.Hour)
+	if err != nil {
+		return "", err
+	}
+	if err := db.Get().Create(&models.Session{
+		UserID: userID, Token: tok, SessionID: sessID,
+		IP: c.ClientIP(), UA: c.Request.UserAgent(),
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+	}).Error; err != nil {
+		return "", err
+	}
+	// 审计：这类操作必须留痕
+	db.Get().Create(&models.AuditLog{
+		UserID: userID, UserName: userName,
+		Action: "change_password", Target: strconv.Itoa(int(userID)),
+		IP: c.ClientIP(), UA: c.Request.UserAgent(),
+		Detail: "all sessions revoked",
+	})
+	return tok, nil
 }
 
 // ---- 密码强度策略 ----

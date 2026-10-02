@@ -163,7 +163,7 @@ func TestCreateUser(t *testing.T) {
 	r := userRouter(admin)
 	r.POST("/users", CreateUser)
 	w := doJSON(r, http.MethodPost, "/users", map[string]any{
-		"userName": "newbie", "password": "Secret1", "email": "n@e.com", "isAdmin": true,
+		"userName": "newbie", "password": "Secret123", "email": "n@e.com", "isAdmin": true,
 	})
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())

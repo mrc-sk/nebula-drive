@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -61,6 +62,12 @@ func Sign(userID uint, sessionID string, ttl time.Duration) (string, error) {
 func Parse(tok string) (*Claims, error) {
 	c := &Claims{}
 	_, err := jwt.ParseWithClaims(tok, c, func(t *jwt.Token) (interface{}, error) {
+		// alg 混淆防御：显式限定 HMAC 族。
+		// 攻击者可能把 alg 改成 none 或改成 RS256 并把公钥当 HMAC 密钥用。
+		// 显式白名单是不依赖库的隐式行为做兜底 —— 换库版本也不会失守。
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
 		return secret, nil
 	})
 	if err != nil {

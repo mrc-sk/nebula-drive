@@ -50,6 +50,13 @@ func CreateUser(c *gin.Context) {
 	if req.GroupID == 0 {
 		req.GroupID = 1
 	}
+	// 密码策略必须在这里校验，与注册（auth.go Register）和改密码
+	// （auth.go ChangePassword）保持一致。此前只有 binding:"required"（非空），
+	// 意味着管理端可以创建 "123" 这种弱密码账号，绕过系统密码策略。
+	if err := validatePassword(req.Password); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
+		return
+	}
 	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	u := models.User{
 		UserName: req.UserName, Email: req.Email, Password: string(hash),

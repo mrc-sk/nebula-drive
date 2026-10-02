@@ -61,3 +61,27 @@ func TestInitFromDB(t *testing.T) {
 		t.Fatal("secret changed on second init")
 	}
 }
+
+// alg=none 攻击：伪造一个 unsigned token。
+// 库里 golang-jwt/v5 本身会拒绝，但显式白名单是第二道防线——
+// 换库版本或未来重构时不至于静默失守。
+func TestParseRejectsAlgNone(t *testing.T) {
+	secret = []byte("test-secret-key")
+	// header {"alg":"none","typ":"JWT"} + payload + 空签名
+	tok := "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0." +
+		"eyJ1aWQiOjQyfQ."
+	if _, err := Parse(tok); err == nil {
+		t.Fatal("alg=none token 应被拒绝")
+	}
+}
+
+// alg 混淆攻击：把 alg 改成 RS256，企图用公钥当 HMAC 密钥。
+func TestParseRejectsAlgMismatch(t *testing.T) {
+	secret = []byte("test-secret-key")
+	// header {"alg":"RS256","typ":"JWT"}
+	tok := "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9." +
+		"eyJ1aWQiOjQyfQ." + "c2ln"
+	if _, err := Parse(tok); err == nil {
+		t.Fatal("alg=RS256 的 token 应被拒绝")
+	}
+}
