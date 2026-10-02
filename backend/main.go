@@ -4,8 +4,12 @@ import (
 	"crypto/tls"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -28,6 +32,8 @@ import (
 func main() {
 	dataDir := flag.String("data", "data", "数据目录")
 	listen := flag.String("listen", "", "监听地址，留空则读配置")
+	autoport := flag.Bool("autoport", false, "自动挑选空闲端口（5212 起），用于试用/一键启动场景")
+	openbrowser := flag.Bool("open", false, "启动后自动打开浏览器")
 	flag.Parse()
 
 	conf.SetDataDir(*dataDir)
@@ -52,10 +58,68 @@ func main() {
 		addr = ":5212"
 	}
 
+	// -autoport：只在显式指定时覆盖已配置的端口。
+	// 优先级高于配置，因为试用场景的核心诉求是「一定能起来」——
+	// 端口冲突是启动失败最常见的原因，而配置里的端口是上次安装留下的。
+	if *autoport {
+		p, err := findFreePort(defaultPortRangeStart)
+		if err != nil {
+			log.Fatalf("[FATAL] %d-%d 端口均被占用，请关闭一些程序后重试: %v",
+				defaultPortRangeStart, defaultPortRangeStart+defaultPortRangeSize-1, err)
+		}
+		addr = fmt.Sprintf("127.0.0.1:%d", p)
+	}
+
 	r := routers.Setup()
 	routers.InitWebDAVRoutes(r)
 	registerFrontend(r)
+
+	if *openbrowser {
+		go func() {
+			// 等HTTP 起来再开，否则浏览器可能先于监听失败
+			time.Sleep(600 * time.Millisecond)
+			openInBrowser("http://" + addr)
+		}()
+	}
+
 	startServer(r, addr)
+}
+
+const (
+	defaultPortRangeStart = 5212
+	defaultPortRangeSize  = 30
+)
+
+// findFreePort 从 start 起顺序探测，返回第一个能成功绑定的端口。
+// 用 net.Listen 实际尝试绑定而不是解析 netstat —— 后者依赖输出列宽，
+// 跨 locale/版本不可靠，且子串匹配会把 52120 误判成 5212 被占用。
+func findFreePort(start int) (int, error) {
+	for i := 0; i < defaultPortRangeSize; i++ {
+		p := start + i
+		l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p))
+		if err == nil {
+			_ = l.Close() // 仅探测，随即释放；真正绑定由 http.Server 做
+			return p, nil
+		}
+	}
+	return 0, fmt.Errorf("no free port in range %d-%d", start, start+defaultPortRangeSize-1)
+}
+
+// openInBrowser 用系统默认浏览器打开 URL（Windows 用 rundll32，
+// 这样不需要额外依赖 xdg-open / open）
+func openInBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	if err := cmd.Start(); err != nil {
+		log.Printf("[WARN] 无法自动打开浏览器，请手动访问 %s: %v", url, err)
+	}
 }
 
 // startServer 根据 settings tls.mode 选择 HTTP/HTTPS 启动
@@ -93,10 +157,41 @@ func startServer(r *gin.Engine, addr string) {
 }
 
 func runHTTP(r *gin.Engine, addr string) {
-	log.Printf("NebulaDrive 启动 HTTP 于 %s（已安装: %v）", addr, conf.IsInstalled())
+	printStartupBanner("HTTP", addr)
 	if err := r.Run(addr); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("启动失败: %v", err)
 	}
+}
+
+// printStartupBanner 打印启动信息。
+// 面向试用场景：第一次用的人不知道下一步该做什么，
+// 所以把「访问地址」和「是否需要走安装向导」直接说清楚。
+func printStartupBanner(scheme, addr string) {
+	// scheme 一律小写：Windows 上 "HTTP://..." 大写形式在部分程序（含部分
+	// 浏览器和 shell 集成）里无法正确识别，粘到地址栏会失败。
+	scheme = strings.ToLower(scheme)
+	// addr 可能是 ":5212"（全接口）或 "127.0.0.1:5212"，统一成可点击的 URL
+	hostPort := addr
+	if strings.HasPrefix(addr, ":") {
+		hostPort = "127.0.0.1" + addr
+	}
+	url := scheme + "://" + hostPort
+
+	installed := conf.IsInstalled()
+	log.Printf("NebulaDrive 启动 %s 于 %s（已安装: %v）", scheme, addr, installed)
+	log.Printf("")
+	log.Printf("  ────────────────────────────────────────────")
+	log.Printf("   访问地址：%s", url)
+	if installed {
+		log.Printf("   停止服务：在此窗口按 Ctrl+C")
+	} else {
+		log.Printf("")
+		log.Printf("   首次使用：请在浏览器打开上面的地址，")
+		log.Printf("             按安装向导创建管理员账号。")
+		log.Printf("             （默认使用 SQLite，无需额外数据库）")
+	}
+	log.Printf("  ────────────────────────────────────────────")
+	log.Printf("")
 }
 
 func runHTTPS(r *gin.Engine, addr string, tlsCfg *tls.Config) {

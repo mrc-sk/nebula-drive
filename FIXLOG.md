@@ -817,7 +817,56 @@ if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 
 ---
 
-## 7. 遗留项
+## 7. 试用包（packaging/）
+
+给非开发者体验用的一套东西。三平台各一个自包含压缩包，对方解压即跑，
+**不需要装 Go / Node / 数据库**。
+
+### 为什么能做到单二进制
+`backend/web.go` 用 `//go:embed all:frontend_dist` 把前端打进了 exe。
+构建加 `-trimpath -ldflags="-s -w"`：剥离符号表与调试信息，
+65 MB → 47 MB（**-27%**），前端资源静态校验确认已内嵌、无 `.tsx` 源码泄漏。
+
+### 端口冲突处理：逻辑放在 Go 里而不是 bat/sh
+最初想用 `netstat | find` 在脚本里探测空闲端口。两个问题：
+
+1. `find ":5212 "` 是**子串匹配**，会把 `52120`/`52121` 误判成 5212 被占用。
+   虽然当前 netstat 列宽对齐时不会撞上，但跨机器/跨 locale 不保证。
+2. batch/shell 的语法无法在本机可靠验证（跨 shell 调用 cmd 被安全策略拦截）。
+
+改为在二进制里加 `-autoport`，用 `net.Listen` **实际尝试绑定**确定端口，
+`start.sh` 只剩一行 `exec ./nebula -autoport -open`。
+新增 `backend/main_test.go` 覆盖 `findFreePort` 的跳号与边界。
+
+`-autoport` 优先级高于配置文件里的 `listen`——试用场景的核心诉求是
+「一定能起来」，而端口冲突是启动失败最常见的原因。
+
+### 实测发现并修掉的问题
+1. **启动横幅 URL 是大写 `HTTP://`** —— Windows 上部分程序无法识别。
+   实测截图确认后加 `strings.ToLower`。这是 `printStartupBanner` 加进去后
+   第一次实际运行才暴露的。
+2. **`start.sh` 会把 `Exec format error` 漏给用户** —— 下错版本时
+   （拿了 Windows 包）文件存在但跑不了，用户完全看不懂这个报错。
+   改为**读文件头魔数**判断：ELF(7f454c46) / Mach-O(cffaedfe) / PE(4d5a)，
+   并检查 ELF 位数与 `getconf LONG_BIT` 是否一致。
+   注意：**靠退出码判断不可靠** —— 实测 Git Bash 会把执行失败转成退出码 0。
+3. 试用说明里的功能声明**逐条 grep 核实**（i18n 实为 5 种含韩语、
+   版本上限 `file.max_versions=10`、回收站 `trash.retention_days=30`
+   且每 6 小时扫一次）。不核实的功能说明等于给朋友的假承诺。
+
+### 验证边界（必须说清楚）
+- **Windows**：全新目录实测启动成功、端口自动选择、HTTP 200、前端页面正常、
+  安装守卫返回 503（正确引导到安装向导）
+- **Linux / macOS**：仅完成交叉编译 + ELF 头校验 + `sh -n` 语法检查 +
+  错误路径实测。**本机无 Linux 环境（WSL 空、无 Docker），
+  未做真机运行验证**
+
+`packaging/试用说明.md` 覆盖安装向导步骤、7 类可试功能、6 个常见问题、
+以及能力边界（单实例设计、WebDAV PROPPATCH 限制、LOCK 进程内）。
+
+---
+
+## 8. 遗留项
 
 均为**非缺陷**的改进建议：
 

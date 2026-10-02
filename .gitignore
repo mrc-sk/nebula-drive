@@ -44,3 +44,6 @@ coverage.out
 *.deb
 *.rpm
 *.apk
+
+# 发布包（含几十 MB 的单二进制，不应进版本库）
+release/
