@@ -168,7 +168,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(body),
   }),
-  me: () => request<ApiResult<AuthUser>>('/api/auth/me', { headers: authHeaders() }),
+  me: () => request<ApiResult<{ user: AuthUser; suggest2FAHint?: boolean }>>('/api/auth/me', { headers: authHeaders() }),
   login: (body: any) =>
     request<ApiResult<LoginData>>('/api/auth/login', {
       method: 'POST',

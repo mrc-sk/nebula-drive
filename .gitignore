@@ -9,12 +9,18 @@ backend/*.log
 backend/data/secret.key
 backend/data/*.ini
 backend/data/*.json
-frontend/dist/
 
 # 前端
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+*.tsbuildinfo
+
+# 测试运行产物
+# 测试里 ensureDefaultPolicy 用的是相对路径 "uploads"，会在各包的测试工作目录下
+# 真的建出 uploads/ 目录。属于运行产物，不应进版本库。
+backend/controllers/uploads/
+backend/filesystem/uploads/
 
 # Go
 *.exe

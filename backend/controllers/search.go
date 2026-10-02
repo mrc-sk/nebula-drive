@@ -99,7 +99,7 @@ func Search(c *gin.Context) {
 	if tagParam := c.Query("tag"); tagParam != "" {
 		tags := strings.Split(tagParam, ",")
 		q = q.Joins("JOIN file_tags ON file_tags.file_id = files.id").
-			Where("file_tags.tag IN ? AND file_tags.owner_id ?", tags, u.ID)
+			Where("file_tags.tag IN ? AND file_tags.owner_id = ?", tags, u.ID)
 	}
 
 	// 维度 h: 只搜回收站
@@ -203,9 +203,19 @@ func SaveSearchHistory(c *gin.Context) {
 		return
 	}
 	db.Get().Create(&models.SearchHistory{UserID: u.ID, Keyword: req.Keyword, Filters: req.Filters})
-	// 只保留最近 20 条
-	db.Get().Where("user_id = ? AND id NOT IN (SELECT id FROM search_histories WHERE user_id = ? ORDER BY id DESC LIMIT 20)",
-		u.ID, u.ID).Delete(&models.SearchHistory{})
+	// 只保留最近 20 条。
+	//
+	// 修复（对应 CODE_REVIEW P1-3）：原实现是
+	//   DELETE FROM search_histories WHERE user_id = ? AND id NOT IN
+	//     (SELECT id FROM search_histories WHERE user_id = ? ORDER BY id DESC LIMIT 20)
+	// MySQL 不允许在 DELETE 的子查询里引用被删除的同一张表，直接报错 1093
+	//（SQLite 能跑，所以本地开发时不会暴露，一到 MySQL 生产就炸）。
+	// 改为「先查出第 20 条的 id，再删比它更早的」——无子查询，三种数据库通用。
+	var keep models.SearchHistory
+	if err := db.Get().Where("user_id = ?", u.ID).
+		Order("id desc").Offset(19).Limit(1).Find(&keep).Error; err == nil && keep.ID > 0 {
+		db.Get().Where("user_id = ? AND id < ?", u.ID, keep.ID).Delete(&models.SearchHistory{})
+	}
 	c.JSON(http.StatusOK, gin.H{"code": 0})
 }
 

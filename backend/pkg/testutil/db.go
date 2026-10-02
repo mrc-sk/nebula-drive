@@ -5,13 +5,24 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/glebarez/sqlite"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
 // SetupDB 初始化一个基于临时文件的 SQLite 测试库并迁移表结构，赋值给全局 db.DB
+//
+// 驱动选择说明：这里必须用 github.com/glebarez/sqlite（纯 Go）而**不是**
+// gorm.io/driver/sqlite（依赖 mattn/go-sqlite3，需要 CGO）。原因有两条：
+//
+//  1. 与实际生产一致 —— pkg/db/db.go 里 sqlite 分支用的就是 glebarez/sqlite。
+//     测试驱动与线上驱动不一致时，"测试通过"不代表"线上通过"，反之亦然。
+//     本项目曾因此让一个 MySQL 才暴露的 SQL 错误（DELETE 子查询引用同表，ER_1093）
+//     长期潜伏 —— SQLite 对此宽容，本地测试全绿，一上 MySQL 就炸。
+//
+//  2. 无需 CGO —— 原本依赖 gcc，导致 Windows 默认环境（CGO_ENABLED=0）和
+//     精简 CI 容器里整个测试套件都跑不起来。
 func SetupDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	g, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "test.db")), &gorm.Config{})
@@ -21,6 +32,18 @@ func SetupDB(t *testing.T) *gorm.DB {
 	db.DB = g
 	if err := models.AutoMigrate(); err != nil {
 		t.Fatalf("migrate: %v", err)
+	}
+	// 注册连接清理。
+	//
+	// 必要性（Windows 特有）：t.TempDir() 在测试结束时删除临时目录，但 SQLite 的
+	// 文件句柄如果还开着，Windows 会拒绝删除并报
+	//   TempDir RemoveAll cleanup: unlinkat ...: The process cannot access the file
+	// 使一个断言全过的测试被判为 FAIL。
+	//
+	// t.Cleanup 是 LIFO 执行：TempDir 的清理在 SetupDB 内被更早注册，因此这里注册的
+	// Close 会**先**执行，从而保证「先关连接、再删目录」的正确顺序。
+	if sqlDB, err := g.DB(); err == nil {
+		t.Cleanup(func() { _ = sqlDB.Close() })
 	}
 	return g
 }

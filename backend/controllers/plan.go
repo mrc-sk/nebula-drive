@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/big"
 	"net/http"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/nebula-drive/nebula/middleware"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
+	"gorm.io/gorm"
 )
 
 // ============ 套餐管理（管理员）============
@@ -443,12 +445,14 @@ func RedeemCode(c *gin.Context) {
 
 // ============ 默认套餐初始化 ============
 
-// SeedDefaultPlans 创建默认三档套餐（仅首次启动）
-func SeedDefaultPlans() {
+// seedDefaultPlans 在给定事务内创建默认三档套餐（幂等）
+func seedDefaultPlans(tx *gorm.DB) error {
 	var cnt int64
-	db.Get().Model(&models.Plan{}).Count(&cnt)
+	if err := tx.Model(&models.Plan{}).Count(&cnt).Error; err != nil {
+		return err
+	}
 	if cnt > 0 {
-		return
+		return nil
 	}
 	plans := []models.Plan{
 		{Name: "ultra", DisplayName: "Ultra", Price: 5900, Currency: "CNY", DurationMonths: 12,
@@ -461,7 +465,23 @@ func SeedDefaultPlans() {
 			MaxStorage: -1, ShareEnabled: true, WebDAVEnabled: true, SpeedLimit: 0,
 			IsActive: true, SortOrder: 3},
 	}
-	for _, p := range plans {
-		db.Get().Create(&p)
+	// 用索引而非 range 值变量取地址，避免循环变量复用带来的隐患
+	for i := range plans {
+		if err := tx.Create(&plans[i]).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SeedDefaultPlans 创建默认三档套餐（仅首次启动）。
+//
+// 保留导出是为了 main 启动流程调用；安装向导走 seedDefaultPlans 以纳入事务。
+func SeedDefaultPlans() {
+	if db.Get() == nil {
+		return
+	}
+	if err := seedDefaultPlans(db.Get()); err != nil {
+		log.Printf("[WARN] 初始化默认套餐失败: %v", err)
 	}
 }

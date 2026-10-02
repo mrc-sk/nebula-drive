@@ -37,8 +37,14 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ loading: true })
     try {
       const res = await api.me()
-      if (res && res.code === 0 && res.data) {
-        set({ user: res.data, token, loading: false })
+      // 后端 /api/auth/me 返回的是 { code, data: { user, suggest2FAHint } }，
+      // 用户对象嵌在 data.user 里。这里必须解一层，否则 user.isAdmin 恒为 undefined，
+      // 路由守卫会把所有 /admin/* 弹回 /files（登录后首次进入正常、一刷新管理后台就进不去）。
+      // 同时兼容历史上可能存在的扁平返回。
+      const payload = res?.data as any
+      const me: AuthUser | null = payload?.user ?? (payload?.userName ? payload : null)
+      if (res && res.code === 0 && me) {
+        set({ user: me, token, loading: false })
       } else {
         localStorage.removeItem(TOKEN_KEY)
         set({ user: null, token: null, loading: false })

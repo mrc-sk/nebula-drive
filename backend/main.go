@@ -7,10 +7,12 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nebula-drive/nebula/conf"
 	"github.com/nebula-drive/nebula/controllers"
+	"github.com/nebula-drive/nebula/internal/service"
 	"github.com/nebula-drive/nebula/migrations"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/aria2"
@@ -19,6 +21,7 @@ import (
 	"github.com/nebula-drive/nebula/pkg/storage"
 	tlspkg "github.com/nebula-drive/nebula/pkg/tls"
 	"github.com/nebula-drive/nebula/routers"
+	"github.com/nebula-drive/nebula/webdav"
 	"gorm.io/gorm"
 )
 
@@ -140,6 +143,38 @@ func bootstrap() {
 	}
 	// 回填遗留 FileObject 引用计数（V1-0.0.1 升级用户秒传/复制共享物理文件，没有 FileObject）
 	storage.BackfillFileObjects()
+	// 注入 internal/service 的实现：
+	//   - 设置读取：让 SSRF/白名单/上传上限等配置能读到 DB 里的 settings
+	//   - 配额解析：让 service 层的原子配额占用（AddStorageTx）能算出套餐/用户组额度
+	// 不做这步，service 会退回各自的兜底实现（仍可工作，但读不到用户自定义设置）。
+	service.SetSettingGetter(func(key string) (string, bool) {
+		if db.Get() == nil {
+			return "", false
+		}
+		var s models.Setting
+		if err := db.Get().Where("`key` = ?", key).First(&s).Error; err != nil {
+			return "", false
+		}
+		return s.Value, true
+	})
+	service.SetQuotaProvider(func(tx *gorm.DB, userID uint) (int64, string) {
+		var u models.User
+		if err := tx.Select("plan_id", "plan_expire_at", "group_id").First(&u, userID).Error; err != nil {
+			return -1, "unknown"
+		}
+		// 套餐优先（且在有效期内）
+		if u.PlanID > 0 && u.PlanExpireAt != nil && u.PlanExpireAt.After(time.Now()) {
+			var p models.Plan
+			if tx.First(&p, u.PlanID).Error == nil {
+				return p.MaxStorage, "plan:" + p.Name
+			}
+		}
+		var g models.Group
+		if tx.First(&g, u.GroupID).Error == nil {
+			return g.MaxStorage, "group:" + g.Name
+		}
+		return -1, "fallback"
+	})
 	// 初始化默认套餐（Ultra/Pro/Pro Max）
 	controllers.SeedDefaultPlans()
 	if err := migrations.Run(db.Get()); err != nil {
@@ -158,6 +193,8 @@ func bootstrap() {
 
 	// 启动回收站自动清理 goroutine（每 6 小时扫描一次）
 	controllers.StartTrashCleanup()
+	// 启动 WebDAV 过期锁回收（LOCK 现在会真实记录锁，必须有对应回收）
+	webdav.StartLockGC()
 }
 
 // ensureDefaults 确保默认用户组与存储策略存在（幂等）

@@ -31,7 +31,11 @@ func TestTestDB(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.POST("/tdb", TestDB)
-	body, _ := json.Marshal(map[string]any{"type": "sqlite", "file": filepath.Join(t.TempDir(), "x.db")})
+	dbFile := filepath.Join(t.TempDir(), "x.db")
+	// 注意顺序：t.Cleanup 为 LIFO，必须在 t.TempDir() **之后**注册，
+	// 这样「关闭连接」才会先于「删除临时目录」执行。
+	t.Cleanup(func() { _ = db.Close() })
+	body, _ := json.Marshal(map[string]any{"type": "sqlite", "file": dbFile})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/tdb", bytes.NewReader(body))
 	r.ServeHTTP(w, req)
@@ -61,6 +65,9 @@ func TestInstallFlow(t *testing.T) {
 	r := gin.New()
 	r.POST("/install", Install)
 	dbFile := filepath.Join(t.TempDir(), "installed.db")
+	// 注意顺序：t.Cleanup 为 LIFO，需在 t.TempDir() 之后注册，
+	// 保证「关闭连接」先于「删除临时目录」执行。
+	t.Cleanup(func() { _ = db.Close() })
 	body, _ := json.Marshal(map[string]any{
 		"db":     map[string]any{"type": "sqlite", "file": dbFile},
 		"system": map[string]any{"siteName": "N", "listen": ":1"},

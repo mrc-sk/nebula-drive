@@ -35,6 +35,9 @@ func TestInitSQLite(t *testing.T) {
 	if sqlDB == nil {
 		t.Fatal("nil sql db")
 	}
+	// 关闭连接，否则 Windows 上 TempDir 清理会因文件句柄占用而失败
+	// （t.Cleanup 为 LIFO：TempDir 的清理在前，故本 Close 会先执行）
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	// 连接池参数应已设置
 	stat := sqlDB.Stats()
 	if stat.MaxOpenConnections <= 0 {

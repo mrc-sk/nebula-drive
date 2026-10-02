@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -86,12 +87,36 @@ func newSFTPHandler(configJSON string) (Handler, error) {
 	return &SFTPHandler{cfg: cfg, root: cfg.Root, client: sftpClient, sshConn: sshClient}, nil
 }
 
-func (h *SFTPHandler) remotePath(name string) string {
-	return path.Join(h.root, name)
+// remotePath 把对象名安全地解析为远端绝对路径，杜绝 ../ 逃逸出 h.root。
+// 复用与本地相同的语义：归一化分隔符、拒绝 ".."、再做前缀校验。
+func (h *SFTPHandler) remotePath(name string) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		return "", ErrInvalidObjectName
+	}
+	clean := strings.ReplaceAll(name, "\\", "/")
+	clean = strings.TrimLeft(clean, "/")
+	if clean == "" {
+		return "", ErrInvalidObjectName
+	}
+	for _, seg := range strings.Split(clean, "/") {
+		if seg == "." || seg == ".." {
+			return "", ErrPathTraversal
+		}
+	}
+	joined := path.Join(h.root, clean)
+	// 远端同样做前缀校验（root 可能带结尾斜杠）
+	base := strings.TrimRight(h.root, "/")
+	if joined != base && !strings.HasPrefix(joined, base+"/") {
+		return "", ErrPathTraversal
+	}
+	return joined, nil
 }
 
 func (h *SFTPHandler) Put(src io.Reader, name string, size int64) error {
-	rp := h.remotePath(name)
+	rp, err := h.remotePath(name)
+	if err != nil {
+		return fmt.Errorf("sftp put %q: %w", name, err)
+	}
 	dir := path.Dir(rp)
 	if err := h.client.MkdirAll(dir); err != nil {
 		return fmt.Errorf("sftp mkdir: %w", err)
@@ -106,7 +131,11 @@ func (h *SFTPHandler) Put(src io.Reader, name string, size int64) error {
 }
 
 func (h *SFTPHandler) Get(name string) (io.ReadCloser, error) {
-	f, err := h.client.Open(h.remotePath(name))
+	rp, err := h.remotePath(name)
+	if err != nil {
+		return nil, fmt.Errorf("sftp get %q: %w", name, err)
+	}
+	f, err := h.client.Open(rp)
 	if err != nil {
 		return nil, fmt.Errorf("sftp get: %w", err)
 	}
@@ -114,7 +143,11 @@ func (h *SFTPHandler) Get(name string) (io.ReadCloser, error) {
 }
 
 func (h *SFTPHandler) GetRange(name string, offset, length int64) (io.ReadCloser, error) {
-	f, err := h.client.Open(h.remotePath(name))
+	rp, err := h.remotePath(name)
+	if err != nil {
+		return nil, fmt.Errorf("sftp getrange %q: %w", name, err)
+	}
+	f, err := h.client.Open(rp)
 	if err != nil {
 		return nil, fmt.Errorf("sftp getrange: %w", err)
 	}
@@ -146,7 +179,11 @@ func (l *limitedReadCloser) Read(p []byte) (int, error) {
 func (l *limitedReadCloser) Close() error { return l.r.Close() }
 
 func (h *SFTPHandler) Delete(name string) error {
-	err := h.client.Remove(h.remotePath(name))
+	rp, err := h.remotePath(name)
+	if err != nil {
+		return fmt.Errorf("sftp delete %q: %w", name, err)
+	}
+	err = h.client.Remove(rp)
 	if err != nil && !strings.Contains(err.Error(), "not exist") {
 		return err
 	}
@@ -154,7 +191,11 @@ func (h *SFTPHandler) Delete(name string) error {
 }
 
 func (h *SFTPHandler) Size(name string) (int64, error) {
-	st, err := h.client.Stat(h.remotePath(name))
+	rp, err := h.remotePath(name)
+	if err != nil {
+		return 0, fmt.Errorf("sftp size %q: %w", name, err)
+	}
+	st, err := h.client.Stat(rp)
 	if err != nil {
 		return 0, err
 	}
@@ -168,12 +209,19 @@ func (h *SFTPHandler) PresignGet(name string, expires time.Duration) (string, er
 
 func (h *SFTPHandler) Copy(src, dst string) error {
 	// SFTP 无原生 copy，通过中转读写实现
-	srcF, err := h.client.Open(h.remotePath(src))
+	srcRP, err := h.remotePath(src)
+	if err != nil {
+		return fmt.Errorf("sftp copy src %q: %w", src, err)
+	}
+	srcF, err := h.client.Open(srcRP)
 	if err != nil {
 		return err
 	}
 	defer srcF.Close()
-	rp := h.remotePath(dst)
+	rp, err := h.remotePath(dst)
+	if err != nil {
+		return fmt.Errorf("sftp copy dst %q: %w", dst, err)
+	}
 	h.client.MkdirAll(path.Dir(rp))
 	dstF, err := h.client.Create(rp)
 	if err != nil {
@@ -212,8 +260,20 @@ func newWebDAVRemoteHandler(configJSON string) (Handler, error) {
 	return &WebDAVRemoteHandler{cfg: cfg, baseURL: cfg.URL}, nil
 }
 
+// fullPath 拼接远端 WebDAV URL 的对象路径。
+// 注意 baseURL 已含尾部斜杠语义，这里对 name 做与本地一致的归一化 + ".." 拒绝，
+// 避免把请求打到服务端非预期路径（远端 WebDAV 服务器通常也会拒绝，但不能依赖对方）。
 func (h *WebDAVRemoteHandler) fullPath(name string) string {
-	return h.baseURL + name
+	clean := strings.ReplaceAll(name, "\\", "/")
+	clean = strings.TrimLeft(clean, "/")
+	segs := make([]string, 0, 8)
+	for _, seg := range strings.Split(clean, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			continue
+		}
+		segs = append(segs, url.PathEscape(seg))
+	}
+	return h.baseURL + strings.Join(segs, "/")
 }
 
 func (h *WebDAVRemoteHandler) Put(src io.Reader, name string, size int64) error {

@@ -3,6 +3,7 @@ package controllers
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -12,12 +13,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/nebula-drive/nebula/internal/service"
 	"github.com/nebula-drive/nebula/middleware"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
 	"github.com/nebula-drive/nebula/pkg/plugin"
 	"github.com/nebula-drive/nebula/pkg/storage"
 	"github.com/nebula-drive/nebula/pkg/util"
+	"gorm.io/gorm"
 )
 
 // CollabOpen 打开协作编辑：
@@ -126,31 +129,46 @@ func CollabSave(c *gin.Context) {
 		return
 	}
 
-	// 归档当前版本
-	var last models.FileVersion
-	db.Get().Where("file_id = ?", f.ID).Order("version desc").First(&last)
-	hv := models.FileVersion{
-		FileID: f.ID, Version: last.Version + 1,
-		Size: f.Size, Hash: f.Hash, SourceName: f.SourceName, PolicyID: f.PolicyID,
-	}
-	if err := db.Get().Create(&hv).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": err.Error()})
-		return
-	}
-
 	newSource := util.UUID() + filepath.Ext(f.SourceName)
 	if err := h.Put(strings.NewReader(req.Content), newSource, int64(len(content))); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": err.Error()})
 		return
 	}
 	oldSize := f.Size
+	oldHash := f.Hash
+	oldSrc := f.SourceName
+	oldPol := f.PolicyID
 	f.Size = int64(len(content))
 	f.Hash = newHash
 	f.SourceName = newSource
-	db.Get().Model(&f).Updates(map[string]any{
-		"size": f.Size, "hash": newHash, "source_name": newSource,
-	})
-	addStorage(f.OwnerID, f.Size-oldSize)
+	// 版本归档 + 主记录更新 + 配额调整放进同一事务（对应 CODE_REVIEW P1-4）。
+	// 原实现三步彼此独立：归档记录建好后任一步失败，都会留下一个「版本号已占用
+	// 但内容对不上」的悬空版本，而用户看到的是"保存失败"。
+	if err := db.Get().Transaction(func(tx *gorm.DB) error {
+		var last models.FileVersion
+		if err := tx.Where("file_id = ?", f.ID).Order("version desc").First(&last).Error; err != nil &&
+			!errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		hv := models.FileVersion{
+			FileID: f.ID, Version: last.Version + 1,
+			Size: oldSize, Hash: oldHash, SourceName: oldSrc, PolicyID: oldPol,
+		}
+		if err := tx.Create(&hv).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.File{}).Where("id = ?", f.ID).Updates(map[string]any{
+			"size": f.Size, "hash": newHash, "source_name": newSource,
+		}).Error; err != nil {
+			return err
+		}
+		return service.AddStorageTx(tx, f.OwnerID, f.Size-oldSize)
+	}); err != nil {
+		// 新内容已在事务外落盘，回滚后无人引用，手动清理
+		_ = h.Delete(newSource)
+		writeQuotaOrServerError(c, err)
+		return
+	}
 	// 协作新内容写新物理文件：refs=1
 	storage.Retain(f.PolicyID, newSource, f.Size, newHash, "collab-save-new")
 

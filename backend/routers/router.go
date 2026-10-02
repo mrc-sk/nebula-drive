@@ -2,7 +2,10 @@ package routers
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -14,6 +17,81 @@ import (
 	"github.com/nebula-drive/nebula/webdav"
 )
 
+// corsOriginCache 缓存从 settings 读到的额外允许来源，避免每个请求查库。
+var (
+	corsOriginCache   []string
+	corsOriginCacheAt time.Time
+	corsOriginMutex   sync.RWMutex
+)
+
+// extraAllowedOrigins 读取 settings: cors.allowed_origins（逗号或换行分隔）。
+// 缺省为空 —— 只允许同源与本机开发来源，绝不放开为 *。
+func extraAllowedOrigins() []string {
+	corsOriginMutex.RLock()
+	if time.Since(corsOriginCacheAt) < time.Minute {
+		out := corsOriginCache
+		corsOriginMutex.RUnlock()
+		return out
+	}
+	corsOriginMutex.RUnlock()
+
+	var list []string
+	if d := db.Get(); d != nil {
+		var s models.Setting
+		if err := d.Where("`key` = ?", "cors.allowed_origins").First(&s).Error; err == nil && s.Value != "" {
+			for _, part := range strings.FieldsFunc(s.Value, func(r rune) bool {
+				return r == ',' || r == '\n' || r == ';' || r == ' '
+			}) {
+				part = strings.TrimSpace(part)
+				if part != "" {
+					list = append(list, part)
+				}
+			}
+		}
+	}
+	corsOriginMutex.Lock()
+	corsOriginCache = list
+	corsOriginCacheAt = time.Now()
+	corsOriginMutex.Unlock()
+	return list
+}
+
+// allowedOrigin 决定是否放行请求的 Origin。
+//   - 同源（Host 与 Origin 主机一致）：放行
+//   - 本机开发来源（localhost / 127.0.0.1 / [::1] 任意端口）：放行
+//   - settings 中显式配置的来源：放行
+//   - 其余：拒绝
+func allowedOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if isLoopbackHost(host) {
+		return true
+	}
+	for _, allow := range extraAllowedOrigins() {
+		if strings.EqualFold(strings.TrimSuffix(allow, "/"), strings.TrimSuffix(origin, "/")) {
+			return true
+		}
+	}
+	// 同源判断交给浏览器：这里无法拿到当前请求 Host，因此同源由前端相对路径天然满足，
+	// 不依赖 CORS 头。跨源请求必须显式列入白名单。
+	return false
+}
+
+// isLoopbackHost 判断是否为本机主机名
+func isLoopbackHost(host string) bool {
+	switch host {
+	case "localhost", "127.0.0.1", "::1", "[::1]":
+		return true
+	}
+	return strings.HasSuffix(host, ".localhost")
+}
+
 // davAllMethods Gin r.Any 只覆盖 9 个 HTTP 方法，不含 WebDAV 扩展方法（PROPFIND/MKCOL/MOVE/COPY/LOCK/UNLOCK/PROPPATCH）。
 // 这里显式列出所有方法，确保 WebDAV 客户端（Windows/Finder/RaiDrive）能真实挂载。
 var davAllMethods = []string{
@@ -21,17 +99,25 @@ var davAllMethods = []string{
 	"PROPFIND", "PROPPATCH", "MKCOL", "MOVE", "COPY", "LOCK", "UNLOCK",
 }
 
+// CORS 相关变量见下方 corsOriginCache / allowedOrigin
+
 func Setup() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.GzipMiddleware())
+	// CORS（对应 CODE_REVIEW P0-5）：
+	//   原实现 AllowAllOrigins + AllowHeaders:* 让任意站点都能带 Cookie 调用本服务 API，
+	//   配合 AllowCredentials 一旦被打开即为完整的 CSRF/凭证窃取面。
+	//   这里改为白名单：同源 + settings 里显式配置的额外来源；未配置时仅允许本机来源。
 	r.Use(cors.New(cors.Config{
-		AllowAllOrigins:  true,
+		AllowOriginFunc:  allowedOrigin,
 		AllowMethods:     append([]string{}, davAllMethods...),
-		AllowHeaders:     []string{"*"},
-		AllowCredentials: false,
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-Requested-With", "X-CSRF-Token", "Range"},
+		ExposeHeaders:    []string{"Content-Length", "Content-Range", "Accept-Ranges", "Content-Disposition"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
 	}))
 
 	r.Use(middleware.IPGuard())

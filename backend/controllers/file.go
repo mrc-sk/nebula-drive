@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nebula-drive/nebula/filesystem"
+	"github.com/nebula-drive/nebula/internal/service"
 	"github.com/nebula-drive/nebula/middleware"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
@@ -187,11 +188,33 @@ func Rapid(c *gin.Context) {
 		Size: exist.Size, PolicyID: exist.PolicyID, SourceName: exist.SourceName,
 		Extension: exist.Extension, MimeType: exist.MimeType, Hash: req.Hash,
 	}
-	db.Get().Create(&f)
-	addStorage(u.ID, f.Size)
+	// 文件记录 + 配额占用放进同一事务（对应 CODE_REVIEW P1-4）。
+	// 原实现是先 Create 再单独 reserveStorage，中间的失败窗口会留下
+	// 「记录已建但配额未记」（或反过来）的中间态。
+	if err := db.Get().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&f).Error; err != nil {
+			return err
+		}
+		return service.AddStorageTx(tx, u.ID, f.Size)
+	}); err != nil {
+		writeQuotaOrServerError(c, err)
+		return
+	}
 	// 秒传命中：复用已有物理文件，引用计数 +1
+	// （放在事务外：refcnt 自身是 UPSERT 幂等操作，且不参与文件表的一致性）
 	storage.Retain(exist.PolicyID, exist.SourceName, exist.Size, exist.Hash, "rapid")
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": f, "rapid": true})
+}
+
+// writeQuotaOrServerError 统一处理「事务内配额/写入失败」的响应。
+// 配额不足属于客户端可纠正的问题（400），其余（如 DB 故障）归为服务端错误（500）。
+// 区分开来的意义：运维看日志能立刻分辨是「用户超额度」还是「数据库出问题」。
+func writeQuotaOrServerError(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrQuotaExceeded) {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": err.Error()})
 }
 
 // Upload 上传（含秒传：前端传 hash 命中则复用）
@@ -234,8 +257,15 @@ func Upload(c *gin.Context) {
 				Size: exist.Size, PolicyID: exist.PolicyID, SourceName: exist.SourceName,
 				Extension: exist.Extension, MimeType: exist.MimeType, Hash: hash,
 			}
-			db.Get().Create(&f)
-			addStorage(u.ID, f.Size)
+			if err := db.Get().Transaction(func(tx *gorm.DB) error {
+				if err := tx.Create(&f).Error; err != nil {
+					return err
+				}
+				return service.AddStorageTx(tx, u.ID, f.Size)
+			}); err != nil {
+				writeQuotaOrServerError(c, err)
+				return
+			}
 			// 秒传：引用计数 +1
 			storage.Retain(exist.PolicyID, exist.SourceName, exist.Size, exist.Hash, "upload-rapid")
 			c.JSON(http.StatusOK, gin.H{"code": 0, "data": f, "rapid": true})
@@ -301,8 +331,18 @@ func Upload(c *gin.Context) {
 		Size: file.Size, PolicyID: p.ID, SourceName: sourceName,
 		Extension: ext, MimeType: mimeType, Hash: hash,
 	}
-	db.Get().Create(&f)
-	addStorage(u.ID, f.Size)
+	// 文件记录 + 配额占用放进同一事务。
+	// 物理对象已在事务外落盘，存储层无法参与数据库回滚，因此失败时手动删除。
+	if err := db.Get().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&f).Error; err != nil {
+			return err
+		}
+		return service.AddStorageTx(tx, u.ID, f.Size)
+	}); err != nil {
+		_ = h.Delete(sourceName)
+		writeQuotaOrServerError(c, err)
+		return
+	}
 	// 新物理文件：建立 FileObject refs=1
 	storage.Retain(p.ID, sourceName, file.Size, hash, "upload")
 
@@ -596,6 +636,17 @@ func Purge(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"code": 1, "message": "forbidden"})
 		return
 	}
+	// 幂等删除（对应 CODE_REVIEW P2-2）：先原子摘行，再记账。
+	// 重复点击「彻底删除」不会二次扣减配额。
+	res := db.Get().Unscoped().Where("id = ?", f.ID).Delete(&models.File{})
+	if res.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": res.Error.Error()})
+		return
+	}
+	if res.RowsAffected == 0 {
+		c.JSON(http.StatusOK, gin.H{"code": 0, "message": "already purged"})
+		return
+	}
 	if !f.IsDir {
 		if h, err := handlerForFile(&f); err == nil {
 			// 引用计数减 1，到 0 才真正删物理文件
@@ -603,11 +654,13 @@ func Purge(c *gin.Context) {
 		}
 	}
 	addStorage(f.OwnerID, -f.Size)
-	db.Get().Unscoped().Delete(&f)
 	c.JSON(http.StatusOK, gin.H{"code": 0})
 }
 
-// addStorage 增减用户已用容量
+// addStorage 增减用户已用容量。
+//
+// Deprecated: 增量路径请改用 service.AddStorageTx（带原子配额校验，消除 TOCTOU）。
+// 该函数保留仅用于纯粹的释放路径（delta < 0）或已有外层校验的场景。
 func addStorage(userID uint, delta int64) {
 	db.Get().Model(&models.User{}).Where("id = ?", userID).
 		UpdateColumn("storage", gorm.Expr("storage + ?", delta))
@@ -615,13 +668,24 @@ func addStorage(userID uint, delta int64) {
 
 // Breadcrumb 路径面包屑（从当前目录向上）
 func Breadcrumb(c *gin.Context) {
+	u := middleware.CurrentUser(c)
 	id, _ := strconv.Atoi(c.Param("id"))
+	// 越权修复（对应 CODE_REVIEW P1-1）：
+	//   原实现完全无鉴权 —— 任意登录用户传别人的目录 ID 即可枚举出完整路径树。
+	//   这里对整条链路上的每个节点都做归属校验，并且限制最大深度防止恶意深链打满内存。
 	var crumbs []models.File
 	cur := uint(id)
-	for cur != 0 {
+	depth := 0
+	const maxDepth = 128
+	for cur != 0 && depth < maxDepth {
+		depth++
 		var f models.File
 		if err := db.Get().First(&f, cur).Error; err != nil {
 			break
+		}
+		if !u.IsAdmin && f.OwnerID != u.ID {
+			c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": "无权访问该路径"})
+			return
 		}
 		crumbs = append([]models.File{f}, crumbs...)
 		if f.ParentID == nil {
@@ -637,21 +701,57 @@ func Breadcrumb(c *gin.Context) {
 const chunkSize = 20 * 1024 * 1024 // 20MB
 
 type chunkUploadMeta struct {
-	UploadID   string
-	Hash       string
-	Name       string
-	Size       int64
-	ParentID   *uint
-	OwnerID    uint
-	ChunkCount int
-	Chunks     map[int]string // 索引 -> 临时文件路径
-	CreatedAt  time.Time
+	UploadID    string
+	Hash        string
+	Name        string
+	Size        int64
+	ParentID    *uint
+	OwnerID     uint
+	ChunkCount  int
+	Chunks      map[int]string // 索引 -> 临时文件路径
+	ChunksBytes int64          // 已落盘分片总字节数（用于真实大小校验）
+	CreatedAt   time.Time
+	LastTouched time.Time
+	mu          sync.Mutex // 保护 Chunks / ChunksBytes / LastTouched
 }
 
 var (
 	chunkUploadsMu sync.Mutex
 	chunkUploads   = make(map[string]*chunkUploadMeta)
 )
+
+// chunkSessionTTL 分片会话最长存活时间：超过则视为废弃，由 GC 回收。
+const chunkSessionTTL = 24 * time.Hour
+
+// chunkGC 定期清理过期分片会话，回收临时分片文件。
+// 对应 CODE_REVIEW P1-6：原实现 chunkUploads 只增不减，废弃会话与磁盘分片永久泄漏。
+func chunkGC() {
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		now := time.Now()
+		var expired []*chunkUploadMeta
+		chunkUploadsMu.Lock()
+		for id, m := range chunkUploads {
+			m.mu.Lock()
+			stale := now.Sub(m.LastTouched) > chunkSessionTTL
+			if stale {
+				expired = append(expired, m)
+				delete(chunkUploads, id)
+			}
+			m.mu.Unlock()
+		}
+		chunkUploadsMu.Unlock()
+		for _, m := range expired {
+			m.mu.Lock()
+			for _, cp := range m.Chunks {
+				os.Remove(cp)
+			}
+			m.Chunks = map[int]string{}
+			m.mu.Unlock()
+		}
+	}
+}
 
 func chunksDir() string {
 	return "uploads/chunks"
@@ -680,8 +780,16 @@ func ChunkInit(c *gin.Context) {
 			Size: exist.Size, PolicyID: exist.PolicyID, SourceName: exist.SourceName,
 			Extension: exist.Extension, MimeType: exist.MimeType, Hash: req.Hash,
 		}
-		db.Get().Create(&f)
-		addStorage(u.ID, f.Size)
+		// 文件记录 + 配额占用同事务（对应 CODE_REVIEW P1-4）
+		if err := db.Get().Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&f).Error; err != nil {
+				return err
+			}
+			return service.AddStorageTx(tx, u.ID, f.Size)
+		}); err != nil {
+			writeQuotaOrServerError(c, err)
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
 			"uploadId":  "",
 			"chunkSize": chunkSize,
@@ -696,15 +804,16 @@ func ChunkInit(c *gin.Context) {
 		chunkCount = 1
 	}
 	meta := &chunkUploadMeta{
-		UploadID:   uploadID,
-		Hash:       req.Hash,
-		Name:       req.Name,
-		Size:       req.Size,
-		ParentID:   req.ParentID,
-		OwnerID:    u.ID,
-		ChunkCount: chunkCount,
-		Chunks:     make(map[int]string),
-		CreatedAt:  time.Now(),
+		UploadID:    uploadID,
+		Hash:        req.Hash,
+		Name:        req.Name,
+		Size:        req.Size,
+		ParentID:    req.ParentID,
+		OwnerID:     u.ID,
+		ChunkCount:  chunkCount,
+		Chunks:      make(map[int]string),
+		CreatedAt:   time.Now(),
+		LastTouched: time.Now(),
 	}
 	chunkUploadsMu.Lock()
 	chunkUploads[uploadID] = meta
@@ -742,9 +851,20 @@ func ChunkUpload(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"code": 1, "message": "forbidden"})
 		return
 	}
+	// 分片序号必须在 [0, ChunkCount) 内，否则会绕过合并完整性校验
+	if idx < 0 || idx >= meta.ChunkCount {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "chunk index out of range"})
+		return
+	}
 	file, err := c.FormFile("chunk")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "chunk file required"})
+		return
+	}
+	// 单分片体积上限：chunkSize + 允许一定冗余，防止用超大分片绕过配额
+	const maxChunkBytes = chunkSize + 1*1024*1024
+	if file.Size > maxChunkBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": 413, "message": "chunk too large"})
 		return
 	}
 	src, err := file.Open()
@@ -760,14 +880,37 @@ func ChunkUpload(c *gin.Context) {
 		return
 	}
 	defer dst.Close()
-	if _, err := io.Copy(dst, src); err != nil {
+	written, err := io.Copy(dst, src)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": err.Error()})
 		return
 	}
-	chunkUploadsMu.Lock()
+	// meta 内部字段用 meta.mu 保护，避免并发分片上传时 map 竞争（原实现在锁外写 meta.Chunks）
+	meta.mu.Lock()
+	prev, existed := meta.Chunks[idx]
+	if existed {
+		meta.ChunksBytes -= chunkFileSize(prev)
+	}
 	meta.Chunks[idx] = chunkPath
-	chunkUploadsMu.Unlock()
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"received": len(meta.Chunks), "total": meta.ChunkCount}})
+	meta.ChunksBytes += written
+	meta.LastTouched = time.Now()
+	received := len(meta.Chunks)
+	totalBytes := meta.ChunksBytes
+	meta.mu.Unlock()
+	_ = prev
+	_ = existed
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
+		"received": received, "total": meta.ChunkCount, "bytes": totalBytes,
+	}})
+}
+
+// chunkFileSize 返回分片临时文件大小，文件不存在返回 0
+func chunkFileSize(path string) int64 {
+	st, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return st.Size()
 }
 
 type chunkMergeReq struct {
@@ -793,13 +936,29 @@ func ChunkMerge(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"code": 1, "message": "forbidden"})
 		return
 	}
-	if len(meta.Chunks) != meta.ChunkCount {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": fmt.Sprintf("chunk incomplete: %d/%d", len(meta.Chunks), meta.ChunkCount)})
+	// 快照分片表（持锁），避免与并发 ChunkUpload 竞争
+	meta.mu.Lock()
+	chunksCopy := make(map[int]string, len(meta.Chunks))
+	for k, v := range meta.Chunks {
+		chunksCopy[k] = v
+	}
+	actualBytes := meta.ChunksBytes
+	meta.mu.Unlock()
+
+	if len(chunksCopy) != meta.ChunkCount {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": fmt.Sprintf("chunk incomplete: %d/%d", len(chunksCopy), meta.ChunkCount)})
 		return
 	}
-	// 配额预检（用 meta.Size）
-	if meta.Size > 0 {
-		if err := ensureQuota(u.ID, meta.Size); err != nil {
+	// 真实大小校验（对应 CODE_REVIEW P1-6）：
+	//   原实现直接采信前端声明的 meta.Size —— 攻击者可声明 1KB 上传 10GB，绕过配额。
+	//   这里以落盘分片实际字节数为准；与声明值不符时拒绝合并。
+	if meta.Size > 0 && actualBytes != meta.Size {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": fmt.Sprintf("size mismatch: declared %d, actual %d", meta.Size, actualBytes)})
+		return
+	}
+	// 配额预检改用真实大小
+	if actualBytes > 0 {
+		if err := ensureQuota(u.ID, actualBytes); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
 			return
 		}
@@ -816,7 +975,7 @@ func ChunkMerge(c *gin.Context) {
 	go func() {
 		defer pw.Close()
 		for i := 0; i < meta.ChunkCount; i++ {
-			cp, ok := meta.Chunks[i]
+			cp, ok := chunksCopy[i]
 			if !ok {
 				continue
 			}
@@ -838,7 +997,7 @@ func ChunkMerge(c *gin.Context) {
 		}
 	}()
 	tee := io.TeeReader(pr, hw)
-	if err := h.Put(tee, sourceName, meta.Size); err != nil {
+	if err := h.Put(tee, sourceName, actualBytes); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": err.Error()})
 		return
 	}
@@ -847,7 +1006,7 @@ func ChunkMerge(c *gin.Context) {
 	if finalHash == "" {
 		finalHash = realHash
 	}
-	mergedSize = meta.Size
+	mergedSize = actualBytes
 	ext := strings.TrimPrefix(filepath.Ext(meta.Name), ".")
 	mimeType := mime.TypeByExtension(filepath.Ext(meta.Name))
 	f := models.File{
@@ -855,11 +1014,22 @@ func ChunkMerge(c *gin.Context) {
 		Size: mergedSize, PolicyID: p.ID, SourceName: sourceName,
 		Extension: ext, MimeType: mimeType, Hash: finalHash,
 	}
-	db.Get().Create(&f)
-	addStorage(u.ID, f.Size)
+	// 文件记录 + 原子配额占用放进同一事务（对应 CODE_REVIEW P1-4）。
+	// 配额用单条条件 UPDATE 实现（P1-5），杜绝读-判-写之间的 TOCTOU 竞态。
+	if err := db.Get().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&f).Error; err != nil {
+			return err
+		}
+		return service.AddStorageTx(tx, u.ID, f.Size)
+	}); err != nil {
+		// 物理对象已在事务外落盘，回滚后无人引用，手动清理
+		_ = h.Delete(sourceName)
+		writeQuotaOrServerError(c, err)
+		return
+	}
 	// 分片合并：新物理文件 refs=1
 	storage.Retain(p.ID, sourceName, mergedSize, finalHash, "chunk-merge")
-	for _, cp := range meta.Chunks {
+	for _, cp := range chunksCopy {
 		os.Remove(cp)
 	}
 	chunkUploadsMu.Lock()
@@ -1012,29 +1182,49 @@ func UploadVersion(c *gin.Context) {
 	src.Close()
 	realHash := hex.EncodeToString(hw.Sum(nil))
 
-	// 归档当前版本
-	var last models.FileVersion
-	db.Get().Where("file_id = ?", f.ID).Order("version desc").First(&last)
-	hv := models.FileVersion{
-		FileID: f.ID, Version: last.Version + 1,
-		Size: f.Size, Hash: f.Hash, SourceName: f.SourceName, PolicyID: f.PolicyID,
-	}
-	if err := db.Get().Create(&hv).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": err.Error()})
-		return
-	}
-
+	// 版本归档 + 文件主记录更新 + 配额调整，全部放进同一事务（对应 CODE_REVIEW P1-4）。
+	//
+	// 原实现是三步彼此独立：归档记录建好了、但主记录更新失败时，会留下一个指向旧内容的
+	//「悬空版本」（version 号被占用但内容对不上），而用户看到的是"上传失败"。
+	// 另外原实现用的是不带校验的 addStorage，这里一并改为 service.AddStorageTx。
 	oldSize := f.Size
-	oldPol := f.PolicyID
+	oldHash := f.Hash
 	oldSrc := f.SourceName
+	oldPol := f.PolicyID
+	// hv 需在事务外可见：下方审计日志要记录它的 version 号
+	var hv models.FileVersion
 	f.Size = file.Size
 	f.Hash = realHash
 	f.SourceName = sourceName
 	f.PolicyID = newPolicyID
-	db.Get().Model(&f).Updates(map[string]any{
-		"size": f.Size, "hash": realHash, "source_name": sourceName, "policy_id": newPolicyID,
-	})
-	addStorage(f.OwnerID, f.Size-oldSize)
+	// 复用开头已声明的 delta（预检时算过同一个值：此刻 f.Size 仍是旧值）
+	delta = f.Size - oldSize
+
+	if err := db.Get().Transaction(func(tx *gorm.DB) error {
+		var last models.FileVersion
+		if err := tx.Where("file_id = ?", f.ID).Order("version desc").First(&last).Error; err != nil &&
+			!errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		hv = models.FileVersion{
+			FileID: f.ID, Version: last.Version + 1,
+			Size: oldSize, Hash: oldHash, SourceName: oldSrc, PolicyID: oldPol,
+		}
+		if err := tx.Create(&hv).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.File{}).Where("id = ?", f.ID).Updates(map[string]any{
+			"size": f.Size, "hash": realHash, "source_name": sourceName, "policy_id": newPolicyID,
+		}).Error; err != nil {
+			return err
+		}
+		return service.AddStorageTx(tx, f.OwnerID, delta)
+	}); err != nil {
+		// 物理对象已在事务外落盘，事务回滚后无人引用，手动清理
+		_ = h.Delete(sourceName)
+		writeQuotaOrServerError(c, err)
+		return
+	}
 	// 新版本文件：refs=1
 	storage.Retain(newPolicyID, sourceName, file.Size, realHash, "upload-version")
 	// 原文件的 Source 交给版本归档（hv 持有），引用计数不变（File→FileVersion 等价交接），
@@ -1055,9 +1245,6 @@ func UploadVersion(c *gin.Context) {
 			}
 		}
 	}
-	// 占位用（避免 oldPol/oldSrc 不被用到告警，保留便于未来细粒度逻辑）
-	_ = oldPol
-	_ = oldSrc
 
 	db.Get().Create(&models.AuditLog{
 		UserID: u.ID, UserName: u.UserName,
@@ -1142,31 +1329,48 @@ func RestoreVersion(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": 1, "message": "version not found"})
 		return
 	}
-	// 归档当前版本为新的历史
-	var last models.FileVersion
-	db.Get().Where("file_id = ?", f.ID).Order("version desc").First(&last)
-	hv := models.FileVersion{
-		FileID: f.ID, Version: last.Version + 1,
-		Size: f.Size, Hash: f.Hash, SourceName: f.SourceName, PolicyID: f.PolicyID,
-	}
-	if err := db.Get().Create(&hv).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": err.Error()})
-		return
-	}
-	// 把指定版本设为当前
+	// 归档当前状态 + 切换到目标版本 + 配额调整 + 移除已恢复的版本记录，全部同事务
+	// （对应 CODE_REVIEW P1-4）。
+	//
+	// 原实现四步独立，中途失败会同时造成两类损坏：悬空的版本记录，
+	// 以及「已从历史移除但主记录没切过去」的版本凭空消失。
 	oldSize := f.Size
+	oldHash := f.Hash
+	oldSrc := f.SourceName
+	oldPol := f.PolicyID
 	f.Size = v.Size
 	f.Hash = v.Hash
 	f.SourceName = v.SourceName
 	f.PolicyID = v.PolicyID
-	db.Get().Model(&f).Updates(map[string]any{
-		"size": v.Size, "hash": v.Hash, "source_name": v.SourceName, "policy_id": v.PolicyID,
-	})
-	addStorage(f.OwnerID, f.Size-oldSize)
+	if err := db.Get().Transaction(func(tx *gorm.DB) error {
+		var last models.FileVersion
+		if err := tx.Where("file_id = ?", f.ID).Order("version desc").First(&last).Error; err != nil &&
+			!errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		hv := models.FileVersion{
+			FileID: f.ID, Version: last.Version + 1,
+			Size: oldSize, Hash: oldHash, SourceName: oldSrc, PolicyID: oldPol,
+		}
+		if err := tx.Create(&hv).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.File{}).Where("id = ?", f.ID).Updates(map[string]any{
+			"size": v.Size, "hash": v.Hash, "source_name": v.SourceName, "policy_id": v.PolicyID,
+		}).Error; err != nil {
+			return err
+		}
+		if err := service.AddStorageTx(tx, f.OwnerID, f.Size-oldSize); err != nil {
+			return err
+		}
+		// 从历史中移除已恢复的版本（其存储现由当前文件引用，不可删）
+		return tx.Delete(&models.FileVersion{}, v.ID).Error
+	}); err != nil {
+		writeQuotaOrServerError(c, err)
+		return
+	}
 	// v.SourceName 之前仅被版本持有；现在 File 也持有它，引用计数 +1
 	storage.Retain(v.PolicyID, v.SourceName, v.Size, v.Hash, "rollback-version")
-	// 从历史中移除已恢复的版本（其存储现由当前文件引用，不可删）
-	db.Get().Delete(&v)
 
 	db.Get().Create(&models.AuditLog{
 		UserID: f.OwnerID, Action: "restore_version", Target: f.Name,
@@ -1356,11 +1560,19 @@ func BatchCopy(c *gin.Context) {
 		nf.ID = 0
 		nf.SourceName = newSource
 		nf.ParentID = pid
-		if err := db.Get().Create(&nf).Error; err == nil {
-			addStorage(u.ID, nf.Size)
-			// 复制产生的新物理文件：refs=1
-			storage.Retain(nf.PolicyID, newSource, nf.Size, nf.Hash, "batch-copy")
+		// 文件记录 + 配额占用同事务（对应 CODE_REVIEW P1-4）；
+		// 物理副本已在事务外落盘，失败时清理它并跳过这一条
+		if err := db.Get().Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&nf).Error; err != nil {
+				return err
+			}
+			return service.AddStorageTx(tx, u.ID, nf.Size)
+		}); err != nil {
+			_ = h.Delete(newSource)
+			continue
 		}
+		// 复制产生的新物理文件：refs=1
+		storage.Retain(nf.PolicyID, newSource, nf.Size, nf.Hash, "batch-copy")
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0})
 }
@@ -1484,6 +1696,11 @@ func StartTrashCleanup() {
 }
 
 // cleanupTrash 扫描软删除超过 retention_days 的文件，永久删除存储层 + DB 记录
+//
+// 幂等性（对应 CODE_REVIEW P2-2）：旧实现无条件 addStorage(-Size)。
+// 若同一条记录先被 Purge 处理（或并发两个 cleanupTrash 实例同时运行），
+// 就会对同一份文件重复扣减配额，导致用户已用容量被扣成负数。
+// 这里改为「先原子摘除 DB 行，只有真正删除成功的那一方才记账」。
 func cleanupTrash() {
 	if db.Get() == nil {
 		return
@@ -1496,12 +1713,19 @@ func cleanupTrash() {
 	var files []models.File
 	db.Get().Unscoped().Where("deleted_at IS NOT NULL AND deleted_at < ?", cutoff).Find(&files)
 	for _, f := range files {
+		// 条件删除：只有把 deleted_at 行真正删掉的那次调用才返回 RowsAffected=1。
+		// 并发/重复执行时另一次拿不到行，直接跳过，避免二次扣减。
+		res := db.Get().Unscoped().
+			Where("id = ? AND deleted_at IS NOT NULL", f.ID).
+			Delete(&models.File{})
+		if res.Error != nil || res.RowsAffected == 0 {
+			continue
+		}
 		if !f.IsDir {
 			if h, err := handlerForFile(&f); err == nil {
 				_, _ = storage.ReleaseObject(f.PolicyID, f.SourceName, h)
 			}
 		}
 		addStorage(f.OwnerID, -f.Size)
-		db.Get().Unscoped().Delete(&f)
 	}
 }

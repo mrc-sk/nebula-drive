@@ -62,9 +62,34 @@ func Init(c *conf.DBConfig) error {
 		sqlDB.SetMaxIdleConns(10)
 		sqlDB.SetConnMaxLifetime(30 * time.Minute)
 	}
+	// 覆盖全局实例前先关闭旧的连接池。
+	// 安装向导的「测试连接」会反复调用 Init（每次换一个 DSN 试），
+	// 旧实现直接赋值 DB = g，旧连接池既不关闭也不释放 → 每次点击泄漏一个池。
+	if DB != nil {
+		if old, oErr := DB.DB(); oErr == nil && old != nil {
+			_ = old.Close()
+		}
+	}
 	DB = g
 	return nil
 }
 
 // Get 返回 DB
 func Get() *gorm.DB { return DB }
+
+// Close 关闭当前数据库连接池。
+// 用途：测试清理（Windows 上句柄不释放会导致 t.TempDir() 删除失败，
+// 使断言全过的测试被判 FAIL），以及进程优雅退出。
+func Close() error {
+	if DB == nil {
+		return nil
+	}
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return err
+	}
+	if sqlDB == nil {
+		return nil
+	}
+	return sqlDB.Close()
+}

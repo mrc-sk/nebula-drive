@@ -3,9 +3,11 @@ package filesystem
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -19,12 +21,69 @@ type Handler interface {
 	Copy(src, dst string) error
 }
 
+// ErrPathTraversal 对象名试图逃逸存储根目录
+var ErrPathTraversal = errors.New("path traversal detected")
+
+// ErrInvalidObjectName 对象名非法（空、含控制字符等）
+var ErrInvalidObjectName = errors.New("invalid object name")
+
+// SafeLocalPath 把对象名安全地解析为 root 下的绝对路径。
+//
+// 这是所有本地存储操作的唯一入口，用于杜绝路径穿越：
+//   - 反斜杠统一归一化为正斜杠（否则 Windows 下 "..\\" 可绕过 filepath.Join 的语义）
+//   - 拒绝空名、绝对路径名、以及任何 ".." 段
+//   - 用 filepath.Abs 后做前缀校验，防止 symbolic link / 大小写 / 盘符等边界情况漏网
+//
+// 返回的路径保证严格位于 root 之内（root 自身允许，表示根目录）。
+func SafeLocalPath(root, name string) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		return "", ErrInvalidObjectName
+	}
+	// 1) 归一化分隔符：Windows 的 \ 与 URL 编码还原出的 \ 都必须处理
+	clean := strings.ReplaceAll(name, "\\", "/")
+	// 2) 去掉前导斜杠，避免被当作绝对路径丢弃 root
+	clean = strings.TrimLeft(clean, "/")
+	if clean == "" {
+		return "", ErrInvalidObjectName
+	}
+	// 3) 逐段检查：拒绝 "." / ".."（Clean 之后仍要检查，因为我们要主动报错而非静默纠正）
+	for _, seg := range strings.Split(clean, "/") {
+		if seg == "" {
+			continue
+		}
+		if seg == "." || seg == ".." {
+			return "", ErrPathTraversal
+		}
+		// 拒绝 Windows 保留字符造成的歧义（如 "C:" 盘符段）
+		if strings.ContainsAny(seg, "\x00") || strings.HasSuffix(seg, ":") {
+			return "", ErrInvalidObjectName
+		}
+	}
+	// 4) 归一化 + 绝对路径前缀校验（最终防线）
+	joined := filepath.Join(root, filepath.FromSlash(clean))
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	absPath, err := filepath.Abs(joined)
+	if err != nil {
+		return "", err
+	}
+	if absPath != absRoot && !strings.HasPrefix(absPath, absRoot+string(filepath.Separator)) {
+		return "", ErrPathTraversal
+	}
+	return absPath, nil
+}
+
 type Local struct {
 	Root string
 }
 
 func (l *Local) Put(src io.Reader, name string, size int64) error {
-	path := filepath.Join(l.Root, name)
+	path, err := SafeLocalPath(l.Root, name)
+	if err != nil {
+		return fmt.Errorf("local put %q: %w", name, err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -38,11 +97,19 @@ func (l *Local) Put(src io.Reader, name string, size int64) error {
 }
 
 func (l *Local) Get(name string) (io.ReadCloser, error) {
-	return os.Open(filepath.Join(l.Root, name))
+	path, err := SafeLocalPath(l.Root, name)
+	if err != nil {
+		return nil, fmt.Errorf("local get %q: %w", name, err)
+	}
+	return os.Open(path)
 }
 
 func (l *Local) GetRange(name string, offset, length int64) (io.ReadCloser, error) {
-	f, err := os.Open(filepath.Join(l.Root, name))
+	path, err := SafeLocalPath(l.Root, name)
+	if err != nil {
+		return nil, fmt.Errorf("local getrange %q: %w", name, err)
+	}
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -74,14 +141,22 @@ type sectionReadCloser struct {
 }
 
 func (l *Local) Delete(name string) error {
-	if err := os.Remove(filepath.Join(l.Root, name)); err != nil && !os.IsNotExist(err) {
+	path, err := SafeLocalPath(l.Root, name)
+	if err != nil {
+		return fmt.Errorf("local delete %q: %w", name, err)
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
 }
 
 func (l *Local) Size(name string) (int64, error) {
-	st, err := os.Stat(filepath.Join(l.Root, name))
+	path, err := SafeLocalPath(l.Root, name)
+	if err != nil {
+		return 0, fmt.Errorf("local size %q: %w", name, err)
+	}
+	st, err := os.Stat(path)
 	if err != nil {
 		return 0, err
 	}
@@ -94,8 +169,14 @@ func (l *Local) PresignGet(name string, expires time.Duration) (string, error) {
 
 // Copy 用 io.Copy 复制本地文件
 func (l *Local) Copy(src, dst string) error {
-	srcPath := filepath.Join(l.Root, src)
-	dstPath := filepath.Join(l.Root, dst)
+	srcPath, err := SafeLocalPath(l.Root, src)
+	if err != nil {
+		return fmt.Errorf("local copy src %q: %w", src, err)
+	}
+	dstPath, err := SafeLocalPath(l.Root, dst)
+	if err != nil {
+		return fmt.Errorf("local copy dst %q: %w", dst, err)
+	}
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 		return err
 	}

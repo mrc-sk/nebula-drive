@@ -3,7 +3,6 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,10 +12,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nebula-drive/nebula/internal/service"
 	"github.com/nebula-drive/nebula/middleware"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/aria2"
 	"github.com/nebula-drive/nebula/pkg/db"
+	"gorm.io/gorm"
 )
 
 var (
@@ -121,17 +122,18 @@ func aria2TaskDir(_ int) string {
 	return filepath.Join(os.TempDir(), "nebula-aria2")
 }
 
-// downloadBytes 用 net/http 下载 URL 内容到内存
-func downloadBytes(url string) ([]byte, error) {
-	resp, err := http.Get(url)
+// downloadBytes 用受控的出站客户端下载 URL 内容到内存。
+//
+// 安全约束（对应 CODE_REVIEW P0-6）：
+//   - 请求前做 SSRF 校验（scheme 白名单 + DNS 解析后禁止内网/回环/链路本地/CGNAT）
+//   - 拨号时再次校验，抵御 DNS Rebinding
+//   - 单次响应体上限 MaxOutboundResponseBytes，避免内存打爆
+func downloadBytes(rawURL string) ([]byte, error) {
+	body, err := service.FetchBytes(rawURL, service.MaxOutboundResponseBytes)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
-	}
-	return io.ReadAll(resp.Body)
+	return body, nil
 }
 
 // runAria2Task 轮询 aria2 tellStatus(gid)，每 2 秒更新 Task.Progress 和 Status，完成时创建 File 记录
@@ -290,11 +292,16 @@ func aria2CreateFile(id uint, ownerID uint, parentID *uint, status map[string]an
 		Size: st.Size(), PolicyID: p.ID, SourceName: sourceName,
 		Extension: trimDot(ext), MimeType: mimeTypeByExt(ext),
 	}
-	if err := db.Get().Create(&f2).Error; err != nil {
+	if err := db.Get().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&f2).Error; err != nil {
+			return err
+		}
+		return service.AddStorageTx(tx, ownerID, f2.Size)
+	}); err != nil {
 		db.Get().Model(&models.Task{}).Where("id = ?", id).Updates(map[string]any{"status": 3, "error": err.Error()})
+		os.Remove(srcPath)
 		return
 	}
-	addStorage(ownerID, f2.Size)
 	// 下载完成通知
 	CreateNotification(ownerID, "下载完成", "下载完成："+filename, "success", "task")
 	// 清理 aria2 临时文件
@@ -316,12 +323,17 @@ func runHTTPTask(id uint, url string) {
 
 	db.Get().Model(&models.Task{}).Where("id = ?", id).Updates(map[string]any{"status": 1, "progress": 0})
 
-	resp, err := http.DefaultClient.Get(url)
+	client := service.OutboundClient()
+	resp, err := client.Get(url)
 	if err != nil {
 		db.Get().Model(&models.Task{}).Where("id = ?", id).Updates(map[string]any{"status": 3, "error": err.Error()})
 		return
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		db.Get().Model(&models.Task{}).Where("id = ?", id).Updates(map[string]any{"status": 3, "error": fmt.Sprintf("status %d", resp.StatusCode)})
+		return
+	}
 
 	var t models.Task
 	if err := db.Get().First(&t, id).Error; err != nil {
@@ -390,27 +402,56 @@ func runHTTPTask(id uint, url string) {
 		Size: st.Size(), PolicyID: p.ID, SourceName: sourceName,
 		Extension: trimDot(ext), MimeType: mimeTypeByExt(ext),
 	}
-	db.Get().Create(&f2)
-	addStorage(t.OwnerID, f2.Size)
+	if err := db.Get().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&f2).Error; err != nil {
+			return err
+		}
+		return service.AddStorageTx(tx, t.OwnerID, f2.Size)
+	}); err != nil {
+		db.Get().Model(&models.Task{}).Where("id = ?", id).Updates(map[string]any{"status": 3, "error": err.Error()})
+		return
+	}
 	db.Get().Model(&models.Task{}).Where("id = ?", id).Updates(map[string]any{"status": 2, "progress": 100})
 	CreateNotification(t.OwnerID, "下载完成", "下载完成："+filename, "success", "task")
 }
 
 // CancelTask 取消任务
+//
+// 幂等性（对应 CODE_REVIEW P1-7）：cancel channel 只会被关闭一次。
+// 旧实现在任务已结束但仍在 dlJobs 中时二次调用会 close 已关闭的 channel → panic。
+// 这里先用 LoadAndDelete 原子摘除，保证同一任务只有一个调用方能拿到 channel 并关闭。
 func CancelTask(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
+	u := middleware.CurrentUser(c)
+
+	var t models.Task
+	if err := db.Get().First(&t, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "任务不存在"})
+		return
+	}
+	if !u.IsAdmin && t.OwnerID != u.ID {
+		c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": "无权操作该任务"})
+		return
+	}
+
+	// 原子摘除：只有成功摘除的调用方负责关闭 channel，避免重复 close panic
 	dlMutex.Lock()
 	j, ok := dlJobs[uint(id)]
+	if ok {
+		delete(dlJobs, uint(id))
+	}
 	dlMutex.Unlock()
+
 	if ok {
 		if j.gid != "" {
 			_ = aria2.GetManager().Remove(j.gid)
 		}
-		close(j.cancel)
-	} else {
-		// 任务可能已不在 dlJobs（完成/失败），仍标记取消
+		if j.cancel != nil {
+			close(j.cancel)
+		}
 	}
-	db.Get().Model(&models.Task{}).Where("id = ?", id).Updates(map[string]any{"status": 3, "error": "cancelled"})
+	db.Get().Model(&models.Task{}).Where("id = ? AND status = ?", id, 1).
+		Updates(map[string]any{"status": 3, "error": "cancelled"})
 	c.JSON(http.StatusOK, gin.H{"code": 0})
 }
 
