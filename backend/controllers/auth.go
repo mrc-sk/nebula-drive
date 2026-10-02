@@ -65,7 +65,7 @@ func Login(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"code": 2, "message": "需要两步验证", "require2FA": true})
 			return
 		}
-		if !service.ValidateTOTP(u.TwoFactor, req.Code) {
+		if !service.ValidateTOTP(u.TwoFactor.String(), req.Code) {
 			c.JSON(http.StatusUnauthorized, gin.H{"code": 1, "message": "两步验证码错误"})
 			return
 		}
@@ -205,11 +205,13 @@ func Setup2FA(c *gin.Context) {
 		return
 	}
 	// 关闭需验证码
-	if !service.ValidateTOTP(u.TwoFactor, req.Code) {
+	if !service.ValidateTOTP(u.TwoFactor.String(), req.Code) {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": 1, "message": "两步验证码错误"})
 		return
 	}
-	db.Get().Model(u).Update("two_factor", "")
+	// 注意：值必须包成 models.From(...) 才能走 Encrypted 的 driver.Valuer 完成加密。
+	// 直接传 string 会让 GORM 生成 `SET two_factor = <明文>`，hook 也拦不住（值来自 map 而非 struct）。
+	db.Get().Model(u).Update("two_factor", models.From(""))
 	c.JSON(http.StatusOK, gin.H{"code": 0})
 }
 
@@ -225,7 +227,8 @@ func Confirm2FA(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": 1, "message": "验证码错误"})
 		return
 	}
-	db.Get().Model(u).Update("two_factor", req.Secret)
+	// 同上：必须包成 models.From 才会加密落库
+	db.Get().Model(u).Update("two_factor", models.From(req.Secret))
 	c.JSON(http.StatusOK, gin.H{"code": 0})
 }
 

@@ -785,7 +785,7 @@ func put(c *gin.Context, u *models.User, p string) {
 		c.String(500, "no storage policy configured")
 		return
 	}
-	h, err := filesystem.New(pol.Type, pol.Config)
+	h, err := filesystem.New(pol.Type, pol.Config.String())
 	if err != nil {
 		c.String(500, err.Error())
 		return
@@ -823,7 +823,12 @@ func put(c *gin.Context, u *models.User, p string) {
 // 扩展名白名单 + 可选图片魔术字节校验 + 体积上限。
 func readDAVUpload(c *gin.Context, name string) ([]byte, string, string, error) {
 	ext := strings.ToLower(path.Ext(name))
-	if !service.IsAllowedExtension(ext) {
+	// path.Ext 返回的是带点的形式（".txt"），而 service.IsAllowedExtension 是
+	// 对白名单做精确比对，白名单里的条目不带点（"txt,md,png,..."）。
+	// 这里少剥一个点，会让所有 WebDAV PUT 都命中 "file type not allowed" ——
+	// 表现是：网盘能挂载、能浏览，但一个文件都传不上去。
+	// 对齐 controllers/file.go 的做法（那里传的是 trimDot 之后的值）。
+	if !service.IsAllowedExtension(strings.TrimPrefix(ext, ".")) {
 		return nil, "", "", fmt.Errorf("file type not allowed: %s", ext)
 	}
 	maxBytes := int64(service.MaxUploadBytes())
@@ -965,7 +970,7 @@ func handlerForFile(f *models.File) (filesystem.Handler, error) {
 	if err := db.Get().First(&p, f.PolicyID).Error; err != nil {
 		return nil, err
 	}
-	return filesystem.New(p.Type, p.Config)
+	return filesystem.New(p.Type, p.Config.String())
 }
 
 // handlerForFilePolicy 按 policy id 取 handler（用于释放旧物理对象）
@@ -974,7 +979,7 @@ func handlerForFilePolicy(policyID uint) (filesystem.Handler, error) {
 	if err := db.Get().First(&p, policyID).Error; err != nil {
 		return nil, err
 	}
-	return filesystem.New(p.Type, p.Config)
+	return filesystem.New(p.Type, p.Config.String())
 }
 
 func mimeTypeFromExt(ext string) string {

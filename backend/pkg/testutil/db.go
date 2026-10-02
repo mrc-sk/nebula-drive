@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"github.com/nebula-drive/nebula/conf"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
 	"gorm.io/gorm"
@@ -25,6 +26,20 @@ import (
 //     精简 CI 容器里整个测试套件都跑不起来。
 func SetupDB(t *testing.T) *gorm.DB {
 	t.Helper()
+
+	// 加载 conf 以启用敏感字段加密。
+	//
+	// 必要性：models.Encrypted 走 driver.Valuer 加密，而密钥来自 conf 的
+	// data/secret.key。未加载 conf 时 EncryptString 会返回 "secret key not loaded"，
+	// Valuer 于是把**整个写操作置为失败**（这是有意的 fail closed 设计），
+	// 结果是所有创建 User / Policy 的测试全部报错。
+	//
+	// 每个测试用独立的 t.TempDir()，因此各自持有独立密钥，互不干扰。
+	conf.SetDataDir(t.TempDir())
+	if err := conf.Load(); err != nil {
+		t.Fatalf("conf.Load: %v", err)
+	}
+
 	g, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "test.db")), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)

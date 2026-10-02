@@ -657,7 +657,7 @@ frontend/dist/   # 第 13 行附近（重复）
 | 4 | **Breadcrumb 鉴权**（加 owner 检查） | P1 | 15min | ✅ 已修 `P1-1` |
 | 5 | **WebDAV PUT 覆盖真实现** | P0 | 3h | ✅ 已修 `P0-2` |
 | 6 | **WebDAV PUT 接入白名单+统一配额** | P0 | 2h | ✅ 已修 `P0-3` |
-| 7 | **敏感字段加密**（TOTP/token/ClientSecret/Policy.Config） | P1 | 4h | ⬜ **剩余唯一待办** `P2-7` |
+| 7 | **敏感字段加密**（TOTP/token/ClientSecret/Policy.Config） | P1 | 4h | ✅ 已修 `P2-7` |
 | 8 | **配额原子化**（条件 UPDATE） | P1 | 3h | ✅ 已修 `P1-5` |
 | 9 | **关键路径加事务**（Rapid/Upload/UploadVersion/Install 等 13 处） | P1 | 6h | ✅ 已修 `P1-4` |
 | 10 | **Search 的 tag JOIN 语法修复** + 分页 SQL 跨库 | P2 | 1h | ✅ JOIN `P1-2` + 跨库清理 `P1-3` |
@@ -719,9 +719,11 @@ go test ./...    EXIT=0   （12 个包全部通过）
 
 ### 剩下的
 
-1. **P2-7 敏感字段加密** —— 唯一剩余项。难点不是加密本身，而是**兼容存量明文**：
-   直接上线加密会让老用户的 2FA 密钥和已签发 PAT 全部失效，必须做"能解密则解密、
-   否则按明文读并在下次写入时加密"的过渡。
+1. ~~**P2-7 敏感字段加密**~~ ✅ 已修。两类字段用了不同方案：需要读回原值的
+   （TOTP secret / ClientSecret / 存储配置）用 AES-256-GCM 可逆加密；
+   只需要比对的（OAuth/PAT 令牌）用 SHA-256 单向哈希 —— 后者同时解决了
+   "可逆加密破坏唯一索引和 WHERE 查询"的问题，且泄露后无法直接冒用。
+   密文带 `enc:v1:` 前缀，因此存量明文可平滑升级，老用户的 2FA 不会失效。
 2. **CI** —— 目前验证靠本地 `go test ./...`。建议加 GitHub Actions 跑 `go vet` + `go test -race ./...`。
    `-race` 尤其值得：分片上传的 map 竞争（P1-6）这类问题，靠竞态检测才能稳定复现。
 3. **README 的 WebDAV 措辞** —— 原文写"RFC 4918 全方法实现"。现在 LOCK/UNLOCK/COPY 已真实现，

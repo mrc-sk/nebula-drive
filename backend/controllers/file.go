@@ -34,7 +34,7 @@ func handlerForFile(f *models.File) (filesystem.Handler, error) {
 	if err := db.Get().First(&p, f.PolicyID).Error; err != nil {
 		return nil, err
 	}
-	return filesystem.New(p.Type, p.Config)
+	return filesystem.New(p.Type, p.Config.String())
 }
 
 // handlerForPolicyID 按 policy id 取 handler
@@ -43,7 +43,7 @@ func handlerForPolicyID(pid uint) (filesystem.Handler, *models.Policy, error) {
 	if err := db.Get().First(&p, pid).Error; err != nil {
 		return nil, nil, err
 	}
-	h, err := filesystem.New(p.Type, p.Config)
+	h, err := filesystem.New(p.Type, p.Config.String())
 	return h, &p, err
 }
 
@@ -1114,7 +1114,7 @@ func handlerForVersion(v *models.FileVersion) (filesystem.Handler, error) {
 	if err := db.Get().First(&p, v.PolicyID).Error; err != nil {
 		return nil, err
 	}
-	return filesystem.New(p.Type, p.Config)
+	return filesystem.New(p.Type, p.Config.String())
 }
 
 // ---- 文件版本控制 ----

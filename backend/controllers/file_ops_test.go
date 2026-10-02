@@ -21,7 +21,7 @@ func setupFileTest(t *testing.T) *models.User {
 	t.Helper()
 	testutil.SetupDB(t)
 	upDir := t.TempDir()
-	db.Get().Create(&models.Policy{ID: 1, Name: "local", Type: "local", Config: `{"path":"` + upDir + `"}`, IsDefault: true})
+	db.Get().Create(&models.Policy{ID: 1, Name: "local", Type: "local", Config: models.From(`{"path":"` + upDir + `"}`), IsDefault: true})
 	u := &models.User{UserName: "fuser", GroupID: 1}
 	db.Get().Create(u)
 	return u

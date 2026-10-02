@@ -143,6 +143,9 @@ func bootstrap() {
 	}
 	// 回填遗留 FileObject 引用计数（V1-0.0.1 升级用户秒传/复制共享物理文件，没有 FileObject）
 	storage.BackfillFileObjects()
+	// 存量敏感字段（2FA secret / OAuth ClientSecret / 存储配置 / 访问令牌）明文 → 加密或哈希。
+	// 幂等；失败不阻塞启动（认证路径另有明文兜底）。
+	models.MigrateSensitiveFields()
 	// 注入 internal/service 的实现：
 	//   - 设置读取：让 SSRF/白名单/上传上限等配置能读到 DB 里的 settings
 	//   - 配额解析：让 service 层的原子配额占用（AddStorageTx）能算出套餐/用户组额度
@@ -212,7 +215,7 @@ func ensureDefaults(uploadPath string) {
 	}
 	var p models.Policy
 	if err := db.Get().First(&p, 1).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-		db.Get().Create(&models.Policy{ID: 1, Name: "本地存储", Type: "local", Config: `{"path":"` + uploadPath + `"}`, IsDefault: true})
+		db.Get().Create(&models.Policy{ID: 1, Name: "本地存储", Type: "local", Config: models.From(`{"path":"` + uploadPath + `"}`), IsDefault: true})
 	}
 	ensureBrandSettings()
 }

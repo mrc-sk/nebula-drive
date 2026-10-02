@@ -23,15 +23,14 @@
 | P1-6 | 分片上传：map 竞争 / 会话泄漏 / 采信前端声明大小 | P1 | ✅ 已修 | `controllers/file.go` |
 | P1-7 | `CancelTask` 重复 close channel panic | P1 | ✅ 已修 | `controllers/task.go` |
 | P2-2 | `Purge` / `cleanupTrash` 重复扣减配额 | P2 | ✅ 已修 | `controllers/file.go` |
+| P2-7 | 敏感字段明文入库 | P1 | ✅ 已修 | `internal/cryptox`、`models/encrypted.go`、`models/migrate_sensitive.go` |
 | — | 测试驱动与生产不一致（且需 CGO，测试跑不起来） | 严重 | ✅ 已修 | `pkg/testutil/db.go` |
 | — | 测试连接不关闭，Windows 上清理失败致误判 FAIL | 中 | ✅ 已修 | `pkg/testutil/db.go`、`pkg/db/db_test.go`、`controllers/install_test.go` |
 | — | `db.Init` 覆盖全局实例时泄漏旧连接池 | 中 | ✅ 已修 | `pkg/db/db.go` |
 
-> 验证状态：`go build ./...` ✅ ｜ `go vet ./...` ✅ ｜ `go test ./...` ✅ 全部通过
-
-**待办（下一批）**：P2-7（`TwoFactor` / `Token` / `ClientSecret` / `Policy.Config` 敏感字段加密，需兼容旧明文迁移的 GORM hook）。
-
-> P1-3、P1-4 均已在本轮修完（见下方说明）。
+> 验证状态：`go build ./...` ✅ ｜ `go vet ./...` ✅ ｜ `go test ./...` ✅ 全部通过（12 个包）
+>
+> **审查清单 15 项已全部完成。** 剩余的可选改进见文末「后续建议」。
 
 ---
 
@@ -378,6 +377,104 @@ if res.RowsAffected == 0 {
 
 ---
 
+### P2-7 敏感字段明文入库
+
+**根因**：五处敏感字段全部明文存库，其中两处的代码注释还写着"加密"：
+
+| 字段 | 内容 | 原注释 |
+|---|---|---|
+| `User.TwoFactor` | TOTP 密钥 | `// TOTP secret，加密` ❌ |
+| `Policy.Config` | 存储配置 JSON（含 SFTP 密码 / OSS / COS 密钥） | `// JSON 加密` ❌ |
+| `OAuthApp.ClientSecret` | OAuth 客户端密钥 | 无 |
+| `AccessToken.Token` | OAuth 访问令牌 | 无 |
+| `PersonalAccessToken.Token` | 个人访问令牌 | 无 |
+
+DB 一旦泄露（备份被拖、SQL 注入、管理员账号失守），攻击者可直接：
+接管任何已开启 2FA 的账号、以明文密码连接用户的 SFTP 存储、冒用 OAuth/PAT 令牌。
+
+#### 关键判断：两类字段必须用不同方案
+
+这是本次改造最需要想清楚的一点 —— 把所有字段一律加密会引入两个真实故障：
+
+| 类别 | 字段 | 方案 | 依据 |
+|---|---|---|---|
+| **需读回原值** | TwoFactor / ClientSecret / Policy.Config | AES-256-GCM **可逆加密** | TOTP 验证需要 secret；Config 要解析出密码去连接存储 |
+| **只需比对** | AccessToken.Token / PAT.Token | SHA-256 **单向哈希** | 令牌创建时展示一次，之后所有场景都只是比对 |
+
+**为什么令牌不能用可逆加密**：
+
+1. AES-GCM 带随机 nonce，每次加密结果都不同 → `WHERE token = ?` 永远查不到
+2. 相同明文得到不同密文 → `uniqueIndex` 失效
+
+单向哈希同时解决了这两点，而且**安全性更高**：哈希是确定性的所以索引和查询照常工作，
+而数据库泄露也无法直接冒用令牌（明文和可逆加密都做不到这一点）。
+
+#### 为什么不用 GORM hook
+
+原本打算用 `BeforeSave` / `AfterFind` 钩子，但项目里 2FA 的开关代码是：
+
+```go
+db.Get().Model(u).Update("two_factor", req.Secret)   // ← 值来自 map，不是 struct 字段
+```
+
+**钩子只对 struct 字段生效**，这条路径的值根本不经过 struct，钩子拦不住，
+会静默写入明文。改用 `database/sql` 的 `driver.Valuer` / `sql.Scanner` 自定义类型
+（`models.Encrypted`），它位于**所有**写入路径的必经之处。
+
+这个选择是踩坑后确定的：先按 hook 写完，grep 时才发现 `auth.go` 有两处 `Update` 用法。
+
+#### 平滑升级：密文带版本前缀
+
+密文形如 `enc:v1:<base64>`。前缀的作用是**区分密文与存量明文**：
+
+```go
+func Decrypt(s string) (string, error) {
+    if s == "" || !IsEncrypted(s) {
+        return s, nil        // 无前缀 → 按明文原样返回
+    }
+    return conf.DecryptString(strings.TrimPrefix(s, prefix))
+}
+```
+
+这让"直接上线加密"成为可能 —— 存量数据照常可读（老用户的 2FA 不会失效），
+在后续写入时顺带升级为密文，不需要停机做全量迁移。
+
+`models.MigrateSensitiveFields()` 负责存量转换：**分批 500 条、幂等、失败不阻塞启动**，
+并在 `main.go` 的 `bootstrap()` 中调用（紧跟 `storage.BackfillFileObjects()`）。
+
+#### 连带必须修的三处
+
+1. **`User.TwoFactor` 字段长度 64 → 255**。TOTP secret 约 32 字符，
+   AES-GCM 加密后（+12 字节 nonce +16 字节 tag）base64 约 80 字符，64 装不下。
+2. **OAuth 的 `WHERE client_secret = ?` 失效**（库里现在是密文）。
+   改为按 `client_id` 查出记录（Scanner 自动解密）后在内存中比对，
+   并用 `crypto/subtle.ConstantTimeCompare` —— 顺带消除了时序攻击面。
+3. **`testutil.SetupDB` 必须 `conf.Load()`**。密钥未加载时 `EncryptString` 报错，
+   而 Valuer 是 fail closed 的（加密失败即让整个写操作失败），
+   结果会是所有创建 User / Policy 的测试全部报错。让测试也走真实加解密路径。
+
+#### 测试策略：必须用原始 SQL 断言
+
+新增的测试用 `rawColumn()` 绕过 GORM 的 Scanner 直接读库：
+
+```go
+func TestEncryptedRoundTrip(t *testing.T) {
+    // ... 写入 TwoFactor
+    raw := rawColumn(t, "users", "two_factor", u.ID)
+    if !strings.HasPrefix(raw, "enc:v1:") { t.Fatalf("落库应为密文，实际 = %q", raw) }
+    if strings.Contains(raw, secret)       { t.Fatal("密文中不应出现明文") }
+}
+```
+
+**这个辅助函数是整个测试文件存在的原因**：如果只用 GORM 读回再断言，
+即使 Valuer 根本没生效（库里就是明文），Scanner 也会"正确"地返回原文，
+测试照样全绿 —— 变成假阳性。加密类改动尤其容易栽在这里。
+
+共新增 10 个测试：5 个覆盖加解密（含存量明文兼容、`Update(map)` 路径、幂等），
+5 个覆盖迁移（端到端转换、哈希化、幂等、不动新格式数据、状态探针）。
+
+---
+
 ### P1-2 标签搜索 SQL 语法错误
 
 `controllers/search.go:102`：
@@ -521,6 +618,9 @@ return ensureGroup(tx, 2, "admin", -1, true, true)
 |---|---|
 | `backend/internal/service/outbound.go` | SSRF 防御、受控出站客户端、上传白名单/魔术字节校验、设置读取注入 |
 | `backend/internal/service/quota.go` | 原子配额占用（`AddStorageTx` / `ReserveQuota` / `CheckQuota`） |
+| `backend/internal/cryptox/cryptox.go` | 敏感字段加解密（带 `enc:v1:` 前缀以区分存量明文）+ 令牌单向哈希 |
+| `backend/models/encrypted.go` | `Encrypted` 类型：`driver.Valuer` / `sql.Scanner` 自动加解密 |
+| `backend/models/migrate_sensitive.go` | 存量敏感字段的幂等批量转换 |
 
 **新增包 `internal/service` 的设计意图**：把「HTTP 上传路径」和「WebDAV 路径」共用的
 安全逻辑（白名单、魔术字节、配额、出站校验）收敛到单一实现，从根上消除

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nebula-drive/nebula/internal/cryptox"
 	"github.com/nebula-drive/nebula/middleware"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
@@ -33,9 +34,10 @@ func CreatePAT(c *gin.Context) {
 	}
 	full := patTokenPrefix + util.RandomStr(32)
 	pat := models.PersonalAccessToken{
-		UserID:    u.ID,
-		Name:      req.Name,
-		Token:     full,
+		UserID: u.ID,
+		Name:   req.Name,
+		// 库里只存单向哈希；明文仅本次返回给用户，之后无法再取回
+		Token:     cryptox.TokenHash(full),
 		Prefix:    full[:len(patTokenPrefix)+8],
 		Scope:     req.Scope,
 		ExpiresAt: req.ExpiresAt,

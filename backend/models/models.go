@@ -16,7 +16,7 @@ type User struct {
 	Status          int            `gorm:"default:0" json:"status"`    // 0 正常 1 封禁
 	GroupID         uint           `gorm:"default:1" json:"groupId"`
 	Storage         int64          `gorm:"default:0" json:"storage"` // 已用字节
-	TwoFactor       string         `gorm:"size:64" json:"-"`         // TOTP secret，加密
+	TwoFactor       Encrypted      `gorm:"size:255" json:"-"`           // TOTP secret，落库前自动加密
 	TwoFactorHinted bool           `gorm:"default:false" json:"-"`   // 是否提醒过开启2FA
 	Avatar          string         `gorm:"size:255" json:"avatar"`
 	NickName        string         `gorm:"size:64" json:"nickName"`
@@ -136,7 +136,7 @@ type Policy struct {
 	ID        uint           `gorm:"primarykey" json:"id"`
 	Name      string         `gorm:"size:64;not null" json:"name"`
 	Type      string         `gorm:"size:32;not null" json:"type"` // local|s3|oss|cos
-	Config    string         `gorm:"type:text" json:"-"`           // JSON 加密
+	Config    Encrypted      `gorm:"type:text" json:"-"`    // 存储配置 JSON（含 SFTP 密码 / 云密钥），落库前自动加密
 	IsDefault bool           `gorm:"default:false" json:"isDefault"`
 	CreatedAt time.Time      `json:"createdAt"`
 	UpdatedAt time.Time      `json:"updatedAt"`
@@ -182,7 +182,7 @@ type Notification struct {
 type OAuthApp struct {
 	ID           uint      `gorm:"primarykey" json:"id"`
 	ClientID     string    `gorm:"uniqueIndex;size:64;not null" json:"clientId"`
-	ClientSecret string    `gorm:"size:128;not null" json:"-"`
+	ClientSecret Encrypted `gorm:"size:255;not null" json:"-"` // 落库前自动加密
 	Name         string    `gorm:"size:128" json:"name"`
 	RedirectURIs string    `gorm:"type:text" json:"redirectUris"` // JSON array
 	UserID       uint      `gorm:"index" json:"userId"`

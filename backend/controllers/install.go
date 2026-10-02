@@ -190,7 +190,7 @@ func ensureDefaultPolicy(tx *gorm.DB, uploadPath string) error {
 		ID:        1,
 		Name:      "本地存储",
 		Type:      "local",
-		Config:    `{"path":"` + uploadPath + `"}`,
+		Config:    models.From(`{"path":"` + uploadPath + `"}`),
 		IsDefault: true,
 	}).Error
 }

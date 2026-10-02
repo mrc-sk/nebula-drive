@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nebula-drive/nebula/internal/cryptox"
 	"github.com/nebula-drive/nebula/middleware"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
@@ -35,8 +37,9 @@ func CreateOAuthApp(c *gin.Context) {
 	}
 	uris, _ := json.Marshal(req.RedirectURIs)
 	app := models.OAuthApp{
-		ClientID:     "nd_" + util.RandomStr(16),
-		ClientSecret: util.RandomStr(32),
+		ClientID: "nd_" + util.RandomStr(16),
+		// 加密落库；创建响应里回显明文给用户（这是唯一一次能看到明文的机会）
+		ClientSecret: models.From(util.RandomStr(32)),
 		Name:         req.Name,
 		RedirectURIs: string(uris),
 		UserID:       u.ID,
@@ -230,8 +233,15 @@ func OAuthToken(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported_grant_type"})
 		return
 	}
+	// ClientSecret 落库时已加密，无法再用于 SQL 比对（GCM 每次密文不同，且有唯一性语义）。
+	// 改为：先按 client_id 定位记录（AfterFind/Scanner 已自动解密），再在内存中比对。
 	var app models.OAuthApp
-	if err := db.Get().Where("client_id = ? AND client_secret = ?", req.ClientID, req.ClientSecret).First(&app).Error; err != nil {
+	if err := db.Get().Where("client_id = ?", req.ClientID).First(&app).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_client"})
+		return
+	}
+	// 用常量时间比较，避免通过响应耗时逐字节猜测 secret
+	if subtle.ConstantTimeCompare([]byte(app.ClientSecret.String()), []byte(req.ClientSecret)) != 1 {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_client"})
 		return
 	}
@@ -257,7 +267,8 @@ func OAuthToken(c *gin.Context) {
 
 	token := util.RandomStr(32)
 	at := models.AccessToken{
-		Token:     token,
+		// 库里只存单向哈希；明文仅本次返回给客户端
+		Token:     cryptox.TokenHash(token),
 		UserID:    oc.UserID,
 		AppID:     app.ID,
 		Scope:     oc.Scope,

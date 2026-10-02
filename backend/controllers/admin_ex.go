@@ -42,7 +42,7 @@ func CreatePolicy(c *gin.Context) {
 	if req.IsDefault {
 		db.Get().Model(&models.Policy{}).Where("1=1").Update("is_default", false)
 	}
-	p := models.Policy{Name: req.Name, Type: req.Type, Config: req.Config, IsDefault: req.IsDefault}
+	p := models.Policy{Name: req.Name, Type: req.Type, Config: models.From(req.Config), IsDefault: req.IsDefault}
 	if err := db.Get().Create(&p).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": err.Error()})
 		return
