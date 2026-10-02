@@ -45,15 +45,28 @@ NebulaDrive 是一个对标 Cloudreve Pro 的**自托管云存储系统**，采�
 不想装环境的话，用这个：
 
 ```bash
-# 开发者侧：一条命令产出试用包
-packaging\build-release.bat
-# → release\NebulaDrive-<版本>-windows-amd64\
+# 产出试用包（构建者侧）
+packaging\build-release.bat          # Windows
+./packaging/build-release.sh          # Linux / macOS
+./packaging/build-release.sh --all    # 在 Linux 上交叉编译三个平台
 
-# 使用者侧：解压后双击 start.bat 即可
+# → release\NebulaDrive-<版本>-<系统>-<架构>\
+
+# 使用者侧：解压后运行对应脚本即可
+#   Windows : start.bat        （双击）
+#   Linux   : ./start.sh
+#   macOS   : ./start.sh
 ```
 
-**单二进制，约 47 MB（`-ldflags="-s -w"` 已剥离符号表，比默认小 27%）。**
-前端通过 `go:embed` 内嵌进 exe，**使用者无需安装 Go / Node / 数据库**。
+**构建者只需装 Go 1.25+**；前端产物 `backend/frontend_dist/` 随仓库提交，
+所以**不需要 Node**。使用方则什么都不用装。
+
+**单二进制 45 MB，打成 zip 约 15 MB**
+（`-trimpath -ldflags="-s -w"` 剥离符号表，比默认小 27%）。
+前端通过 `go:embed` 内嵌进二进制，**使用者无需安装 Go / Node / 数据库**。
+
+`start.sh` 会自动补加执行权限，并检查二进制格式是否与当前系统匹配
+（拿了 Windows 版会得到明确提示，而不是难以理解的 `Exec format error`）。
 
 `start.bat` 做的事：
 - `-autoport` 自动挑选空闲端口（5212 起，冲突时顺延），避免"端口被占用"起不来
