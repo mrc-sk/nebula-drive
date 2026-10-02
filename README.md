@@ -2,9 +2,9 @@
 
 > 新一代毛玻璃风格开源云存储系统 · 作者 **mrc-sk** · 仓库 <https://github.com/mrc-sk/nebula-drive>
 >
-> 本项目基于 **NebulaDrive (<https://github.com/mrc-sk/nebula-drive>)** 开发，原作者 **mrc-sk**。
+> 作者：**mrc-sk** · <https://github.com/mrc-sk/nebula-drive>
 
-[![License](https://img.shields.io/badge/License-MIT%20%2B%20Attribution-blue)](#-开源协议)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](./LICENSE)
 [![Go Build](https://img.shields.io/badge/build-passing-brightgreen)](#)
 [![Coverage](https://img.shields.io/badge/coverage-42.2%25-green)](#)
 
@@ -138,24 +138,39 @@ nebula-drive/
 
 ## 📝 开源协议
 
-> 组合协议：**MIT License + 署名保留附加条款 v1.0**
+> **GNU Affero General Public License v3.0（AGPL-3.0）**
 >
 > Copyright (c) 2026 **mrc-sk** · Repository: <https://github.com/mrc-sk/nebula-drive>
 
 ### ✅ 你可以
 
-- **商用**：任意修改、二次开发、分发、用于商业产品、收费服务 —— **完全免费，无需报备**
-- **自托管**：给自己团队/公司/客户部署，不需要通知作者
+- **自托管**：给自己团队 / 公司 / 客户部署，不需要通知作者
+- **修改与分发**：任意修改、二次开发；可以闭源分发你自己的衍生版本
+- **收费服务**：可以收费卖运维、部署、定制开发等服务
 
-### 🔒 你必须（**至少 3 处署名，禁止移除**）
+### 🔒 你必须
 
-1. **LICENSE 文件**：完整保留本仓库 [LICENSE](./LICENSE) 中 "Copyright (c) 2026 mrc-sk" 与仓库链接声明；
-2. **用户界面页脚 / 关于页**：软件运行时的 UI 中（网页 Footer / 关于页面 / 命令行 --version）必须显示：
-   `Powered by NebulaDrive · 作者 mrc-sk · 仓库 github.com/mrc-sk/nebula-drive`；
-3. **README / 文档 / 产品介绍页**：任何配套文档、官网、产品介绍中必须包含项目来源声明：
-   "本项目基于 NebulaDrive (https://github.com/mrc-sk/nebula-drive) 开发，原作者：mrc-sk"。
+AGPL-3.0 的核心义务是**网络服务同样要开源**（这是它与 GPL 的唯一区别）：
 
-详见完整协议 [LICENSE](./LICENSE)。
+1. **对外提供网络服务时**：若把本程序或其修改版部署到服务器、供他人通过网络访问，
+   **必须向这些使用者提供完整的对应源码**（含你的修改）。
+2. **分发二进制时**：随附完整源码，或提供获取源码的书面要约。
+3. **保留版权与许可声明**：不得删除 [LICENSE](./LICENSE) 中的版权声明。
+4. **标注修改**：对原代码做过修改的部分需注明。
+
+> **常见疑问**
+>
+> | 场景 | 是否需要公开你的修改源码 |
+> |---|---|
+> | 内部使用，不对外提供服务 | ❌ 不需要（自部署自用完全自由） |
+> | 改了代码自己部署，不对外开放 | ❌ 不需要 |
+> | 改了代码部署到公网供他人使用 | ✅ **需要**（属对外提供网络服务） |
+> | 编译成二进制卖给客户，客户自行部署 | ❌ 不需要（这不算网络服务） |
+> | 用本项目搭建 SaaS 收费 | ✅ **需要**（包括你基于它做的修改） |
+>
+> 简单记：**只要"通过网络让别人用"，就要开源你的修改**；只是把软件卖出去（客户自己装）则不受此限。
+
+完整条款见 [LICENSE](./LICENSE)。
 
 ---
 
