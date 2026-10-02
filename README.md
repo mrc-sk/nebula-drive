@@ -23,7 +23,7 @@ NebulaDrive 是一个对标 Cloudreve Pro 的**自托管云存储系统**，采�
 |---|---|
 | 🗂️ **文件管理** | 列表/网格双视图、版本控制（保留最近 10 版）、文件标签、拖拽上传（脉冲边框）、批量移动/复制/改存储策略、回收站 30 天自动清理 |
 | ☁️ **多存储后端** | 本地 / AWS S3（aws-sdk-go-v2）/ 阿里云 OSS / 腾讯云 COS，官方 SDK 真实接入 |
-| 🌐 **WebDAV** | RFC 4918 全方法实现，后台可自定义路径前缀 & 方法集白名单，支持 Range 下载 |
+| 🌐 **WebDAV** | RFC 4918 方法集：PROPFIND / PROPPATCH / MKCOL / GET / HEAD / PUT / DELETE / MOVE / COPY / LOCK / UNLOCK / OPTIONS，支持 Range 下载；后台可自定义路径前缀 & 方法集白名单。<br>**已知限制**：PROPPATCH 按 RFC §9.2 返回 `207 + 403 Forbidden`（不写自定义 dead property），LOCK 为进程内排他锁（重启后失效） |
 | 🚀 **离线下载** | HTTP / BT / 磁力，内嵌 aria2c 子进程 + JSON-RPC，未安装 aria2 自动回退 |
 | 🔐 **认证安全** | bcrypt + JWT + 单设备登录、2FA(TOTP) 可选、邮箱验证码、7 天记住登录 |
 | 🔗 **分享双因子** | 提取码 + 密码两层保护，签名 URL 防盗链 5 分钟有效 |
@@ -133,6 +133,20 @@ nebula-drive/
     │   └── api/         # axios 客户端
     └── index.css        # 毛玻璃/亚克力/旋转彩蛋/动画
 ```
+
+### 部署形态
+
+当前为**单实例设计**。以下状态保存在进程内存中，多副本部署需注意：
+
+| 状态 | 位置 | 多副本后果 |
+|---|---|---|
+| WebDAV 排他锁 | `webdav.go` 的 `davLocks` map | 副本间锁不共享 → 并发写可能互相覆盖 |
+| 登录失败计数 | `middleware/ip_guard.go` 的 `loginFailures` map | 计数不共享 → 攻击者可用 N 个副本各试 9 次绕过封禁阈值（封禁**记录**在 DB，判定是共享的，但触发需要凑满 10 次） |
+| 验证码触发阈值 | 同上（3 次失败后要求验证码） | 同上 |
+| 通用限流 | `middleware/rate_limit.go` 的 `limiter.records` | 限流额度按副本数倍增 |
+| 分片上传会话 | `controllers/file.go` 的会话 map | 必须开启会话粘性（sticky session） |
+
+需要水平扩展时，数据库可切 MySQL / PostgreSQL（`conf` 已支持），IP 封禁记录也已落库可直接共享；上表前四项需先外置到 Redis 等共享存储。
 
 ---
 

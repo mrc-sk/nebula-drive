@@ -724,10 +724,15 @@ go test ./...    EXIT=0   （12 个包全部通过）
    只需要比对的（OAuth/PAT 令牌）用 SHA-256 单向哈希 —— 后者同时解决了
    "可逆加密破坏唯一索引和 WHERE 查询"的问题，且泄露后无法直接冒用。
    密文带 `enc:v1:` 前缀，因此存量明文可平滑升级，老用户的 2FA 不会失效。
-2. **CI** —— 目前验证靠本地 `go test ./...`。建议加 GitHub Actions 跑 `go vet` + `go test -race ./...`。
-   `-race` 尤其值得：分片上传的 map 竞争（P1-6）这类问题，靠竞态检测才能稳定复现。
-3. **README 的 WebDAV 措辞** —— 原文写"RFC 4918 全方法实现"。现在 LOCK/UNLOCK/COPY 已真实现，
-   但 PROPPATCH 明确不支持写属性（返回 207 + 403），措辞仍需对齐。
+2. ~~**CI**~~ ✅ 已加。`.github/workflows/go-ci.yml`：ubuntu + windows 矩阵，
+   跑 `go build` → `go vet` → `go test -race -count=1 ./...`，触发于 push main / PR / 手动。
+   显式设 `CGO_ENABLED=1` 并前置检查 gcc —— race detector 依赖 cgo，
+   而本机 `go env CGO_ENABLED=0`（无 MinGW），**本地跑不了 race，只有 CI 能验**。
+   同时补齐了此前缺失的 `go.sum`（原来仓库里没有，CI 的 `cache-dependency-path` 会直接报错）。
+3. ~~**README 的 WebDAV 措辞**~~ ✅ 已改。原文"RFC 4918 全方法实现"会误导客户端开发者以为
+   能写自定义 dead property。现改为列出 12 个方法全名，并明确两条限制：
+   PROPPATCH 按 §9.2 返回 `207 + 403 Forbidden`（不写 dead property）、
+   LOCK 是进程内排他锁（重启后失效，多副本部署不共享）。
 
 ---
 

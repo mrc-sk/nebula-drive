@@ -1,0 +1,71 @@
+name: Go CI
+
+on:
+  push:
+    branches: [main]
+    paths: ['backend/**', '.github/workflows/go-ci.yml']
+  pull_request:
+    paths: ['backend/**', '.github/workflows/go-ci.yml']
+  workflow_dispatch:
+
+# 取消正在跑的旧 run：force-push 后避免跑 N 个旧 commit
+concurrency:
+  group: go-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# 整个 job 在 backend/ 下跑——它是独立 Go module（根目录不是 module）
+# checkout 必须看到仓库根，setup-go 路径相对于仓库根解析，
+# 所以这两个 step 不能套 working-directory；后续 build/vet/test 通过 defaults 在 backend/ 跑
+defaults:
+  run:
+    working-directory: backend
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: vet + test -race (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      # -race 依赖 cgo，不能依赖 runner 默认值。
+      # 本地 Windows 若没装 MinGW，go env CGO_ENABLED 可能是 0，
+      # 那样 go test -race 会直接报 "requires cgo" 而失败。
+      CGO_ENABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # setup-go 在仓库根解析路径，不受 working-directory 影响
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Download modules
+        run: go mod download
+
+      # cgo 前置检查：race detector 需要 C 编译器。
+      # runner 镜像通常自带，但显式检查能把"环境缺 gcc"和"代码有 bug"两类失败区分开
+      - name: Check C toolchain
+        run: |
+          gcc --version || (echo "::error::gcc not found; -race needs a C toolchain" && exit 1)
+
+      # 编译检查——比 vet 严格，能查出 import/类型层面的破坏
+      - name: Build
+        run: go build ./...
+
+      # vet：捕获可疑构造（Printf 不匹配、锁复制、shadow 等）
+      # 故意放在 build 之后：vet 的报错往往和 build 错混在一起
+      - name: Vet
+        run: go vet ./...
+
+      # 关键：-race，代价 ~3x 慢，但能稳定复现 P1-6 那种分片 map 竞争
+      # sqlite + GORM 在 race 下偶尔会有 'database is locked'，加 -count=1 避免命中本地缓存
+      - name: Test
+        run: go test -race -count=1 ./...
