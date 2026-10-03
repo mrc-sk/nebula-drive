@@ -890,3 +890,20 @@ if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 
 - **5 项进程内存状态** —— WebDAV 锁、登录失败计数、验证码阈值、通用限流、分片会话。
   多副本部署需外置到 Redis，README「部署形态」已列明。
+
+---
+
+## 9. 前端代码分割（性能优化）
+
+`frontend/src/App.tsx` 原本把所有页面（含后台 8 个页面 + echarts）静态打进单一 **3.15 MB chunk**
+（gzip 981 KB）。改为路由级 `React.lazy` + 顶层 `<Suspense>`：
+
+- 所有页面组件改为 `lazy(() => import('...'))`，`<Routes>` 外包一层
+  `<Suspense fallback={<FullScreenLoading/>}>`（页面均为 default 导出，可直接 lazy）。
+- 首屏主 chunk 从 3.15 MB 降到 **291 KB（gzip 98 KB）**；echarts（Dashboard 1.15 MB）、
+  播放器/文档预览（Files 1.53 MB）等重依赖改为**按需加载、可独立缓存**，不再阻塞首屏。
+- `tsc -b` 类型检查 + `vite build` 均通过；`go:embed all:frontend_dist` 已随新 chunk 重新编译通过，
+  后端 `go build` 验证无误（前端_dist 由 3 文件增至 49 文件，旧单 chunk 已删）。
+
+**未做的进一步优化**（按需）：Files 页仍 1.53 MB，因其内联了 plyr / hls.js / mammoth / xlsx /
+jszip 等预览依赖。若想继续压，可在 Files 内对这些预览/播放组件再做二级 `lazy` 拆分。

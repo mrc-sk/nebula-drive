@@ -1,23 +1,26 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { lazy, Suspense, useEffect, useState, useRef, useCallback } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Loader2, X, Info } from 'lucide-react'
 import { api } from './api/client'
-import Install from './pages/Install'
-import Login from './pages/Login'
-import Files from './pages/Files'
-import Share from './pages/Share'
-import OAuthAuthorize from './pages/OAuthAuthorize'
-import AdminLayout from './layouts/AdminLayout'
-import Dashboard from './pages/admin/Dashboard'
-import Users from './pages/admin/Users'
-import Groups from './pages/admin/Groups'
-import Policies from './pages/admin/Policies'
-import Settings from './pages/admin/Settings'
-import Tasks from './pages/admin/Tasks'
-import Plugins from './pages/admin/Plugins'
-import About from './pages/admin/About'
 import { useAuthStore } from './store/auth'
 import { useUserPrefsStore } from './store/user'
+
+// 路由级代码分割：把各页面拆成独立 chunk，首屏（登录 / 文件浏览）不必加载
+// 后台管理与 echarts 等重依赖；首屏主 chunk 体积从单包 ~3.15MB 大幅下降。
+const Install = lazy(() => import('./pages/Install'))
+const Login = lazy(() => import('./pages/Login'))
+const Files = lazy(() => import('./pages/Files'))
+const Share = lazy(() => import('./pages/Share'))
+const OAuthAuthorize = lazy(() => import('./pages/OAuthAuthorize'))
+const AdminLayout = lazy(() => import('./layouts/AdminLayout'))
+const Dashboard = lazy(() => import('./pages/admin/Dashboard'))
+const Users = lazy(() => import('./pages/admin/Users'))
+const Groups = lazy(() => import('./pages/admin/Groups'))
+const Policies = lazy(() => import('./pages/admin/Policies'))
+const Settings = lazy(() => import('./pages/admin/Settings'))
+const Tasks = lazy(() => import('./pages/admin/Tasks'))
+const Plugins = lazy(() => import('./pages/admin/Plugins'))
+const About = lazy(() => import('./pages/admin/About'))
 
 export interface BrandInfo {
   name: string
@@ -228,7 +231,8 @@ export default function App() {
   return (
     <>
       <AcrylicBackground />
-      <Routes>
+      <Suspense fallback={<FullScreenLoading />}>
+        <Routes>
         <Route
           path="/install"
           element={
@@ -329,7 +333,8 @@ export default function App() {
           }
         />
         <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+        </Routes>
+      </Suspense>
 
       {wheelOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-md animate-fade-in">
