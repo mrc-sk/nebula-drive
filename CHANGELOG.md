@@ -6,9 +6,38 @@
 
 ## V26-10.0-b — Beta（2026-10-03）
 
-> 集成测试加固 + 关键数据安全修复。三平台单二进制（Windows / Linux / macOS）已打包。
+> 侧边栏三个入口修复 + 六项既有缺陷修复 + i18n 门禁。三平台单二进制（Windows / Linux / macOS）已重新打包。
 
 ### 🐛 修复
+
+- **侧边栏「分享列表 / 离线下载 / 回收站」点击无反应**
+  根因：这三个路径在 `App.tsx` 里**从未注册**。React Router v6 遇到未匹配路径会命中
+  末尾的 `<Route path="*" element={<Navigate to="/" replace />} />`，被**静默重定向回首页** ——
+  不报错、不白屏，所以看起来就是「点了没反应」。
+  现补齐 `/share-list`、`/tasks`、`/trash` 三条路由，并新增 `pages/ShareList.tsx`、
+  `pages/TasksOffline.tsx`、`pages/Trash.tsx` 三个页面（均为路由级懒加载）。
+  影响面不止桌面侧栏：移动端底部 tabbar 的第二个入口同样指向 `/share-list`，此前也是死的。
+
+- **管理员「用户管理」列表恒为空**
+  `api/client.ts` 把返回类型声明成 `items`，而后端实际返回 `list`。
+  `u.data.items || []` 永远取到空数组 —— 管理员打开用户管理页看到的一直是空表。
+  同样错配的还有通知铃铛（`(r.data as any).items || r.data || []`），已一并修正。
+
+- **侧栏「关于」在任何语言下都显示不出来**
+  `MainLayout.tsx` 里写的是 `labelKey: '关于'`（中文字面量而非 key），
+  渲染时变成查 `ns_admin.关于`，必然查不到；且 `ns_admin.about` 这个 key 当时压根不存在。
+  现补上五语言的 `about` key 并修正引用。
+
+- **任务状态显示成字面量 `task.1`**
+  后端 `Task.Status` 是 **int**（0 等待 / 1 进行 / 2 完成 / 3 失败），前端却写
+  `(tk.status || tk.state || 'pending') as TaskStatus` 把它硬转成字符串枚举。
+  `status=0` 因为是 falsy 恰好落到 `'pending'` 才显得正常，`status=1` 就直接渲染成 `task.1`。
+  这纯属巧合掩盖了类型错误。现补显式 int→枚举映射（`toStatus`），两条任务页共用。
+
+- **任务「重试」按钮打 404**
+  前端按钮调 `POST /api/tasks/:id/retry`，后端从未注册该路由。现补 `RetryTask`：
+  校验归属（非管理员只能操作自己的任务）、只允许终态任务重试（进行中重试会重复下载同一 URL）、
+  重置 `progress` 与 `error` 后复用与创建任务相同的下载分派逻辑。
 
 - **Windows 下存储路径静默失效（数据错位隐患）**
   存储策略 config 此前用字符串拼接生成（`{"path":"C:\Users\..."}`），而反斜杠在 JSON 中
@@ -17,6 +46,17 @@
   结果：Windows 上所有上传都落到与配置声明无关的位置，文件错乱且极易丢失，**全程不报错**。
   现改用 `json.Marshal` 正确转义生成配置；解析失败时优先回退到配置中的绝对上传目录并打日志，
   仍拿不到才显式报错 —— 绝不静默落到相对目录。
+
+### 🧹 重构
+
+- **抽出 `GuardedPage`**，消除 8 处重复手写的路由守卫三段式
+  （`installed === null`  loading / `!installed`  去 `/install` / `authBusy`  loading / `!user`  去 `/login`）。
+- **抽出 `components/Modal.tsx` 与 `utils/format.ts`**，收敛原先分散在 `Files.tsx` 私有一份、
+  `admin/Users.tsx` 导出一份的重复实现。
+- **`CreateTask` 从 67 行缩到 27 行**，并抽出 `startTask` 供创建与重试共用 ——
+  否则 aria2/net-http 的分派逻辑要写两遍，两边很容易各自漂移。
+- **任务列表轮询改为按需**：仅当存在等待/进行中任务时继续轮询，否则 `clearInterval`；
+  并加 `alive` 守卫避免组件卸载后 setState。
 
 ### 🧪 测试
 
@@ -32,10 +72,28 @@
   | 权限矩阵 | 用户之间互相不可见、不可访问，越权一律 403 |
   | 文件生命周期 | 上传 → 复制 → 软删 → 彻底删除，配额与物理文件始终一致 |
 
+- **新增 `TestIntegration_TaskRetryAndTrashEndpoints`**（7 组断言）
+  锁死本轮三个入口所依赖的后端能力：未认证 401、`ListTasks` 的 `owner_id` 过滤不泄露他人任务、
+  Retry 他人任务 403、Retry 进行中任务 400、Retry 失败任务正确重置状态、
+  回收站软删→可见→他人不可见→还原的完整生命周期、Purge 他人文件 403。
+  同时验证 `DELETE /api/files/:id` 无 `X-Confirm-Password` 时确实被 `RequireConfirm` 拦下。
+
+- **新增 i18n 对称性门禁**（`frontend/check_i18n.py`，已接入 `frontend-ci.yml`）
+  五个语言文件必须逐命名空间、逐 key 完全一致，且页面引用的 key 都真实存在。
+  少一个 key 的表现是界面直接显示 `ns_mine.emptyTrash` 这种原始串，
+  **tsc 与 vite 都发现不了** —— 本轮新增 40 个 key 跨 5 语言，正是最需要这道门禁的场景。
+
 ### 📦 产物
 
 `NebulaDrive-V26-10.0-b-{windows,linux,darwin}-amd64`（各含 zip）。
 单文件二进制，前端已内嵌，无需安装 Go / Node / 数据库。
+
+- **发布包补入 `LICENSE`**（`packaging/repack.py`）：AGPL-3.0 要求分发二进制时随附许可证声明，
+  原脚本漏掉了它，合规上站不住脚。
+- 包内文本统一转 LF（仓库工作区的 `LICENSE` / `README.md` 是 CRLF，直接 copy 会带进包）。
+- zip 条目统一带顶级目录前缀，避免解压后一堆散落文件覆盖用户同名文件。
+- 新增 `packaging/verify_release.py`：78 项自动校验（zip CRC、平台魔数、权限位、行尾、
+  内嵌前端是否为新版），三平台全通过。
 
 ### ⚖️ 许可
 
@@ -47,6 +105,43 @@
 - `nfpm.yaml` 的 `license` 用 SPDX 标识 `AGPL-3.0`；`version` 由过期的 `1.0.0` 校正为
   `26.10.0`（`release: b`），`homepage` 校正为 `github.com/mrc-sk/nebula-drive`。
 - 前端产物已重建并同步 `backend/frontend_dist`（`go:embed` 内嵌，CI 有同步守卫）。
+
+### 🚑 侧边栏三个入口点了没反应（路由从未注册）
+
+| 入口 | 路径 | 原因 |
+|---|---|---|
+| 分享列表 | `/share-list` | `App.tsx` 只有 `/share/:id`（单页公开分享），从未注册 `/share-list` |
+| 离线下载 | `/tasks` | 只有一个 `/admin/tasks`（管理员），用户版从未注册 |
+| 回收站 | `/trash` | 回收站只在 `Files.tsx` 里做成了 `trashMode` 开关，没有独立路由 |
+
+三者都落进 `App.tsx` 的 catch-all `<Route path="*" element={<Navigate to="/" replace />} />`，
+被静默弹回文件页 —— 表现为「点了没反应」而不是报错。
+
+**修复**：新增 `ShareList.tsx` / `TasksOffline.tsx` / `Trash.tsx` 三个页面并注册路由，
+守卫抽成 `GuardedPage` 组件（此前同样的 installed/authBusy/user 三段式在 8 处重复）。
+
+**回收站有一条必须让用户知道的行为**：后端 `Restore` 每次都会新建一个
+「恢复的文件-YYYYMMDD-HHMMSS」目录把文件塞进去 —— 批量还原 10 个文件会得到 10 个时间戳目录。
+UI 上已就此给出提示，避免用户以为还原丢了文件。
+
+### 🐛 顺带修掉的既有缺陷
+
+- **管理员用户列表恒为空**：`admin.ListUsers` 返回 `{total, list}`，`client.ts` 却声明成
+  `items`，`Users.tsx` 读 `u.data.items` 恒为 `undefined`。表格空白但页面不报错。
+  通知列表有同样的 `items`/`list` 错配（被 `|| r.data` 兜住了）。两处均已对齐。
+- **管理员侧栏「关于」不翻译**：`MainLayout.tsx` 的 `labelKey` 写的是中文 `'关于'`，
+  渲染时变成 `t('ns_admin.关于')`，任何语言下都显示不出正确文案；而 `ns_admin.about`
+  这个 key 压根不存在。已补齐 5 种语言的 `about` 并修正 labelKey。
+- **任务状态显示错误**：`Task.Status` 是 int（0/1/2/3），但页面写的是
+  `(tk.status || tk.state || 'pending') as TaskStatus` —— 把 int 硬转字符串枚举，
+  `status=1`（进行中）会渲染成字面量 `task.1`、徽章配色回落到灰色 pending。
+  `status=0` 恰好因 falsy 落到 `'pending'` 才显得正常，纯属巧合。现改为显式映射。
+- **「重试」按钮必然 404**：前端 `api.tasks.retry` 已封装并有按钮，但后端从未注册该路由，
+  前端还用 `(api.tasks as any).retry?.(id)` 静默吞掉。现**已实现后端 `POST /api/tasks/:id/retry`**
+  （重置状态 + 复用创建时的分派逻辑），并抽出 `startTask` 供创建与重试共用。
+  进行中/等待中的任务返回 400 —— 否则会对同一 URL 重复下载。
+- **任务页无条件 2s 轮询**：即使全部任务已完成也一直打接口，且请求在途时卸载会 setState。
+  现仅在存在等待/进行中任务时继续轮询，并加 `alive` 守卫。
 
 ### 🧹 已知遗留
 

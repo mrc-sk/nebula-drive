@@ -252,6 +252,7 @@ func Setup() *gin.Engine {
 			tasks.GET("", controllers.ListTasks)
 			tasks.POST("", controllers.CreateTask)
 			tasks.POST("/:id/cancel", controllers.CancelTask)
+			tasks.POST("/:id/retry", controllers.RetryTask)
 		}
 
 		notifications := api.Group("/notifications", middleware.Auth(true))

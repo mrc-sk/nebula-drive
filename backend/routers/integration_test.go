@@ -675,3 +675,131 @@ func fileVisibleInTrash(t *testing.T, env *testEnv, cookie *http.Cookie, id uint
 	}
 	return false
 }
+
+// TestIntegration_TaskRetryAndTrashEndpoints 锁死侧边栏三个入口所依赖的后端能力。
+//
+// 背景：侧边栏「分享列表 / 离线下载 / 回收站」三个入口的路由从未在前端注册，
+// 本用例守着它们真正要用的那几个接口，避免再次出现「点了没反应」却无人察觉：
+//   - POST /api/tasks/:id/retry（本轮新增；此前前端按钮打的是 404）
+//   - GET  /api/files?trash=1
+//   - POST /api/files/:id/restore
+//   - POST /api/files/:id/purge
+func TestIntegration_TaskRetryAndTrashEndpoints(t *testing.T) {
+	env := bootstrapForTest(t)
+	pass := "Str0ng-Pass-123!"
+	owner := makeUser(t, env.DB, "retryer", 1, false, pass)
+	other := makeUser(t, env.DB, "intruder", 1, false, pass)
+	ownerCookie := authCookie(t, owner)
+	otherCookie := authCookie(t, other)
+
+	// ---- 1. 未认证访问全部被拒 ----
+	for _, p := range []string{"/api/tasks", "/api/files?trash=1"} {
+		if w := doReq(t, env, http.MethodGet, p, nil, ""); w.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated %s: got %d, want 401", p, w.Code)
+		}
+	}
+
+	// ---- 2. ListTasks 只回自己的任务（后端按 owner_id 过滤） ----
+	mkTask := func(ownerID uint, url string, status int) models.Task {
+		tk := models.Task{OwnerID: ownerID, Type: "http", URL: url, Status: status}
+		if err := env.DB.Create(&tk).Error; err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+		return tk
+	}
+	mine := mkTask(owner.ID, "https://example.com/a.bin", 3)        // 失败态，可重试
+	theirs := mkTask(other.ID, "https://example.com/secret.bin", 2) // 别人的，不应出现在我的列表
+
+	w := doJSON(t, env, http.MethodGet, "/api/tasks", nil, ownerCookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list tasks: %d %s", w.Code, w.Body.String())
+	}
+	var list struct {
+		Data []struct {
+			ID uint `json:"id"`
+		} `json:"data"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &list)
+	seenMine, seenTheirs := false, false
+	for _, r := range list.Data {
+		if r.ID == mine.ID {
+			seenMine = true
+		}
+		if r.ID == theirs.ID {
+			seenTheirs = true
+		}
+	}
+	if !seenMine {
+		t.Fatalf("own task missing from list: %s", w.Body.String())
+	}
+	if seenTheirs {
+		t.Fatal("list leaked another user's task — owner_id filter broken")
+	}
+
+	// ---- 3. Retry：他人任务不可重试（403） ----
+	if w := doJSON(t, env, http.MethodPost, "/api/tasks/"+itoa(theirs.ID)+"/retry", nil, ownerCookie); w.Code != http.StatusForbidden {
+		t.Fatalf("retry other's task: got %d, want 403", w.Code)
+	}
+
+	// ---- 4. Retry：进行中的任务不该被重试（400，避免同一 URL 重复下载） ----
+	running := mkTask(owner.ID, "https://example.com/running.bin", 1)
+	if w := doJSON(t, env, http.MethodPost, "/api/tasks/"+itoa(running.ID)+"/retry", nil, ownerCookie); w.Code != http.StatusBadRequest {
+		t.Fatalf("retry running task: got %d, want 400", w.Code)
+	}
+
+	// ---- 5. Retry：失败态任务被重置为进行中、进度与错误清空 ----
+	env.DB.Model(&models.Task{}).Where("id = ?", mine.ID).
+		Updates(map[string]any{"progress": 42, "error": "boom"})
+	if w := doJSON(t, env, http.MethodPost, "/api/tasks/"+itoa(mine.ID)+"/retry", nil, ownerCookie); w.Code != http.StatusOK {
+		t.Fatalf("retry failed task: got %d %s", w.Code, w.Body.String())
+	}
+	var after models.Task
+	env.DB.First(&after, mine.ID)
+	if after.Status != 1 {
+		t.Fatalf("after retry status = %d, want 1 (running)", after.Status)
+	}
+	if after.Progress != 0 || after.Error != "" {
+		t.Fatalf("after retry progress=%d error=%q, want 0 and empty", after.Progress, after.Error)
+	}
+
+	// ---- 6. 回收站：软删 -> 出现在 trash -> 他人不可见 -> 还原 ----
+	up := parseUpload(t, uploadFile(t, env, ownerCookie, "trash-me.txt", "bye"))
+	upID := up.Data.ID
+
+	// 删除接口要求 X-Confirm-Password（middleware.RequireConfirm），先确认护栏生效
+	if w := doJSON(t, env, http.MethodDelete, "/api/files/"+itoa(upID), nil, ownerCookie); w.Code == http.StatusOK {
+		t.Fatal("delete without X-Confirm-Password must be rejected")
+	}
+
+	// 直接改库置软删态，绕开需要确认头的删除接口
+	env.DB.Model(&models.File{}).Where("id = ?", upID).
+		Updates(map[string]any{"deleted_at": time.Now()})
+
+	if !fileVisibleInTrash(t, env, ownerCookie, upID) {
+		t.Fatal("soft-deleted file must show up in trash listing")
+	}
+	if fileVisibleInTrash(t, env, otherCookie, upID) {
+		t.Fatal("trash listing leaked another user's file")
+	}
+	if fileVisible(t, env, ownerCookie, upID) {
+		t.Fatal("soft-deleted file must NOT appear in normal file listing")
+	}
+
+	// 他人不能还原
+	if w := doJSON(t, env, http.MethodPost, "/api/files/"+itoa(upID)+"/restore", nil, otherCookie); w.Code != http.StatusForbidden {
+		t.Fatalf("restore other's file: got %d, want 403", w.Code)
+	}
+
+	// 还原
+	if w := doJSON(t, env, http.MethodPost, "/api/files/"+itoa(upID)+"/restore", nil, ownerCookie); w.Code != http.StatusOK {
+		t.Fatalf("restore: %d %s", w.Code, w.Body.String())
+	}
+	if fileVisibleInTrash(t, env, ownerCookie, upID) {
+		t.Fatal("file still in trash after restore")
+	}
+
+	// ---- 7. Purge：他人文件不可彻底删除 ----
+	if w := doJSON(t, env, http.MethodPost, "/api/files/"+itoa(upID)+"/purge", nil, otherCookie); w.Code != http.StatusForbidden {
+		t.Fatalf("purge other's file: got %d, want 403", w.Code)
+	}
+}

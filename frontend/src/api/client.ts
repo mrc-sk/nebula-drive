@@ -66,6 +66,24 @@ export interface ShareItem {
   expireAt: string | null
   isDir: boolean
   createdAt: string
+  // 后端 models.Share.ExtractCode 的 tag 是 json:"extractCode"，会随列表返回。
+  // 注意 Password 是 json:"-"，后端永不返回，所以分享列表无法显示密码。
+  extractCode?: string
+}
+
+// 后端 models.Task 的 status 是 int，不是字符串枚举 —— 展示前必须显式映射。
+// 0 等待 / 1 进行 / 2 完成 / 3 失败
+export interface TaskItem {
+  id: number
+  ownerId: number
+  type: 'http' | 'bt'
+  url: string
+  status: 0 | 1 | 2 | 3
+  progress: number
+  parentId: number | null
+  error: string
+  createdAt: string
+  updatedAt: string
 }
 
 export async function request<T = any>(
@@ -301,7 +319,7 @@ export const api = {
 
   admin: {
     users: (page = 1, size = 20) =>
-      request<ApiResult<{ items: any[]; total: number }>>(`/api/admin/users?page=${page}&size=${size}`),
+      request<ApiResult<{ list: any[]; total: number }>>(`/api/admin/users?page=${page}&size=${size}`),
     createUser: (body: any) =>
       request<ApiResult<any>>('/api/admin/users', { method: 'POST', body: JSON.stringify(body) }),
     updateUser: (id: number | string, body: any) =>
@@ -355,18 +373,33 @@ export const api = {
   },
 
   tasks: {
-    list: () => request<ApiResult<any[]>>('/api/tasks'),
+    // 后端 ListTasks 对非管理员按 owner_id 过滤、对管理员返回全部（硬编码 LIMIT 100），
+    // 所以这个接口同时服务用户页与管理员页。
+    list: () => request<ApiResult<TaskItem[]>>('/api/tasks'),
     create: (body: { type: 'http' | 'bt'; url: string; parentId?: number | string | null }) =>
-      request<ApiResult<any>>('/api/tasks', { method: 'POST', body: JSON.stringify(body) }),
+      request<ApiResult<TaskItem>>('/api/tasks', { method: 'POST', body: JSON.stringify(body) }),
     cancel: (id: number | string) =>
       request<ApiResult>(`/api/tasks/${id}/cancel`, { method: 'POST' }),
     retry: (id: number | string) =>
       request<ApiResult>(`/api/tasks/${id}/retry`, { method: 'POST' }),
   },
 
+  // 回收站：后端没有独立的 /api/trash 分组，全部复用 /api/files 的 trash 模式。
+  //   GET  /api/files?trash=1            列出该用户全部软删除文件（跨目录扁平，忽略 parent）
+  //   POST /api/files/:id/restore        还原
+  //   POST /api/files/:id/purge          彻底删除（释放配额 + 删物理文件）
+  //
+  // 已知限制：File.DeletedAt 的 tag 是 json:"-"，所以列表拿不到删除时间；
+  // Restore 每次都会新建一个「恢复的文件-YYYYMMDD-HHMMSS」目录。
+  trash: {
+    list: () => request<ApiResult<FileItem[]>>('/api/files?parent=&trash=1'),
+    restore: (id: number) => request<ApiResult>(`/api/files/${id}/restore`, { method: 'POST' }),
+    purge: (id: number) => request<ApiResult>(`/api/files/${id}/purge`, { method: 'POST' }),
+  },
+
   notifications: {
     list: (page = 1, size = 20) =>
-      request<ApiResult<{ items: any[]; total?: number }>>(`/api/notifications?page=${page}&size=${size}`),
+      request<ApiResult<{ list: any[]; total?: number }>>(`/api/notifications?page=${page}&size=${size}`),
     unreadCount: () => request<ApiResult<number>>('/api/notifications/unread-count'),
     markRead: (id: number | string) =>
       request<ApiResult>(`/api/notifications/${id}/read`, { method: 'PUT', headers: authHeaders() }),

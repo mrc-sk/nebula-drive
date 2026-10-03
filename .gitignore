@@ -28,6 +28,13 @@ frontend/vite.config.js.timestamp-*.mjs
 backend/controllers/uploads/
 backend/filesystem/uploads/
 
+# 交叉编译暂存目录（Git Bash 的 /tmp 对 Go 工具链不可见，只能落在这里）
+backend/.ndbuild/
+# 冒烟测试临时目录（跑发布产物时用，会建 sqlite 库与截图）
+backend/.smoke/
+# gofmt 行尾归一化检测的临时目录
+backend/.fmtcheck/
+
 # Go
 *.exe
 *.exe~

@@ -50,6 +50,13 @@ jobs:
       - name: Typecheck & build
         run: npm run build
 
+      # i18n 对称性门禁：五个语言文件（en/zh-CN/zh-TW/ja/ko）必须逐命名空间、
+      # 逐 key 完全一致，且页面里引用的 key 都真实存在。
+      # 少一个 key 的表现是界面直接显示 "ns_mine.emptyTrash" 这种原始串，
+      # tsc 与 vite 都发现不了 —— 只能靠这个检查拦。
+      - name: Verify i18n keys are symmetric across all 5 languages
+        run: python3 check_i18n.py
+
       # 守卫：本次构建产出的 frontend_dist 必须与仓库里提交的完全一致。
       # 不一致说明有人改了前端却没重建/提交 frontend_dist —— 直接判红并给出修复命令。
       # 路径用仓库根相对路径（git 从任意子目录都能正确比对）。

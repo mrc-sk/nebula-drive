@@ -1073,3 +1073,92 @@ StaticCache + Auth + WebDAV + 全部 REST 路由），用 `httptest` 真实发 H
 ### 遗留
 `V26-10.0-b` 三平台产物打包于本次修正**之前**，二进制里 `go:embed` 的还是写着 MIT 的旧前端。
 **重新打包后才能对外分发**，已在 CHANGELOG「已知遗留」标注。
+
+---
+
+## 14. 侧边栏三个入口点击无反应（+ 连带修掉六项既有缺陷）
+
+**日期**：2026-10-03
+
+### 根因：路由从未注册，被 catch-all 静默吞掉
+`App.tsx` 里 `/share-list`、`/tasks`、`/trash` 三条路径**一条都没有**。
+React Router v6 匹配不到时会落到文件末尾的
+`<Route path="*" element={<Navigate to="/" replace />} />`，
+被**静默重定向回首页** —— 不抛错、不白屏、URL 变了但内容没变，
+所以用户看到的现象就是「点了没反应」。
+
+这类 bug 难定位的原因是它**不留错误痕迹**：控制台干净、Network 正常、
+只有点一下才知道没跳。移动端底部 tabbar 的第二个入口指向的也是 `/share-list`，
+所以桌面侧栏和移动底栏同时是死的。
+
+修法本身不难，难的是知道该修什么 —— 一开始差点去查后端接口，
+实际上后端 `ListShares` / `ListTasks` / `GET /api/files?trash=1` 都好好地在那儿。
+
+### 顺带发现的六个既有缺陷
+排查三入口时把相关代码路径都读了一遍，发现的都是**已经上线、只是没人用到那个入口所以没暴露**：
+
+| # | 位置 | 症状 | 根因 |
+|---|---|---|---|
+| 1 | `api/client.ts` + `admin/Users.tsx` | 管理员用户列表恒为空 | 类型声明成 `items`，后端返回 `list` |
+| 2 | `components/NotificationBell.tsx` | 通知列表取不到 | 同上（且原写法 `(r.data as any).items \|\| r.data` 掩盖了类型错误） |
+| 3 | `layouts/MainLayout.tsx` | 侧栏「关于」任何语言都显示不出 | `labelKey: '关于'` 写成中文字面量，渲染时查 `ns_admin.关于`；且该 key 压根不存在 |
+| 4 | `pages/admin/Tasks.tsx` | 进行中任务显示成 `task.1` | 后端 `Status` 是 **int**，前端 `(tk.status \|\| tk.state \|\| 'pending') as TaskStatus` 硬转字符串枚举 |
+| 5 | 后端 `routers/router.go` | 任务「重试」按钮打 404 | 前端调 `POST /api/tasks/:id/retry`，后端从未注册 |
+| 6 | `pages/admin/Tasks.tsx` | 轮询空转 | 无活动任务时仍持续轮询；且无卸载守卫 |
+
+**缺陷 4 值得单说**：`status=0` 恰好是 falsy，会落到 `'pending'`，
+所以等待中的任务看起来完全正常 —— 是巧合掩盖了类型错误。
+一旦 `status=1` 就直接渲染成字面量 `task.1`，徽章配色也回落到灰色 pending。
+如果只测「等待中」和「已完成」两种状态，这个 bug 能一直藏着。
+现已补显式的 int→枚举映射（`toStatus`），两个任务页共用一份。
+
+### 重构：消除重复
+- **抽出 `GuardedPage`**：路由守卫的三段式（`installed === null` / `!installed` / `authBusy` / `!user`）
+  原本在 8 处手写了一遍。加第 9 条路由时不想再抄第 9 遍。
+- **抽出 `components/Modal.tsx`**：`Files.tsx` 私有一份、`admin/Users.tsx` 导出一份，现统一。
+- **抽出 `utils/format.ts`**：`formatSize` / `formatTime` 原本在 `Files.tsx` 里，
+  三个新页面各复制一份就是三份重复。
+- **`CreateTask` 从 67 行缩到 27 行**，抽出 `startTask` 供创建与重试共用 ——
+  否则 aria2 / net-http 的分派逻辑要写两遍，加新下载方式时极易只改一处。
+
+### 三个页面的功能边界（刻意不画空气按钮）
+后端能力有明确边界，UI 就只做后端支持的：
+- 分享列表：后端 `ListShares` 只返回 `owner_id = 当前用户`，没有「分享给我的」概念；
+  `models.Share.Password` 的 tag 是 `json:"-"`，密码永不返回（但 `ExtractCode` 是 `json:"extractCode"`，会返回）；
+  `Download` 字段从未自增，显示恒为 0。所以只做：列、复制链接、取消分享。
+- 回收站：`trash=1` 时 `parent` 参数被忽略，返回的是**跨目录扁平列表**而非某目录内容；
+  `Restore` 每次新建时间戳目录（批量还原 10 个 → 10 个目录）。这两点直接写进 UI 提示，
+  否则用户会以为是 bug。后端只有单条 restore/purge，批量操作前端**串行**循环（并发会放大 SQLite 写竞争）。
+- 离线下载：与 `/admin/tasks` 调同一接口，区别只在侧栏位置。
+
+### 测试：为什么补集成测试而不是靠手工点
+`TestIntegration_TaskRetryAndTrashEndpoints` 用 7 组断言锁住三个入口依赖的后端能力。
+其中「Retry 进行中任务返回 400」这条是刻意的：进行中重试会造成同一 URL 重复下载，
+这是个容易漏但危害实在的边界。
+
+### 一个新加的门禁：i18n 对称性
+本轮新增 40 个 key 跨 5 个语言文件。少一个 key 的表现是界面直接显示
+`ns_mine.emptyTrash` 这种原始串 —— **tsc 发现不了**（`t()` 接受任意 string），
+**vite 也发现不了**（运行时才渲染）。所以写了 `frontend/check_i18n.py` 并接进 CI。
+
+已做反向验证：故意把 `ko.ts` 的 `emptyTrash` 改名，脚本立刻报出 key 差异且退出码为 1；
+还原后恢复 0。（注意：用 `| head` 观察时退出码会被管道吞掉，要看真实退出码得重定向到 `/dev/null`。）
+
+### 验证
+- `npx tsc -b` → exit 0；
+- `go build ./...` 通过；`go test ./... -count=1` **19 个包全绿**（controllers 32.9s、routers 18.0s、
+  middleware 20.4s、models 20.0s）；
+- i18n 五语言均 466 行，`ns_mine` / `ns_share` / `task` 三段起始行完全一致；
+- **实机冒烟**：跑 Windows 发布产物 → 真实安装 → 登录 → 三个路由逐一确认
+  `location.pathname` 未被守卫重定向，各自侧栏高亮正确、面包屑与空状态正常。
+
+### 排查过程中我犯的两个错（都记下来）
+1. **用 503 判断「路由已注册」是错的**。`InstallGuard` 是 `r.Use` 注册的**全局**中间件，
+   未匹配路由也会经过它，所以不存在和不存在的路由在未安装状态下**都返回 503**。
+   正确甄别要在**已安装状态**下做：已注册→401（走鉴权），未注册→404。
+2. **Edge 的 `--screenshot=` 必须给绝对路径**，给相对路径会报
+   `Failed to write file` 但**仍然返回 rc=0**。这个「成功但无产物」的组合极易误判。
+
+### 遗留
+`models.Share.Download` 字段从未自增（前端显示恒为 0），属后端既有缺陷，
+本轮未动 —— 修它需要决定统计口径（是否需要定时任务），不在本次范围内。

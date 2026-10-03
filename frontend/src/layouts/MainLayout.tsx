@@ -60,7 +60,7 @@ const ADMIN_SUB = [
   { to: '/admin/policies', key: 'policies', Icon: Database, labelKey: 'policies' },
   { to: '/admin/plugins', key: 'plugins', Icon: Puzzle, labelKey: 'plugins' },
   { to: '/admin/settings', key: 'settings', Icon: Settings, labelKey: 'settings' },
-  { to: '/admin/about', key: 'about', Icon: Info, labelKey: '关于' },
+  { to: '/admin/about', key: 'about', Icon: Info, labelKey: 'about' },
 ] as const
 
 export default function MainLayout(props: MainLayoutProps) {

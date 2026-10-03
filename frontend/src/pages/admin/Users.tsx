@@ -40,7 +40,7 @@ export default function Users() {
     try {
       const [u, g] = await Promise.all([api.admin.users(page, size), api.admin.groups()])
       if (u?.code === 0 && u.data) {
-        setRows((u.data.items || []).filter((r: UserRow) => !keyword || match(r, keyword)))
+        setRows((u.data.list || []).filter((r: UserRow) => !keyword || match(r, keyword)))
         setTotal(u.data.total || 0)
       }
       if (g?.code === 0) setGroups(g.data || [])

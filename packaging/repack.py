@@ -1,42 +1,62 @@
 # -*- coding: utf-8 -*-
 """
-重新打包 V26-10.0-b 三平台发布物（内含 AGPL 前端）。
+重新打包 V26-10.0-b 三平台发布物（内嵌前端由 go:embed 打进二进制）。
 
 要点（历史踩坑，勿改）：
 - *.sh 必须 LF（CRLF 会让 Linux 报 bad interpreter: /bin/sh^M）；
 - *.bat 应 CRLF；
-- zip 需给 nebula 与 *.sh 置 0755 权限位（external_attr）；
-- packaging/ 源脚本本身是 CRLF，copy 出来要逐平台转换。
+- zip 需给二进制与 *.sh 置 0755 权限位（external_attr），否则 Linux/macOS
+  用户解压后还得手动 chmod +x；
+- **必须包含 LICENSE**：AGPL-3.0 要求分发二进制时随附许可证声明。
+  漏了它合规上就站不住脚，不要因为"文件多了不好看"而省掉；
+- zip 内条目统一带顶级目录前缀（NebulaDrive-<版本>-<平台>/）。
+  不带前缀的话解压出来是一堆散落在当前目录的文件，容易覆盖用户自己的同名文件；
+- 仓库工作区的 LICENSE / README.md 是 CRLF（git 索引里是 LF，但检出后
+  带 CRLF），所以文档类文件一律走 write_text 转换，不能 copy2。
 
-用法: python packaging/repack.py
+用法:
+    # 1) 交叉编译（输出必须用 Windows 可见路径，Git Bash 的 /tmp 对 go 不可见）
+    cd backend
+    GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o .ndbuild/nebula-windows-amd64.exe .
+    GOOS=linux   GOARCH=amd64 go build -ldflags="-s -w" -o .ndbuild/nebula-linux-amd64 .
+    GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o .ndbuild/nebula-darwin-amd64 .
+    cd ..
+    # 2) 组包
+    python packaging/repack.py
+
+注意：后端 frontend_dist 必须与 frontend/src 同步（CI frontend-ci.yml 有守卫），
+否则打出来的是旧前端。
 """
 import os
 import shutil
-import subprocess
-import sys
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
-BUILD = os.path.join(ROOT, "release", "_build")
+BUILD = os.path.join(ROOT, "backend", ".ndbuild")
 PKG = os.path.join(ROOT, "packaging")
 RELEASE = os.path.join(ROOT, "release")
 
 VERSION = "V26-10.0-b"
 
 PLATFORMS = [
-    # (目录后缀, 二进制名, 启动脚本名, 是否 windows)
-    ("windows-amd64", "nebula.exe", "start.bat", True),
-    ("linux-amd64", "nebula", "start.sh", False),
-    ("darwin-amd64", "nebula", "start.sh", False),
+    # (目录后缀, 编译产物名, 包内二进制名, 启动脚本名, 是否 windows)
+    ("windows-amd64", "nebula-windows.exe", "nebula.exe", "start.bat", True),
+    ("linux-amd64", "nebula-linux", "nebula", "start.sh", False),
+    ("darwin-amd64", "nebula-darwin", "nebula", "start.sh", False),
 ]
 
-# 每个发布目录应包含的文件
-COMMON_FILES = ["nebula", "start", "试用说明.md", "README.md"]
+# 文档类文件：统一转 LF 后写入。LICENSE 是 AGPL 义务，不能少。
+DOCS = [
+    ("LICENSE", "LICENSE", "lf"),
+    ("README.md", "README.md", "lf"),
+    ("试用说明.md", "试用说明.md", "lf"),
+]
 
 
 def read_text(p):
+    """newline="" 保留原始行尾信息，交给 write_text 统一处理。"""
     with open(p, "r", encoding="utf-8", newline="") as f:
         return f.read()
 
@@ -49,90 +69,73 @@ def write_text(p, s, eol):
         f.write(s.encode("utf-8"))
 
 
-def run_check(args, desc):
-    p = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if p.returncode != 0:
-        print(f"  [warn] {desc}: rc={p.returncode} {(p.stderr or '')[:300]}")
-    return p.returncode == 0
-
-
 def main():
     if not os.path.isdir(BUILD):
-        raise SystemExit("缺少 _build 目录，请先交叉编译: " + BUILD)
+        raise SystemExit("缺少编译产物目录: " + BUILD)
 
     os.makedirs(RELEASE, exist_ok=True)
     made = []
 
-    for suffix, binname, starter, is_win in PLATFORMS:
-        src = os.path.join(BUILD, f"nebula-{suffix}" + (".exe" if is_win else ""))
+    for suffix, buildname, binname, starter, is_win in PLATFORMS:
+        src = os.path.join(BUILD, buildname)
         if not os.path.exists(src):
-            print(f"[skip] 缺少 {src}")
+            print(f"[skip] 缺少编译产物 {src}")
             continue
 
-        d = os.path.join(RELEASE, f"NebulaDrive-{VERSION}-{suffix}")
+        pkgname = f"NebulaDrive-{VERSION}-{suffix}"
+        d = os.path.join(RELEASE, pkgname)
         if os.path.isdir(d):
             shutil.rmtree(d)
         os.makedirs(d)
 
         # 1) 二进制
         shutil.copy2(src, os.path.join(d, binname))
-        os.chmod(os.path.join(d, binname), 0o755)
 
         # 2) 启动脚本（行尾按平台转换）
-        sname = starter
-        ssrc = os.path.join(PKG, sname)
+        ssrc = os.path.join(PKG, starter)
         if os.path.exists(ssrc):
-            eol = "crlf" if is_win else "lf"
-            write_text(os.path.join(d, sname), read_text(ssrc), eol)
-            os.chmod(os.path.join(d, sname), 0o755)
-            print(f"  {suffix}: {sname} -> {eol}")
+            write_text(os.path.join(d, starter), read_text(ssrc), "crlf" if is_win else "lf")
 
-        # 3) 说明文档
-        doc = os.path.join(PKG, "试用说明.md")
-        if os.path.exists(doc):
-            write_text(os.path.join(d, "试用说明.md"), read_text(doc), "lf")
+        # 3) 文档（含 LICENSE —— AGPL 义务）
+        for src_name, dst_name, eol in DOCS:
+            base = os.path.join(PKG, src_name) if src_name == "试用说明.md" else os.path.join(ROOT, src_name)
+            if os.path.exists(base):
+                write_text(os.path.join(d, dst_name), read_text(base), eol)
+            else:
+                raise SystemExit(f"缺少必需文件: {base}")
 
-        readme = os.path.join(ROOT, "README.md")
-        if os.path.exists(readme):
-            write_text(os.path.join(d, "README.md"), read_text(readme), "lf")
-
-        # 4) 校验 shebang / 行尾
+        # 4) 自检：非 Windows 的 .sh 里出现 CR 就是不可用包
         if not is_win:
-            sh = os.path.join(d, sname)
-            if os.path.exists(sh):
-                with open(sh, "rb") as f:
-                    head = f.read(200)
-                if b"\r" in head:
-                    raise SystemExit(f"{suffix}: {sname} 仍含 CR，会导致 bad interpreter")
+            sh = os.path.join(d, starter)
+            with open(sh, "rb") as f:
+                head = f.read(200)
+            if b"\r" in head:
+                raise SystemExit(f"{suffix}: {starter} 仍含 CR，会导致 bad interpreter")
+            if not head.startswith(b"#!"):
+                raise SystemExit(f"{suffix}: {starter} 首行不是 shebang: {head[:20]!r}")
 
-        # 5) zip（权限位）
-        zp = os.path.join(RELEASE, f"NebulaDrive-{VERSION}-{suffix}.zip")
+        # 5) zip（权限位 + 顶级目录前缀）
+        zp = os.path.join(RELEASE, pkgname + ".zip")
         if os.path.exists(zp):
             os.remove(zp)
         with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-            for root, _dirs, files in os.walk(d):
-                for fn in sorted(files):
-                    fp = os.path.join(root, fn)
-                    arc = os.path.relpath(fp, d)
-                    attr = 0o644 << 16
-                    if fn == binname or fn.endswith(".sh"):
-                        attr = 0o755 << 16
-                    zi = zipfile.ZipInfo(arc, date_time=(2026, 10, 3, 17, 20, 0))
-                    zi.external_attr = attr
-                    zi.compress_type = zipfile.ZIP_DEFLATED
-                    with open(fp, "rb") as f:
-                        z.writestr(zi, f.read())
+            for fn in sorted(os.listdir(d)):
+                fp = os.path.join(d, fn)
+                if not os.path.isfile(fp):
+                    continue
+                zi = zipfile.ZipInfo(pkgname + "/" + fn, date_time=(2026, 10, 3, 12, 0, 0))
+                zi.external_attr = (0o755 if (fn == binname or fn.endswith(".sh")) else 0o644) << 16
+                zi.compress_type = zipfile.ZIP_DEFLATED
+                with open(fp, "rb") as f:
+                    z.writestr(zi, f.read())
 
-        print(f"[ok] {suffix}: 目录 {len(os.listdir(d))} 项, zip {os.path.getsize(zp):,} bytes")
+        print(f"[ok] {suffix}: 二进制 {os.path.getsize(os.path.join(d, binname)):,} B, "
+              f"zip {os.path.getsize(zp):,} B, {len(os.listdir(d))} 项")
         made.append(zp)
 
     print("\n=== 产出 ===")
     for p in made:
         print(" ", p)
-
-    # 清理构建中间目录（保留发布目录与 zip）
-    shutil.rmtree(BUILD, ignore_errors=True)
-    print("\n[clean] 已删除中间目录 _build")
 
 
 if __name__ == "__main__":

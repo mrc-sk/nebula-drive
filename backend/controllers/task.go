@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -52,6 +53,8 @@ type createTaskReq struct {
 // CreateTask 创建任务
 //   - HTTP：优先走 aria2 AddURI，aria2 不可用时回退到 net/http 下载逻辑
 //   - BT：磁力链接走 aria2 AddURI，.torrent 链接先下载种子再走 aria2 AddTorrent
+//
+// 分派细节见 startTask —— 与 RetryTask 共用同一套逻辑。
 func CreateTask(c *gin.Context) {
 	u := middleware.CurrentUser(c)
 	var req createTaskReq
@@ -60,61 +63,109 @@ func CreateTask(c *gin.Context) {
 		return
 	}
 
+	t := models.Task{OwnerID: u.ID, Type: req.Type, URL: req.URL, Status: 1, ParentID: req.ParentID}
+	if err := db.Get().Create(&t).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": err.Error()})
+		return
+	}
+	if err := startTask(&t); err != nil {
+		// 分派失败就让任务落「失败」态，而不是留在「进行中」永不推进 ——
+		// 用户可以直接在列表里重试（前提是比如 aria2 已就绪）。
+		db.Get().Model(&models.Task{}).Where("id = ?", t.ID).
+			Updates(map[string]any{"status": 3, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": t})
+}
+
+// startTask 按任务类型分派下载：HTTP 优先走 aria2 AddURI，不可用时回退 net/http；
+// BT 磁力链接走 AddURI，.torrent 链接先下载种子再走 AddTorrent。
+//
+// 抽出来是为了让 CreateTask 与 RetryTask 共用同一套分派逻辑 —— 否则重试就得复制
+// 一遍 aria2/net-http 的分支，两边很容易各自漂移。
+//
+// 调用方负责在失败时把错误写回 HTTP 响应；这里只返回 error。
+func startTask(t *models.Task) error {
 	am := aria2.GetManager()
 
-	if req.Type == "http" {
+	if t.Type == "http" {
 		// 优先尝试 aria2 AddURI
 		if am.IsReady() {
-			opts := map[string]any{"dir": aria2TaskDir(int(0))}
-			if gid, err := am.AddURI([]string{req.URL}, opts); err == nil {
-				t := models.Task{OwnerID: u.ID, Type: req.Type, URL: req.URL, Status: 1, ParentID: req.ParentID}
-				if err := db.Get().Create(&t).Error; err == nil {
-					go runAria2Task(t.ID, gid, t.OwnerID, t.ParentID)
-					c.JSON(http.StatusOK, gin.H{"code": 0, "data": t})
-					return
-				}
+			opts := map[string]any{"dir": aria2TaskDir(0)}
+			if gid, err := am.AddURI([]string{t.URL}, opts); err == nil {
+				go runAria2Task(t.ID, gid, t.OwnerID, t.ParentID)
+				return nil
 			}
 			// aria2 调用失败则回退到 net/http
 		}
 		// 回退：net/http 下载
-		t := models.Task{OwnerID: u.ID, Type: req.Type, URL: req.URL, Status: 1, ParentID: req.ParentID}
-		db.Get().Create(&t)
-		go runHTTPTask(t.ID, req.URL)
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": t})
-		return
+		go runHTTPTask(t.ID, t.URL)
+		return nil
 	}
 
 	// BT 类型
 	if !am.IsReady() {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "BT 下载需要 aria2，请先安装 aria2 后再试"})
-		return
+		return errors.New("BT 下载需要 aria2，请先安装 aria2 后再试")
 	}
 	var gid string
-	if strings.HasPrefix(req.URL, "magnet:") {
-		g, err := am.AddURI([]string{req.URL}, map[string]any{"dir": aria2TaskDir(0)})
+	if strings.HasPrefix(t.URL, "magnet:") {
+		g, err := am.AddURI([]string{t.URL}, map[string]any{"dir": aria2TaskDir(0)})
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": err.Error()})
-			return
+			return err
 		}
 		gid = g
 	} else {
 		// 先下载种子文件
-		data, derr := downloadBytes(req.URL)
+		data, derr := downloadBytes(t.URL)
 		if derr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "下载种子文件失败: " + derr.Error()})
-			return
+			return fmt.Errorf("下载种子文件失败: %w", derr)
 		}
 		g, err := am.AddTorrent(data, map[string]any{"dir": aria2TaskDir(0)})
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": err.Error()})
-			return
+			return err
 		}
 		gid = g
 	}
-	t := models.Task{OwnerID: u.ID, Type: req.Type, URL: req.URL, Status: 1, ParentID: req.ParentID}
-	db.Get().Create(&t)
 	go runAria2Task(t.ID, gid, t.OwnerID, t.ParentID)
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": t})
+	return nil
+}
+
+// RetryTask 重试一个已失败/已取消的任务。
+//
+// 语义是「用同一个 URL 重新排队」：把 status 重置为进行中、清空 progress 与 error，
+// 再走一遍 startTask 的分派逻辑。不复用原任务行而新建，是为了让重试历史在
+// ListTasks（按 id desc 排序）里可见，也避免重置一个可能已被 aria2 侧清理掉的 gid。
+func RetryTask(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	u := middleware.CurrentUser(c)
+
+	var t models.Task
+	if err := db.Get().First(&t, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "任务不存在"})
+		return
+	}
+	if !u.IsAdmin && t.OwnerID != u.ID {
+		c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": "无权操作该任务"})
+		return
+	}
+	// 只有终态任务可重试。进行中的任务重试会造成同一 URL 重复下载。
+	if t.Status == 0 || t.Status == 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "任务尚未结束，无需重试"})
+		return
+	}
+
+	// 重置状态后再分派：即使分派失败，任务也停在「失败」而不是永远「进行中」。
+	db.Get().Model(&models.Task{}).Where("id = ?", id).
+		Updates(map[string]any{"status": 1, "progress": 0, "error": ""})
+
+	if err := startTask(&t); err != nil {
+		db.Get().Model(&models.Task{}).Where("id = ?", id).
+			Updates(map[string]any{"status": 3, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0})
 }
 
 // aria2TaskDir 给每个任务一个独立的下载子目录（在 aria2 全局 --dir 下）

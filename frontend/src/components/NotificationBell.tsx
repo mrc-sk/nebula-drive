@@ -81,8 +81,8 @@ export default function NotificationBell() {
     try {
       const r = await api.notifications.list(1, 20)
       if (r?.code === 0 && r.data) {
-        const items = (r.data as any).items || r.data || []
-        setList(Array.isArray(items) ? items : [])
+        // 后端返回 { total, list }（见 controllers.ListNotifications）
+        setList(Array.isArray(r.data.list) ? r.data.list : [])
       }
     } catch { /* ignore */ }
   }, [])

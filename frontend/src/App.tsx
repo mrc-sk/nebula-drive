@@ -21,6 +21,35 @@ const Settings = lazy(() => import('./pages/admin/Settings'))
 const Tasks = lazy(() => import('./pages/admin/Tasks'))
 const Plugins = lazy(() => import('./pages/admin/Plugins'))
 const About = lazy(() => import('./pages/admin/About'))
+const ShareList = lazy(() => import('./pages/ShareList'))
+// 命名 TasksOffline 而非 Tasks：与上面的 pages/admin/Tasks 同名容易看错，
+// 且 i18n key 本来就叫 tasksOffline（离线下载）。
+const TasksOffline = lazy(() => import('./pages/TasksOffline'))
+const Trash = lazy(() => import('./pages/Trash'))
+
+/**
+ * 已安装 + 已登录 才能访问的页面的统一守卫。
+ *
+ * 之前每个路由都手写一遍 installed/authBusy/user 三段式三元，重复了七八次；
+ * 新增路由时很容易漏掉某一段（漏掉 authBusy 会在会话恢复期间闪出未登录态）。
+ */
+function GuardedPage({
+  installed,
+  authBusy,
+  user,
+  children,
+}: {
+  installed: boolean | null
+  authBusy: boolean
+  user: unknown
+  children: React.ReactNode
+}) {
+  if (installed === null) return <FullScreenLoading />
+  if (!installed) return <Navigate to="/install" replace />
+  if (authBusy) return <FullScreenLoading />
+  if (!user) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
 
 export interface BrandInfo {
   name: string
@@ -277,6 +306,11 @@ export default function App() {
             )
           }
         />
+        {/* 侧边栏这三个入口此前从未注册，命中下面的 catch-all 被重定向回「/」，
+            表现为「点了没反应」。守卫条件与 /files 完全一致。 */}
+        <Route path="/share-list" element={<GuardedPage installed={installed} authBusy={authBusy} user={user}><ShareList /></GuardedPage>} />
+        <Route path="/tasks" element={<GuardedPage installed={installed} authBusy={authBusy} user={user}><TasksOffline /></GuardedPage>} />
+        <Route path="/trash" element={<GuardedPage installed={installed} authBusy={authBusy} user={user}><Trash /></GuardedPage>} />
         <Route
           path="/share/:id"
           element={

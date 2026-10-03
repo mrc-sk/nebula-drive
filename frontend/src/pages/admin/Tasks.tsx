@@ -7,6 +7,28 @@ import { Modal } from './Users'
 type TaskType = 'http' | 'bt'
 type TaskStatus = 'pending' | 'running' | 'success' | 'failed'
 
+// 后端 Task.Status 是 int（0 等待 / 1 进行 / 2 完成 / 3 失败），
+// 必须显式映射成展示用的字符串枚举。
+//
+// 之前写的是 `(tk.status || tk.state || 'pending') as TaskStatus` —— 那相当于把
+// int 硬转成字符串枚举：status=1 会渲染成字面量 "task.1"，且徽章配色回落到 pending。
+// status=0 恰好因为 falsy 落到 'pending' 才显得"正常"，纯属巧合。
+const STATUS_BY_CODE: Record<number, TaskStatus> = {
+  0: 'pending',
+  1: 'running',
+  2: 'success',
+  3: 'failed',
+}
+
+function toStatus(raw: unknown): TaskStatus {
+  if (typeof raw === 'number') return STATUS_BY_CODE[raw] || 'pending'
+  // 兼容未来后端改成字符串枚举
+  if (typeof raw === 'string' && raw in { pending: 1, running: 1, success: 1, failed: 1 }) {
+    return raw as TaskStatus
+  }
+  return 'pending'
+}
+
 export default function Tasks() {
   const { t } = useTranslation()
   const [rows, setRows] = useState<any[]>([])
@@ -15,7 +37,6 @@ export default function Tasks() {
   const [type, setType] = useState<TaskType>('http')
   const [form, setForm] = useState({ url: '', parentId: '' })
   const [saving, setSaving] = useState(false)
-  const timerRef = useRef<any>(null)
 
   const load = async () => {
     try {
@@ -26,11 +47,42 @@ export default function Tasks() {
     }
   }
 
+  // 轮询：仅当存在「等待中/进行中」任务时才继续，否则空转。
+  // 之前是无条件 setInterval(load, 2000)，即使全部任务都已完成也一直在打接口。
   useEffect(() => {
-    load()
-    timerRef.current = setInterval(load, 2000)
+    let alive = true
+    let timer: any = null
+
+    const tick = async () => {
+      try {
+        const r = await api.tasks.list()
+        if (!alive) return // 卸载后不再 setState
+        if (r?.code === 0) {
+          setRows(r.data || [])
+          // 全部任务都进了终态就不再轮询
+          const hasActive = (r.data || []).some(
+            (t: any) => {
+              const s = toStatus(t.status ?? t.state)
+              return s === 'running' || s === 'pending'
+            },
+          )
+          if (!hasActive && timer) {
+            clearInterval(timer)
+            timer = null
+          }
+        }
+      } catch {
+        // 轮询失败静默重试，不打断用户
+      } finally {
+        if (alive) setLoading(false)
+      }
+    }
+
+    tick()
+    timer = setInterval(tick, 2000)
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
+      alive = false
+      if (timer) clearInterval(timer)
     }
   }, [])
 
@@ -64,7 +116,7 @@ export default function Tasks() {
 
   const retry = async (id: any) => {
     try {
-      await (api.tasks as any).retry?.(id)
+      await api.tasks.retry(id)
       load()
     } catch {
       alert('Failed')
@@ -106,7 +158,7 @@ export default function Tasks() {
             )}
             {!loading &&
               rows.map((tk) => {
-                const status = (tk.status || tk.state || 'pending') as TaskStatus
+                const status = toStatus(tk.status ?? tk.state)
                 const pct = Number(tk.progress ?? tk.percent ?? 0)
                 return (
                   <tr key={tk.id} className="hover:bg-white/5">
