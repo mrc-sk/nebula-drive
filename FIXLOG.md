@@ -907,3 +907,26 @@ if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 
 **未做的进一步优化**（按需）：Files 页仍 1.53 MB，因其内联了 plyr / hls.js / mammoth / xlsx /
 jszip 等预览依赖。若想继续压，可在 Files 内对这些预览/播放组件再做二级 `lazy` 拆分。
+
+---
+
+## 10. 点阵加载动画接入（前端体验）
+
+用户提供桌面 `JS.txt`（一个自包含 IIFE Web Component `<dot-motion-loader>`，canvas 点阵动画），
+选择接入为全局加载动画。落地方式：
+
+- 来源文件保留在桌面不动；项目内副本放到 `frontend/public/dot-motion-loader.js`。Vite 的 `public/`
+  会原样拷到产物根目录，**dev 与内嵌二进制（Go `go:embed`）下均能用**，无需改 `web.go`。
+- `frontend/index.html` 的 `<head>` 内用 `<script defer src="/dot-motion-loader.js"></script>`
+  注册：`customElements.define` 在脚本执行时自动注册，保证 React 渲染前已可用；`defer` 不阻塞 HTML 解析。
+- `frontend/src/App.tsx` 的 `FullScreenLoading()` 把原 `Loader2` 旋转圈换成
+  `<dot-motion-loader style={{ width: '100px' }} />`。组件 `:host` 默认 48px、`canvas{width:100%}`，
+  用内联 width 放大到 100px 居中；canvas 透明（`clearRect` 而非填背景），只绘制点阵——
+  暗色底点 + `primary` 紫色辉光活动点，在暗色主题上自然融合，无黑块。
+- 新增 `frontend/src/types/dot-motion-loader.d.ts`，给该自定义元素补齐 JSX 类型，避免
+  `tsc -b` 报 `Property 'dot-motion-loader' does not exist on type JSX.IntrinsicElements`。
+  （lucide 的 `Loader2` 仅 `FullScreenLoading` 使用，已从 import 移除；`X`/`Info` 仍被使用。）
+
+验证：`npm run build`（`tsc -b` 严格类型检查 + `vite` 生产构建）通过；`dot-motion-loader.js`
+已正确进入 `backend/frontend_dist` 根目录；`go build ./...`（含 `go:embed all:frontend_dist`）
+通过。`frontend_dist` 同步守卫（CI）继续有效：源码与内嵌产物一致。

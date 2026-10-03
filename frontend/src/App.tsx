@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState, useRef, useCallback } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { Loader2, X, Info } from 'lucide-react'
+import { X, Info } from 'lucide-react'
 import { api } from './api/client'
 import { useAuthStore } from './store/auth'
 import { useUserPrefsStore } from './store/user'
@@ -416,7 +416,7 @@ function AcrylicBackground() {
 function FullScreenLoading() {
   return (
     <div className="flex h-full items-center justify-center">
-      <Loader2 className="h-8 w-8 animate-spin text-nebula-300" />
+      <dot-motion-loader style={{ width: '100px' }} />
     </div>
   )
 }
