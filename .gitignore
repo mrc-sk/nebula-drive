@@ -15,6 +15,12 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 *.tsbuildinfo
+# tsc -b 从 vite.config.ts 生成的产物（构建时自动再生，不应进库）
+frontend/vite.config.js
+frontend/vite.config.d.ts
+# tsc -b 增量时间戳垃圾文件
+frontend/vite.config.js.timestamp-*.mjs
+*.timestamp-*.mjs
 
 # 测试运行产物
 # 测试里 ensureDefaultPolicy 用的是相对路径 "uploads"，会在各包的测试工作目录下

@@ -31,10 +31,13 @@
 | — | 测试连接不关闭，Windows 上清理失败致误判 FAIL | 中 | ✅ 已修 | `pkg/testutil/db.go`、`pkg/db/db_test.go`、`controllers/install_test.go` |
 | — | `db.Init` 覆盖全局实例时泄漏旧连接池 | 中 | ✅ 已修 | `pkg/db/db.go` |
 
-> 验证状态：`go build ./...` ✅ ｜ `go vet ./...` ✅ ｜ `go test ./...` ✅ 全部通过（12 个包）
-> ｜ GitHub Actions `go test -race` 双平台（ubuntu + windows）✅
+> 验证状态：
+> - 后端：`go build` ✅ ｜ `go vet` ✅ ｜ `go test -race` 双平台（ubuntu + windows）✅（全量测试通过）
+> - 前端：GitHub Actions `npm ci` + `npm run build`（`tsc -b` 严格类型检查 + `vite` 生产构建）✅，
+>   并校验 `backend/frontend_dist` 与构建产物一致 ✅
 >
-> **审查清单 15 项 + 追加加固 3 项已全部完成。** 剩余的可选改进见文末「后续建议」。
+> **审查清单 15 项 + 追加加固 3 项（S-1~S-3）已全部完成**；后续两处非缺陷改进
+> （`UpdateUser` 自操作保护、前端 CI）亦已补上，仅剩"5 项进程内存状态外置到 Redis"按需处理。
 
 ---
 
@@ -866,13 +869,24 @@ if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 
 ---
 
-## 8. 遗留项
+## 8. 遗留项与本轮补充
 
-均为**非缺陷**的改进建议：
+均为**非缺陷**的改进；其中两项已在本轮补上，一项按需处理。
 
-1. **`UpdateUser` 无自操作保护** —— 管理员可把自己 `is_admin` 置 false 或改 `status`，
-   导致误操作后无法进入后台（`DeleteUser` 有保护，`UpdateUser` 没有）。
-   属自我锁定而非越权，危害低。
-2. **5 项进程内存状态** —— WebDAV 锁、登录失败计数、验证码阈值、通用限流、分片会话。
-   多副本部署需外置到 Redis，README「部署形态」已列明。
-3. **CI 目前只跑后端** —— 前端（React + Vite）无 lint / 类型检查 / 测试。
+### 已补强
+
+- **`UpdateUser` 自操作保护**（原 #1）—— 管理员不能把自己 `is_admin` 置 false，也不能把
+  `status` 改成非 0（即 `auth.go` 的"已封禁"），否则一次误操作就永久失去后台访问权限。
+  与 `DeleteUser` 的"不能删除自己"形成完整闭环。`controllers/admin_selflock_test.go`
+  用 4 个用例覆盖（自降级拦截 / 自封禁拦截 / 自改中性字段放行 / 降级他人放行），并做了
+  **变异验证**：临时去掉拦截后两个用例即 FAIL，证明守卫真实生效。
+- **前端 CI**（原 #3）—— 新增 `.github/workflows/frontend-ci.yml`：node 20 + `npm ci` +
+  `npm run build`（`tsc -b` 严格类型检查 + `vite` 生产构建）。额外加 **`frontend_dist` 同步守卫**：
+  防止改了前端源码却没重建并提交 `backend/frontend_dist`，导致二进制内嵌的是过期页面。
+  已交叉验证 node 22 / 24 构建产物哈希完全一致（esbuild 版本锁定，与 node 版本无关），
+  故 CI 的 node 20 不会出现工具链漂移误报。
+
+### 仍待处理（按需）
+
+- **5 项进程内存状态** —— WebDAV 锁、登录失败计数、验证码阈值、通用限流、分片会话。
+  多副本部署需外置到 Redis，README「部署形态」已列明。

@@ -1,0 +1,63 @@
+name: Frontend CI
+
+# 前端（React + Vite + TypeScript）质量门。此前 CI 只跑后端，前端零校验。
+# 这里做两件事：
+#   1) tsc -b 严格类型检查（tsconfig 已开 strict）+ vite 生产构建 —— 任一不过即红；
+#   2) 校验 backend/frontend_dist（被 Go go:embed 内嵌）与本次前端构建产物一致，
+#      防止"改了前端源码却忘了重建并提交的 frontend_dist"，导致二进制里跑的是过期页面。
+on:
+  push:
+    branches: [main]
+    paths: ['frontend/**', '.github/workflows/frontend-ci.yml']
+  pull_request:
+    paths: ['frontend/**', '.github/workflows/frontend-ci.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: frontend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# 整个 job 在 frontend/ 下跑；setup-node 的 cache 路径相对于仓库根解析，
+# 所以 package-lock.json 路径不能套 working-directory（与 go-ci 同理）
+defaults:
+  run:
+    working-directory: frontend
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # 干净安装：严格按 package-lock 还原，保证可复现（CI 不应出现"我本地能过"）
+      - name: Install dependencies
+        run: npm ci
+
+      # 关键门禁：tsc -b 类型检查 + vite 生产构建。
+      # 构建产物输出到 ../backend/frontend_dist（被 Go go:embed 内嵌）。
+      # 若前端源码有类型错误，tsc 会先于 vite 失败。
+      - name: Typecheck & build
+        run: npm run build
+
+      # 守卫：本次构建产出的 frontend_dist 必须与仓库里提交的完全一致。
+      # 不一致说明有人改了前端却没重建/提交 frontend_dist —— 直接判红并给出修复命令。
+      # 路径用仓库根相对路径（git 从任意子目录都能正确比对）。
+      - name: Verify embedded frontend_dist is in sync
+        run: |
+          if ! git diff --quiet -- backend/frontend_dist; then
+            echo "::error::backend/frontend_dist 与本次前端构建不一致（前端源码改了但没重建 frontend_dist）"
+            echo "本地修复：在 frontend/ 下执行 'npm run build' 后再提交 backend/frontend_dist/"
+            git --no-pager diff --stat -- backend/frontend_dist
+            exit 1
+          fi

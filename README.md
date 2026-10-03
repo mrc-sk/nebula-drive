@@ -210,6 +210,21 @@ nebula-drive/
 
 ---
 
+## 🔧 CI / 持续集成
+
+两个 GitHub Actions 工作流（`.github/workflows/`）：
+
+| 工作流 | 触发条件 | 做什么 |
+|---|---|---|
+| `go-ci.yml` | 改 `backend/**` 或工作流本身 | `go build` + `go vet` + `go test -race`（ubuntu + windows 双平台，需 cgo） |
+| `frontend-ci.yml` | 改 `frontend/**` 或工作流本身 | `npm ci` + `npm run build`（`tsc -b` 严格类型检查 + `vite` 生产构建），并校验 `backend/frontend_dist` 与构建产物一致 |
+
+> ⚠️ **内嵌前端同步约定**：`backend/frontend_dist` 被 Go `go:embed` 打进单二进制。
+> 改了前端源码后，必须在 `frontend/` 下执行 `npm run build` 再一并提交 `backend/frontend_dist/`，
+> 否则 `frontend-ci.yml` 的同步守卫会判红。
+
+---
+
 ## 📝 开源协议
 
 > **GNU Affero General Public License v3.0（AGPL-3.0）**

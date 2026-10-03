@@ -87,6 +87,24 @@ func UpdateUser(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
 		return
 	}
+
+	// 自操作保护：管理员不能把自己踢出后台。
+	// DeleteUser 已有"不能删除自己"保护，此处补上对应的"不能降级/封禁自己"。
+	// 否则一次误操作（is_admin→false 或 status→非 0，即 auth.go 里的"已封禁"）
+	// 就会永久失去后台访问权限。仅拦截"操作对象正是自己"的请求；
+	// 管理员改其他用户（含降级其他管理员）不受影响。
+	cur := middleware.CurrentUser(c)
+	if cur != nil && uint(id) == cur.ID {
+		if req.IsAdmin != nil && !*req.IsAdmin {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "不能取消自己的管理员权限"})
+			return
+		}
+		if req.Status != nil && *req.Status != 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "不能封禁或禁用自己"})
+			return
+		}
+	}
+
 	updates := map[string]any{}
 	if req.Status != nil {
 		updates["status"] = *req.Status
@@ -109,17 +127,19 @@ func UpdateUser(c *gin.Context) {
 	}
 	db.Get().Model(&models.User{}).Where("id = ?", id).Updates(updates)
 
-	cur := middleware.CurrentUser(c)
-	detail, _ := json.Marshal(updates)
-	db.Get().Create(&models.AuditLog{
-		UserID:   cur.ID,
-		UserName: cur.UserName,
-		Action:   "admin_update_user",
-		Target:   strconv.Itoa(id),
-		IP:       c.ClientIP(),
-		UA:       c.Request.UserAgent(),
-		Detail:   string(detail),
-	})
+	// 审计：AdminOnly 守卫保证 cur 非空；这里再兜一层 nil 防御避免极端路径 panic
+	if cur != nil {
+		detail, _ := json.Marshal(updates)
+		db.Get().Create(&models.AuditLog{
+			UserID:   cur.ID,
+			UserName: cur.UserName,
+			Action:   "admin_update_user",
+			Target:   strconv.Itoa(id),
+			IP:       c.ClientIP(),
+			UA:       c.Request.UserAgent(),
+			Detail:   string(detail),
+		})
+	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0})
 }
