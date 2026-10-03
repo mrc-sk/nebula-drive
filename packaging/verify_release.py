@@ -1,9 +1,16 @@
-"""校验 release/ 下三平台发布包：二进制平台、zip CRC、权限位、行尾、内嵌前端是否为新版。"""
+"""校验 release/ 下三平台发布包：二进制平台、zip CRC、权限位、行尾、内嵌前端是否为新版。
+
+用法：python packaging/verify_release.py（从任意工作目录运行都可以）
+"""
 import os
 import stat
 import zipfile
 
-REL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "release")
+# 脚本在 packaging/ 下，release/ 是它的**上级**目录。
+# 写成 os.path.join(dirname, "release") 会去找 packaging/release —— 不存在，
+# 于是三个包全报"zip 存在"失败，看起来像打包丢了，实际只是路径错一层。
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REL = os.path.join(ROOT, "release")
 VERSION = "V26-10.0-b"
 PLATFORMS = ["windows-amd64", "linux-amd64", "darwin-amd64"]
 
@@ -19,6 +26,11 @@ EXPECT_MAGIC = {
 }
 
 fail = 0
+
+# 路径层错必须在这里就炸掉。若放任它走到逐包检查，三个包会各报一次
+# "zip 存在"失败 —— 看起来像"打包丢了三个包"，实际只是目录找错一层。
+if not os.path.isdir(REL):
+    raise SystemExit("找不到发布目录: %s\n（是否在错误的工作目录，或还没跑 packaging/repack.py？）" % REL)
 
 
 def check(cond, msg):
