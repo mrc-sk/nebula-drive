@@ -90,10 +90,20 @@
 
 - **发布包补入 `LICENSE`**（`packaging/repack.py`）：AGPL-3.0 要求分发二进制时随附许可证声明，
   原脚本漏掉了它，合规上站不住脚。
+- **Linux / macOS 包补入 `stop.sh`**：`start.sh --daemon` 会写 `.nebula.pid` 并提示
+  「停止服务请执行 `./stop.sh`」，`试用说明.md` 也在教用户执行 `./stop.sh` ——
+  但原脚本只复制了 `start.sh`。用户按文档操作会直接吃到 `No such file or directory`。
+  `build-release.sh` 一直有复制它，只有 `repack.py` 漏了。
+- **Linux 包补入 `Linux上手说明.md`**：跨平台的 `试用说明.md` 没覆盖 Linux 用户真正会卡的地方 ——
+  必须先解压不能直接跑压缩包、`chmod +x` 的时机、`uname -m` 确认架构、
+  `bad interpreter: /bin/sh^M` 的真实原因（说明文件被改坏，不是脚本问题）、
+  以及「纯静态链接（`CGO_ENABLED=0`）所以不挑 glibc，老发行版也能跑」这条实用信息。
 - 包内文本统一转 LF（仓库工作区的 `LICENSE` / `README.md` 是 CRLF，直接 copy 会带进包）。
 - zip 条目统一带顶级目录前缀，避免解压后一堆散落文件覆盖用户同名文件。
-- 新增 `packaging/verify_release.py`：78 项自动校验（zip CRC、平台魔数、权限位、行尾、
-  内嵌前端是否为新版），三平台全通过。
+- 新增 `packaging/verify_release.py`：自动校验 zip CRC、平台魔数、权限位、行尾、
+  内嵌前端是否为新版，以及**「文档里提到的文件是否真的在包里」**
+  （`stop.sh` / `Linux上手说明.md` 断言），三平台全通过。
+- `repack.py` 的 `.sh` 自检从「只查启动脚本」改为**遍历包内全部 `.sh`**，避免漏检。
 
 ### ⚖️ 许可
 

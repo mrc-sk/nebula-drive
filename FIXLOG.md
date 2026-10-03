@@ -1162,3 +1162,68 @@ React Router v6 匹配不到时会落到文件末尾的
 ### 遗留
 `models.Share.Download` 字段从未自增（前端显示恒为 0），属后端既有缺陷，
 本轮未动 —— 修它需要决定统计口径（是否需要定时任务），不在本次范围内。
+
+---
+
+## 15. Linux 分发包：文档教用户执行 stop.sh，但包里没有 stop.sh
+
+**日期**：2026-10-03（给朋友分发 Linux 版时发现）
+
+### 怎么发现的
+准备把 Linux 包发给朋友之前，逐条核对了「包内文件」与「说明文档里让用户敲的命令」，
+发现 `试用说明.md` 第 30 行写着：
+
+```
+- **Linux / macOS 后台运行**（./start.sh --daemon）：执行 ./stop.sh
+```
+
+而 `start.sh` 自己也有两处提到 `stop.sh`：
+
+```sh
+#   ./start.sh --daemon     后台运行，日志写nebula.log，用 ./stop.sh 停止
+echo "  [信息] PID=$PID ，停止服务请执行 ./stop.sh"
+```
+
+**但包里只有 `start.sh`，没有 `stop.sh`。**
+朋友按文档操作会直接吃到 `./stop.sh: No such file or directory` ——
+而且是在他已经开始用之后才发现的那种。
+
+### 根因：两份打包脚本，只有一份记得这文件
+- `packaging/build-release.sh` 一直有 `cp packaging/start.sh packaging/stop.sh ...`
+- `packaging/repack.py` 只复制了 `starter`（即 `start.sh`）
+
+也就是说 `repack.py` 是一份**平行实现**，两边各写各的。
+写它的时候没对照 `build-release.sh` 已经处理过的事，于是漏了。
+这类「两份实现各写各的」的地方，review 时只能靠逐文件对照，
+不能指望「我照着原意写」—— 原意已经被另一份脚本固化了。
+
+### 修法
+1. `repack.py` 加 `SH_SCRIPTS = ["start.sh", "stop.sh"]`，Linux/macOS 包都带上；
+2. **`.sh` 自检从「只查启动脚本」改为遍历包内全部 `.sh`** ——
+   原来的写法漏掉任何一个脚本都会让用户撞上 `bad interpreter`；
+3. `verify_release.py` 加断言：Linux/macOS 包必须含 `stop.sh` 与 `Linux上手说明.md`。
+   **这条断言守的是「文档提到的文件必须在包里」** ——
+   比检查文件数量有意义得多，数量对但缺某个文件的情况正是这次漏的。
+
+### 顺带：Linux 专属上手说明
+跨平台的 `试用说明.md` 讲了功能，但没讲 Linux 用户真正会卡的点。
+新增 `packaging/Linux上手说明.md`，只补这些（不重复已有内容）：
+
+- **必须先解压**，不能直接跑压缩包
+- `chmod +x` 的时机 —— 明确说明「包里已带权限，是某些解压工具会丢它」
+- `uname -m` 确认架构：输出 `aarch64`/`arm64` 说明这个包不适用
+- `bad interpreter: /bin/sh^M` 的**真实原因**是文件传输中被改坏，
+  不是脚本写错 —— 避免用户去改脚本
+- **纯静态链接（`CGO_ENABLED=0`）不依赖 glibc** ——
+  所以 CentOS 7 / Ubuntu 16.04 这类老发行版也能跑，
+  不用为了它折腾装新系统
+- 「只监听 127.0.0.1 是故意的」+ 想改监听地址的代价（无 HTTPS，别直接暴公网）
+
+### 验证
+- 三平台重新交叉编译（`CGO_ENABLED=0 GOPROXY=off`），`repack.py` 重新组包，全平台校验通过
+- **真实解压测试**：用 Python 解压 zip 模拟 `unzip`，确认 `stop.sh` 在内、
+  权限位 755、带 `+x`；`sh -n` 语法检查两个脚本均通过
+- 模拟 `nebula` 无执行权限（644）时 `start.sh` 的 ELF 魔数检测：`7f454c46` 判定正确
+- `stop.sh` 在无 `.nebula.pid` 时的行为：给出可操作提示（前台运行请Ctrl+C），不是报错
+- **完整用户流程冒烟**（13 项全通过）：登录 → 上传 → 分享（含提取码）→
+  分享列表 → 任务列表 → 删除进回收站 → 回收站列表 → 还原 → 回收站清空 → 分享详情

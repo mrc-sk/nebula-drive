@@ -99,9 +99,16 @@ for plat in PLATFORMS:
                 # 只确认它确实是二进制。
                 check(b"\x00" in data[:4096], base + " 确为二进制（含 NUL）")
 
-        # 5. 必须带的文档
+        # 5. 必须带的文件
         for must in ("LICENSE", "README.md", "试用说明.md"):
             check(prefix + must in names, "含 " + must)
+
+        # Linux/macOS 包必须带 stop.sh：start.sh --daemon 会写 .nebula.pid 并
+        # 提示「用 ./stop.sh 停止」，试用说明也教用户执行 ./stop.sh。
+        # 只发 start.sh 的话，朋友按文档操作直接吃 No such file or directory。
+        if plat != "windows-amd64":
+            check(prefix + "stop.sh" in names, "含 stop.sh（--daemon 停止用，说明文档引用了它）")
+            check(prefix + "Linux上手说明.md" in names, "含 Linux上手说明.md（Linux 专属上手指引）")
 
     # 6. 磁盘目录与 zip 一致
     check(os.path.isdir(ddir), "解压目录存在")

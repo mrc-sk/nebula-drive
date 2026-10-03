@@ -54,6 +54,17 @@ DOCS = [
     ("试用说明.md", "试用说明.md", "lf"),
 ]
 
+# Linux 包额外带一份上手说明：试用说明.md 是跨平台的通用文档，
+# Linux 用户真正会卡的点（解压方式、chmod、uname -m 查架构、
+# bad interpreter 原因、静态链接所以不挑 glibc）都在这份里。
+LINUX_DOC = "Linux上手说明.md"
+
+# Linux / macOS 专有脚本。stop.sh 必须带上：
+# start.sh --daemon 会写 .nebula.pid 并提示「用 ./stop.sh 停止」，
+# 试用说明第 30 行也让用户执行 ./stop.sh —— 只发 start.sh 的话，
+# 朋友按文档操作会直接得到 "No such file or directory"。
+SH_SCRIPTS = ["start.sh", "stop.sh"]
+
 
 def read_text(p):
     """newline="" 保留原始行尾信息，交给 write_text 统一处理。"""
@@ -92,9 +103,21 @@ def main():
         shutil.copy2(src, os.path.join(d, binname))
 
         # 2) 启动脚本（行尾按平台转换）
+        #    Windows 只有 start.bat；Linux/macOS 还要带上 stop.sh（见 SH_SCRIPTS 注释）
         ssrc = os.path.join(PKG, starter)
         if os.path.exists(ssrc):
             write_text(os.path.join(d, starter), read_text(ssrc), "crlf" if is_win else "lf")
+        else:
+            raise SystemExit(f"缺少启动脚本: {ssrc}")
+
+        if not is_win:
+            for extra in SH_SCRIPTS:
+                if extra == starter:
+                    continue
+                epath = os.path.join(PKG, extra)
+                if not os.path.exists(epath):
+                    raise SystemExit(f"缺少脚本: {epath}")
+                write_text(os.path.join(d, extra), read_text(epath), "lf")
 
         # 3) 文档（含 LICENSE —— AGPL 义务）
         for src_name, dst_name, eol in DOCS:
@@ -104,15 +127,25 @@ def main():
             else:
                 raise SystemExit(f"缺少必需文件: {base}")
 
-        # 4) 自检：非 Windows 的 .sh 里出现 CR 就是不可用包
+        # 3.1) Linux 包额外带上手说明
         if not is_win:
-            sh = os.path.join(d, starter)
-            with open(sh, "rb") as f:
-                head = f.read(200)
-            if b"\r" in head:
-                raise SystemExit(f"{suffix}: {starter} 仍含 CR，会导致 bad interpreter")
-            if not head.startswith(b"#!"):
-                raise SystemExit(f"{suffix}: {starter} 首行不是 shebang: {head[:20]!r}")
+            ldoc = os.path.join(PKG, LINUX_DOC)
+            if not os.path.exists(ldoc):
+                raise SystemExit(f"缺少 Linux 上手说明: {ldoc}")
+            write_text(os.path.join(d, LINUX_DOC), read_text(ldoc), "lf")
+
+        # 4) 自检：非 Windows 的 .sh 里出现 CR 就是不可用包
+        #    遍历全部 .sh（不只启动脚本）—— 漏掉任何一个都会让用户撞上 bad interpreter
+        if not is_win:
+            for sh_name in sorted(os.listdir(d)):
+                if not sh_name.endswith(".sh"):
+                    continue
+                with open(os.path.join(d, sh_name), "rb") as f:
+                    head = f.read(200)
+                if b"\r" in head:
+                    raise SystemExit(f"{suffix}: {sh_name} 仍含 CR，会导致 bad interpreter")
+                if not head.startswith(b"#!"):
+                    raise SystemExit(f"{suffix}: {sh_name} 首行不是 shebang: {head[:20]!r}")
 
         # 5) zip（权限位 + 顶级目录前缀）
         zp = os.path.join(RELEASE, pkgname + ".zip")
