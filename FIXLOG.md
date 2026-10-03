@@ -930,3 +930,92 @@ jszip 等预览依赖。若想继续压，可在 Files 内对这些预览/播放
 验证：`npm run build`（`tsc -b` 严格类型检查 + `vite` 生产构建）通过；`dot-motion-loader.js`
 已正确进入 `backend/frontend_dist` 根目录；`go build ./...`（含 `go:embed all:frontend_dist`）
 通过。`frontend_dist` 同步守卫（CI）继续有效：源码与内嵌产物一致。
+
+### 修正：底点透明（同节补充）
+
+初版用了桌面 `JS.txt`，其点阵 `background` 为 `[0,0,0,1]`（不透明黑底点），在暗色加载区会显出
+黑点网格。用户反馈后改用 `Downloads/loader-1.js`（`background:[0,0,0,0]`，alpha=0）：底点不再绘制，
+仅保留 `primary` 紫色辉光活动点，暗色主题下干净无黑点。两文件为同一工具导出，组件名/`:host`/绘制
+逻辑完全一致，故 `index.html` 注册与 `App.tsx` 用法无需改动——仅替换 `public/dot-motion-loader.js`
+并重 build 即可。提交 `28252b7`。
+
+---
+
+## 11. 全栈集成测试 + Windows 存储路径修复（提交 `ce1ad77`）
+
+### 背景
+`controllers/*_test.go` 全部用 `newTestRouter()`：把单个 handler 挂到空 `gin.New()`、手动
+`c.Set(CtxUserKey, u)` 注入用户。这绕过了完整的认证 / 安装守卫 / 权限中间件链——而 CODE_REVIEW
+里修的 P0 恰好**全部**发生在这些中间件与 WebDAV 层。也就是说：修复本身没有测试保护。
+
+### 新增 `backend/routers/integration_test.go`（package routers_test）
+启动 `routers.Setup()` 完整引擎（Recovery→SecurityHeaders→Gzip→CORS→IPGuard→InstallGuard→
+StaticCache + Auth + WebDAV + 全部 REST 路由），用 `httptest` 真实发 HTTP 请求，走生产完全一致的路径。
+
+打通完整引擎有三个必备前提（都曾卡住）：
+1. `conf.Save()` 是唯一能把 `installed` 翻 true 的公开途径（`markInstalled` 私有），
+   否则 `InstallGuard` 把所有 `/api` 业务路由挡成 503；
+2. 必须 seed Group(1 default/开 WebDAV、2 admin/-1) + Policy(1 local) + 品牌与上传安全 settings，
+   并注入 `service.SetSettingGetter` / `SetQuotaProvider` + `jwt.Init()` + `SeedDefaultPlans()`；
+3. **两套认证路径不同**——REST 走 cookie `nebula_token` / `Bearer` → JWT → 校验 `sessions` 表；
+   WebDAV 走 **HTTP Basic**（`webdav.basicAuth`）查库 + bcrypt 比对 + `Group.WebDAVEnabled`，
+   与 session/JWT 无关。测试需分别构造。
+
+覆盖 5 组已修 P0：WebDAV 路径穿越、WebDAV PUT 覆盖、SSRF 拒绝、权限矩阵、文件生命周期
+（上传→复制→软删→purge，全程校验 DB + 物理文件 + 配额三者一致）。
+
+### 顺带修掉的真实数据错位缺陷
+`FileLifecycle` 起初挂在"物理文件丢失"上。排查发现不是测试写法问题，而是**生产缺陷**：
+存储策略 config 由字符串拼接生成 `{"path":"C:\Users\...\003"}`，反斜杠在 JSON 中不是合法转义，
+`json.Unmarshal` 直接失败；而代码写的是 `_ = json.Unmarshal(...)` **把错误吞了**，
+`cfg.Path` 为空后静默回落到**相对目录** `uploads`——相对路径按**进程 CWD** 解析。
+于是 Windows 上所有上传都落到与配置声明无关的位置，文件错乱且极易丢失，**全程不报错**。
+
+- `models.LocalPolicyConfig(path)`：改用 `json.Marshal` 正确转义，替换全部 3 处拼接
+  （`main.ensureDefaults` / `install.ensureDefaultPolicy` / 测试）；
+- `filesystem.New`：不再吞掉 Unmarshal 错误——解析失败时优先回退 `conf.UploadPath`
+  （绝对路径）并打日志，仍拿不到才显式报错，**绝不静默落到相对目录**；
+- `filesystem` 原有测试自己也用了同样错误的拼接写法，被新 fail-closed 逻辑拦下，一并修正；
+- 新增 `TestLocalConfigJSONEscaping`，双向锁死"正确转义可写入目标目录"与"畸形 config 不得变相对目录"。
+
+验证：`go build ./...` 通过，`go test ./...` 全绿（19 包）。`-race` 本机不可跑
+（`CGO_ENABLED=0` 且无 gcc），CI 已配 `CGO_ENABLED=1` + gcc 前置检查，新测试自动纳入。
+
+### 两个测试侧踩坑（非被测代码 bug）
+- **PROPFIND 的 `Depth`**：不传时 `propfind()` 默认 `depth="0"`（符合 RFC 4918 §9.1，只返回资源
+  自身、不返回子项）。断言"应列出子文件"必须显式传 `Depth: 1`。
+- **gofmt**：仓库既有文件是 CRLF，`gofmt -l` 会把几乎所有文件都列出来（噪声）。
+  不可全量 `gofmt -w`（会生成覆盖全仓库的无关 diff），只对新建文件执行。
+
+---
+
+## 12. 打包三平台 V26-10.0-b
+
+### 版本号规则（本次确立）
+`V<两位年号>-<月>.<版本>` + 可选后缀：测试版 `-b` / 热修复 `-PR` / 特殊 `-S`。
+本次为 2026 年 10 月，改动含新增功能与修复但未发正式版，故取 `V26-10.0-b`。
+（历史 tag 为另一套 `V1-0.0.x-beta` 命名，两套并存，本次按新规则。）
+
+### 产物（`release/`，已被 `.gitignore` 忽略）
+`NebulaDrive-V26-10.0-b-{windows,linux,darwin}-amd64`，各含目录 + zip
+（15.36 / 15.11 / 15.38 MB）。构建：`CGO_ENABLED=0 go build -trimpath -ldflags="-s -w"`，
+在 Windows 上直接交叉编译，未走 `packaging/build-release.bat`——它版本取自 `git describe --tags`，
+无新 tag 时会退化成 `dev`（上次打包就因此产出了 `-dev` 命名）。
+
+### 打包要点
+- **前端同步**：`go:embed` 直接嵌 `backend/frontend_dist`，不同步即打出旧页面。打包前已确认
+  `git status -- frontend/ backend/frontend_dist/` 为空（CI `frontend-ci.yml` 有同步守卫）；
+- **行尾按平台分别转**（最易踩）：`*.sh` 必须 **LF**（CRLF 会让 Linux 报
+  `bad interpreter: /bin/sh^M`，包直接不可用）；`*.bat` 应 **CRLF**。`packaging/` 源脚本本身
+  是 CRLF，copy 出来需逐平台转换，已用 `cat -A` 确认 shebang 无 `^M`；
+- **zip 权限位**：用 Python `zipfile` 写 `external_attr`，给 `nebula` 与 `*.sh` 置 0755，
+  否则 Linux/macOS 用户解压后仍需手动 `chmod +x`。
+
+### 验证（不只看"编译通过"）
+- 文件头交叉确认平台：`4d5a`=PE(Windows) / `7f454c46`=ELF(Linux) / `cffaedfe`=Mach-O(macOS)；
+- **实跑 Windows 产物**：`/api/health` → `{"installed":false,"ok":true}`；`/` 返回完整 HTML；
+  `/dot-motion-loader.js` → 200 / 3508 bytes（证明 `go:embed` 前端确实可用）；
+- zip 逐项核对：CRC 全 OK、权限位正确、行尾符合平台预期；
+- 清理冒烟测试残留（`data/`、日志），交付目录只含 5 个正式文件。
+
+另：旧的 `NebulaDrive-dev-*` 产物（10-02 打包，**不含**本轮 Windows 路径修复）已删除，避免误用。
