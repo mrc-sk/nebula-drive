@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/nebula-drive/nebula/conf"
 )
 
 type Handler interface {
@@ -202,9 +205,22 @@ func New(policyType, configJSON string) (Handler, error) {
 	switch policyType {
 	case "local":
 		var cfg localConfig
-		_ = json.Unmarshal([]byte(configJSON), &cfg)
+		if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+			// 配置 JSON 损坏（典型场景：Windows 路径里的反斜杠未转义，形如
+			// {"path":"C:\Users\..."} 是非法 JSON）。绝不能静默回落到相对目录
+			// "uploads" —— 那会把文件写到进程 CWD，导致落盘位置错误且极易丢失。
+			// 优先回退到 conf 配置的绝对上传目录；若连它也缺失，则明确报错。
+			if fb := confUploadPath(); fb != "" {
+				log.Printf("[filesystem] local policy config JSON 解析失败，回退到 conf.UploadPath=%q: %v", fb, err)
+				return &Local{Root: fb}, nil
+			}
+			return nil, fmt.Errorf("invalid local policy config %q: %w", configJSON, err)
+		}
 		if cfg.Path == "" {
-			cfg.Path = "uploads"
+			if fb := confUploadPath(); fb != "" {
+				return &Local{Root: fb}, nil
+			}
+			return nil, errors.New("local policy config missing path and no conf.UploadPath fallback available")
 		}
 		if err := os.MkdirAll(cfg.Path, 0o755); err != nil {
 			return nil, err
@@ -222,4 +238,13 @@ func New(policyType, configJSON string) (Handler, error) {
 		return newWebDAVRemoteHandler(configJSON)
 	}
 	return nil, errors.New("unsupported policy type: " + policyType)
+}
+
+// confUploadPath 返回 conf 配置的绝对上传目录（兜底用）。
+func confUploadPath() string {
+	c := conf.Current()
+	if c == nil {
+		return ""
+	}
+	return c.System.UploadPath
 }

@@ -310,7 +310,7 @@ func ensureDefaults(uploadPath string) {
 	}
 	var p models.Policy
 	if err := db.Get().First(&p, 1).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-		db.Get().Create(&models.Policy{ID: 1, Name: "本地存储", Type: "local", Config: models.From(`{"path":"` + uploadPath + `"}`), IsDefault: true})
+		db.Get().Create(&models.Policy{ID: 1, Name: "本地存储", Type: "local", Config: models.From(models.LocalPolicyConfig(uploadPath)), IsDefault: true})
 	}
 	ensureBrandSettings()
 }

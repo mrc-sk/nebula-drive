@@ -1,11 +1,24 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/nebula-drive/nebula/pkg/db"
 	"gorm.io/gorm"
 )
+
+// LocalPolicyConfig 构造本地存储策略的 config JSON 字符串。
+//
+// 必须用 json.Marshal 而不是直接字符串拼接：Windows 的上传路径含反斜杠
+// （如 C:\Users\...），若直接拼成 {"path":"C:\Users\..."} 会成为非法 JSON
+// （\U、\0 等不是合法转义），filesystem.New 解析失败时会被静默回落到相对目录
+// "uploads"（写到进程 CWD），导致文件落盘位置错误且极易丢失。json.Marshal
+// 会正确转义，任何平台都能稳定解析。
+func LocalPolicyConfig(path string) string {
+	b, _ := json.Marshal(map[string]string{"path": path})
+	return string(b)
+}
 
 // User 用户
 type User struct {
