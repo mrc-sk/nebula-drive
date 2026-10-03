@@ -1019,3 +1019,57 @@ StaticCache + Auth + WebDAV + 全部 REST 路由），用 `httptest` 真实发 H
 - 清理冒烟测试残留（`data/`、日志），交付目录只含 5 个正式文件。
 
 另：旧的 `NebulaDrive-dev-*` 产物（10-02 打包，**不含**本轮 Windows 路径修复）已删除，避免误用。
+
+---
+
+## 13. 许可证残留清理（MIT → AGPL-3.0）
+
+### 起因
+用户在关于页截图里发现「本项目采用 MIT License 开源发布」，指出仓库实际是 AGPL。
+核对后确认用户记忆正确：根 `LICENSE` 确实是 **GNU AGPL-3.0**（661 行，16 处 AGPL 关键字），
+`README.md` 的 badge 与协议章节也早已改成 AGPL —— 但**前端与打包配置没跟上**。
+
+### 排查方法
+全项目 `grep -rniI "MIT"`，逐条甄别而非无脑替换。命中的三类：
+- **误报（须保留）**：`package-lock.json` 里几百条 `"license": "MIT"` 是第三方依赖的正常声明；
+  `go.mod`/`go.sum` 的 `smithy`/`mapstructure`；`tsconfig.json` 的 `noEmit`；`App.tsx` 的 konami 码。
+- **真残留（须修）**：见下表。
+- **历史记录（须保留）**：`CODE_REVIEW.md` 三处提到 MIT，是那份报告在记录「原问题」，
+  改了反而丢失决策痕迹。
+
+### 实际修正
+| 位置 | 修正前 | 修正后 |
+|---|---|---|
+| `frontend/src/pages/admin/About.tsx` | MIT License + 品牌保留 3 处 | GNU AGPL-3.0 + 网络服务源码开放义务 |
+| `frontend/src/pages/admin/Plugins.tsx` | MIT License + 品牌保留 3 处 | 同上 |
+| `backend/nfpm.yaml` | `license: MIT` | `license: AGPL-3.0`（SPDX 标识） |
+| `backend/nfpm.yaml` | `version: 1.0.0` | `version: 26.10.0` + `release: b` |
+| `backend/nfpm.yaml` | homepage 指向 `nebula-drive/nebula` | `mrc-sk/nebula-drive`（与 README 一致） |
+| `trailer/tools/render_opening.py` | 片头字卡「MIT 开源」 | 「AGPL-3.0 开源」 |
+| `trailer/RELEASE_COPY.md` | 「LICENSE 仍写着 MIT」的待确认告警 | 删除（问题早已解决，属过期告警） |
+
+### 一个容易漏的点：连带死代码
+`Plugins.tsx` 原本只在**那两段 MIT 文案**里用到 `brand`（`brand.name` / `brand.author`）。
+文案改写后 `brand` 变成完全未使用 —— 虽然 `tsconfig` 的 `noUnusedLocals: false` 不会报错，
+但留着就是自己引入的死代码。连带清掉了 `useState` 声明、配套的 `useEffect`，
+以及**只被这个 effect 使用的 `getBrand` import**（留着会触发 lint 告警）。
+`About.tsx` 的 `brand` 页脚仍在用，不动。
+
+### 关于「品牌保留 3 处」这条附加条款
+它原本写在 MIT 之上、要求运行时展示署名。`CODE_REVIEW.md` §5.1 早已判定该条款与 MIT 第 1 条
+冲突、解释权不明，并在改用 AGPL-3.0 时**整体废弃**。但前端两处合规声明没跟着删，
+等于把一个已经不存在的许可证义务展示给用户 —— 这比单纯的「MIT 拼错」更严重：
+用户会以为不保留 3 处品牌就违反协议。现已改写为 AGPL 真正的核心义务
+（**网络服务同样触发源码开放**，AGPL 与 GPL 的唯一区别）。
+
+### 验证
+- `npx tsc -b` → exit 0（strict 模式）；
+- `npm run build` → 15.44s，`About-BKMbMF-o.js` / `Plugins-CfkcX9zP.js` 中 `grep MIT` 为空、
+  `grep AGPL-3.0` 命中，确认改动真的进了 bundle；
+- `go build ./...` 通过；`go test ./... -count=1` **全绿**（controllers 68.6s、routers 7.8s、
+  middleware 10.5s、models 9.5s，其余均 ok）；
+- 全项目复扫 `MIT`：自有文件中仅剩 `CODE_REVIEW.md` 的 3 处历史记录（预期保留）。
+
+### 遗留
+`V26-10.0-b` 三平台产物打包于本次修正**之前**，二进制里 `go:embed` 的还是写着 MIT 的旧前端。
+**重新打包后才能对外分发**，已在 CHANGELOG「已知遗留」标注。

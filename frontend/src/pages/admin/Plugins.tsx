@@ -5,7 +5,6 @@ import {
   Plug, Info, Zap, Mail, DatabaseBackup, Undo2, KeyRound, ArrowRightLeft, ShieldAlert, Terminal,
 } from 'lucide-react'
 import { api } from '../../api/client'
-import { getBrand } from '../../App'
 
 interface StorePlugin {
   id?: string | number
@@ -87,11 +86,6 @@ export default function Plugins() {
   const [storeMsg, setStoreMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const [tab, setTab] = useState<'store' | 'hooks'>('store')
   const [hooks, setHooks] = useState<Record<string, number>>({})
-  const [brand, setBrand] = useState({ name: 'NebulaDrive', author: 'NebulaDrive Team', version: '1.0.0' })
-
-  useEffect(() => {
-    setBrand(getBrand())
-  }, [])
 
   const load = async () => {
     setLoading(true)
@@ -366,12 +360,14 @@ export default function Plugins() {
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs leading-relaxed text-slate-300">
               <p className="mb-2">
-                本项目采用 MIT License，<span className="font-semibold text-cyan-glow">允许商用</span>。
+                本项目采用 <span className="font-semibold text-cyan-glow">GNU AGPL-3.0</span>，
+                <span className="font-semibold text-cyan-glow">允许商用</span>。
               </p>
               <p>
-                但必须在界面至少保留 <span className="font-bold text-amber-200">3 处</span> 原品牌名
-                （<span className="font-semibold text-white">{brand.name}</span>）与作者名
-                （<span className="font-semibold text-white">{brand.author}</span>）。
+                但若把本程序或其修改版部署到服务器供他人通过网络访问，
+                <span className="font-bold text-amber-200">必须向这些使用者提供完整对应源码</span>
+                （含你的修改）；分发二进制时须随附源码或提供获取源码的书面要约，并保留{' '}
+                <span className="font-semibold text-white">LICENSE</span> 中的版权与许可声明。
               </p>
             </div>
           </div>

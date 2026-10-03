@@ -37,9 +37,22 @@
 `NebulaDrive-V26-10.0-b-{windows,linux,darwin}-amd64`（各含 zip）。
 单文件二进制，前端已内嵌，无需安装 Go / Node / 数据库。
 
+### ⚖️ 许可
+
+- **协议残留清理**：仓库 `LICENSE` 与 `README.md` 早已是 AGPL-3.0，但前端关于页、插件页、
+  `backend/nfpm.yaml`、预告片工具等处仍残留 **MIT** 表述。现已全量统一为 **AGPL-3.0**。
+- **同时废除「界面至少保留 3 处品牌名」附加条款**：该条款原附在 MIT 之上（要求运行时展示署名），
+  与 MIT 第 1 条冲突、解释权不明；改用 AGPL-3.0 后本就不存在该要求。前端两处合规声明
+  已改写为 AGPL 的**核心义务：网络服务同样需向使用者提供完整对应源码**。
+- `nfpm.yaml` 的 `license` 用 SPDX 标识 `AGPL-3.0`；`version` 由过期的 `1.0.0` 校正为
+  `26.10.0`（`release: b`），`homepage` 校正为 `github.com/mrc-sk/nebula-drive`。
+- 前端产物已重建并同步 `backend/frontend_dist`（`go:embed` 内嵌，CI 有同步守卫）。
+
 ### 🧹 已知遗留
 
 - `V1-0.0.2-beta` / `V1-0.0.2.1-beta` / `V1-0.0.2.2-beta` / `V1-0.0.3-beta` 尚未补记条目。
+- ⚠️ `V26-10.0-b` 三平台产物**打包于本次许可修正之前**，二进制内嵌的仍是写着 MIT 的旧前端。
+  重新打包后方可对外分发。
 
 ---
 

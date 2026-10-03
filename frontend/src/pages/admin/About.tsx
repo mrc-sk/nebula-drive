@@ -94,17 +94,20 @@ export default function About() {
           </div>
           <div className="space-y-3 text-xs leading-relaxed text-slate-300">
             <p>
-              本项目采用 <span className="font-semibold text-cyan-glow">MIT License</span> 开源发布，允许个人与商业用途。
+              本项目采用{' '}
+              <span className="font-semibold text-cyan-glow">GNU AGPL-3.0</span>{' '}
+              开源发布，允许个人与商业用途。
             </p>
             <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2.5 text-amber-200/90">
               <div className="mb-1 flex items-center gap-1.5 font-semibold">
                 <Info className="h-3.5 w-3.5" />
-                品牌保留要求
+                核心义务：网络服务同样需开源
               </div>
               <div>
-                允许商用，但必须在界面至少保留 <span className="font-bold text-amber-100">3 处</span> 原品牌名（
-                <span className="font-semibold">{brand.name}</span>）与作者名（
-                <span className="font-semibold">{brand.author}</span>）。
+                AGPL-3.0 与 GPL 的唯一区别在于：若把本程序或其修改版部署到服务器供他人通过网络访问，
+                <span className="font-bold text-amber-100">必须向这些使用者提供完整的对应源码</span>
+                （含你的修改）；分发二进制时须随附源码或提供获取源码的书面要约，并保留{' '}
+                <span className="font-semibold">LICENSE</span> 中的版权与许可声明。
               </div>
             </div>
           </div>
