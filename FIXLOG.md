@@ -1227,3 +1227,84 @@ echo "  [信息] PID=$PID ，停止服务请执行 ./stop.sh"
 - `stop.sh` 在无 `.nebula.pid` 时的行为：给出可操作提示（前台运行请Ctrl+C），不是报错
 - **完整用户流程冒烟**（13 项全通过）：登录 → 上传 → 分享（含提取码）→
   分享列表 → 任务列表 → 删除进回收站 → 回收站列表 → 还原 → 回收站清空 → 分享详情
+
+## 16. 分享页整条链路都是假的（下载按钮 + 预览区 + 计数字段）
+
+自主巡检时发现的。问题比「`Downloads` 字段不自增」严重得多 ——
+分享功能此前只有一个链接能打开，下载和预览都是摆设。
+
+### 根因与修复
+
+| # | 问题 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | 下载按钮点了没反应 | `Share.tsx` 的按钮**没有 `onClick`**；且后端没有可用的公开下载端点（登录下载接口挂在 `Auth` 后面） | 新增 `GET /api/shares/:id/download`（挂在 `api` 组，无 `Auth`）+ 前端接线 |
+| 2 | 预览区显示外部占位图 / 硬编码假代码 | `Preview` 组件图片用 `trae-api-cn.mchost.guru/...text_to_image?prompt=Nebula cloud storage...`，文本写死一段假代码 | 按真实类型接真实内容；新增 `GET /api/shares/:id/preview` |
+| 3 | `fileId` 可被构造成越权读取 | 下载端点接受客户端传的 `?fileId=`，不校验即可拖走任意文件 | `fileWithinShare` 逐级校验祖先链（每层 owner 一致 + 未删 + 落到根） |
+| 4 | 浏览次数永远慢一拍 | `UpdateColumn` 已把新值写回结构体，代码又 `s.Views++` 了一次 | `gorm.Expr` 数据库侧自增后单独回读 |
+| 5 | 下载次数永远为 0 | 全项目没有任何地方写 `Share.Downloads` | 在下载路径自增（数据库侧，并发安全） |
+| 6 | 中文文件名下载后乱码 | `Content-Disposition` 只给裸 `filename` | 补 RFC 5987 `filename*` + ASCII 回退名安全过滤 |
+| 7 | DB 连不上时每个请求都 panic | `bootstrap()` 里 `db.Init` 失败只打 WARN 就继续，`db.Get()` 返回 nil | 改 `log.Fatalf` 直接退出 |
+
+### 为什么预览要单独一个端点
+
+预览与下载的差别不只是响应体：
+
+- `Content-Disposition` 必须不同。用 `attachment` 时浏览器会忽略 `Content-Type`
+  直接弹下载框，`<img src>` 只会拿到一个空壳 —— 图片根本显示不出来。
+- 预览**不能**计入 `downloads`，否则所有者看到的下载量虚高且无法排查。
+- 预览响应带 `Cache-Control: no-store`：内容受密码/提取码保护，
+  留在浏览器缓存里等于绕过校验就能再取一次。
+
+### 为什么 fileId 必须校验整条祖先链
+
+分享树只递归 2 层（`listChildrenLimited(root.OwnerID, &root.ID, 2)`），
+深层文件在 UI 树里看不见 —— 所以下载端点**必须**支持按 fileId 取任意深度，
+但这正好给了越权构造的入口。
+
+只查一层是不够的：孙目录、深层文件同样能被构造出来。
+必须逐级向上，每层满足 `owner_id == 分享所有者 && 未删除`，最后落到分享根 ID。
+`maxDepth = 64` 防 parent 成环导致无限回溯。
+
+失败时不区分「不存在」与「越权」：告诉攻击者哪个 ID 存在本身就是信息泄露。
+
+### 为什么 streamFile 要抽出来
+
+登录下载（`ownOrAdmin` 校验）与分享下载（密码/提取码/祖先链校验）都要这套响应逻辑：
+对象存储 302 签名跳转、Range 206、普通流式。
+各自写一份的话，对象存储跳转与 Range 支持很容易只改一处 ——
+而 Range 恰恰是视频拖进度条的前提。
+
+### 测试
+
+`TestIntegration_ShareDownloadAndPreview`（9 组断言）
++ `TestIntegration_ShareDetailViewsIncrements`（3 次连续访问逐次断言）
+
+**反向验证**：把 `fileWithinShare` 的调用改成 `if false` 后，
+测试立刻报 `cross-user fileId: got 200, want 404` ——
+确认断言真的在守这条边界，不是恰好通过。
+
+### 验证
+
+- `go build ./...` / `go test ./... -count=1`（13 包全绿）/ `npx tsc -b` / i18n 门禁 全通过
+- **实机冒烟 14 项**（真跑二进制 + curl）：未认证下载内容一致、`attachment`、
+  预览 `inline`、Range 206、`downloads` 计数正确而 preview 不计、中文名 `filename*`
+- **浏览器UI 11 项**（系统 Edge + CDP，零依赖）：分享页未被路由守卫重定向、
+  `img.src` 指向 preview 端点、图片真的解码成功（`naturalWidth=64`）、
+  文本页显示真实内容且不含旧假代码
+
+  过程中抓到并修掉一个自己引入的 bug：图片**成功**时「预览失败」提示也叠在图上
+  （原本用 `absolute inset-0` 常驻渲染，忘了默认 `hidden`）。改为条件渲染 +
+  切换节点时重置 `imgBroken`。
+
+### 顺带记录的排查经验
+
+- **`UpdateColumn` 会把新值写回内存结构体**（不是「绕过钩子所以不回写」）。
+  所以 `UpdateColumn("views", s.Views+1)` 之后再 `s.Views++` 是二次自增。
+  这个认知错误一开始让我把测试预期写成了 1，实际行为是 2。
+- **`/api/install` 的请求体结构**是 `{admin:{userName,email,password}, db:{type,file}, system:{...}}`，
+  管理员在 `admin` 字段下，不在顶层。
+- **sqlite 的 `file` 是相对路径**，换个工作目录启动就打不开这个库，
+  报的是极具误导性的 `out of memory (14)`。冒烟测试必须以数据目录为 CWD 启动。
+- Bash sandbox 隔离了本机回环连接，`curl http://127.0.0.1:<port>` 会报
+  `Failed to connect`（此时服务明明在 `netstat` 里 LISTENING），
+  需要 `dangerouslyDisableSandbox`。

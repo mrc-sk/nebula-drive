@@ -121,6 +121,29 @@ export async function fetchBlob(url: string): Promise<Blob> {
   return res.blob()
 }
 
+/**
+ * 以 query 凭据拉取分享内的文件二进制（公开分享页预览用）。
+ *
+ * 与 fetchBlob 的区别：不带 Bearer（访问者通常没登录），
+ * 而是带 password / extract 走 query —— 后端 readShareAccessParams 认这两种来源。
+ * 失败时尽量把后端的 message 带出来：401（需要密码/提取码）与 404（文件不在分享内）
+ * 在UI 上要给出完全不同的引导，笼统的 "fetch failed" 没法区分。
+ */
+export async function fetchShareBlob(url: string, signal?: AbortSignal): Promise<Blob> {
+  const res = await fetch(BASE + url, signal ? { signal } : undefined)
+  if (!res.ok) {
+    let msg = res.statusText || `HTTP ${res.status}`
+    try {
+      const j = await res.json()
+      if (j?.message) msg = j.message
+    } catch {
+      /* 响应体不是 JSON（网络中断等），沿用状态文本 */
+    }
+    throw new Error(msg)
+  }
+  return res.blob()
+}
+
 /** 分片读取大文件并以 spark-md5 计算 MD5 */
 export function computeMD5(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -315,6 +338,21 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ password, extractCode }),
       }),
+    // 下载/预览的裸 URL：给 <a download>、<img>、<video> 这类需要自己发请求的地方用。
+    // 密码/提取码走 query 而不是 header —— <img src> 没法带自定义 header，
+    // 这是唯一能让浏览器原生媒体标签直接吃这个端点的方式。
+    fileURL: (
+      id: number | string,
+      opts?: { fileId?: number | string; password?: string; extractCode?: string; preview?: boolean },
+    ) => {
+      const q = new URLSearchParams()
+      if (opts?.fileId != null) q.set('fileId', String(opts.fileId))
+      if (opts?.password) q.set('password', opts.password)
+      if (opts?.extractCode) q.set('extract', opts.extractCode)
+      const qs = q.toString()
+      const base = `/api/shares/${id}/${opts?.preview ? 'preview' : 'download'}`
+      return qs ? `${base}?${qs}` : base
+    },
   },
 
   admin: {

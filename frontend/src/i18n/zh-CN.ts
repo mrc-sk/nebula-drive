@@ -450,6 +450,13 @@ export default {
     notFound: '分享不存在或已删除',
     expired: '分享已过期',
     selectPreview: '请选择文件进行预览',
+    downloading: '下载中…',
+    downloadFailed: '下载失败',
+    noPreview: '该格式不支持预览',
+    previewFailed: '预览失败',
+    dirNotDownloadable: '文件夹无法直接下载，请选择其中的文件',
+    textTruncated: '文件较大，仅显示前 {n}（共 {total}）',
+    previewTooLarge: '文件过大，无法在线预览，请改为下载',
   },
   task: {
     http: 'HTTP 下载',

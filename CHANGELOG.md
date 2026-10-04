@@ -4,6 +4,95 @@
 
 ---
 
+## V26-10.0-c — Beta（2026-10-04）
+
+> **分享页整条链路接通了。** 此前下载按钮点不动、预览区全是假内容 —— 分享功能等于只有一个链接能打开。
+
+### 🐛 修复
+
+- **分享页的下载按钮是个纯装饰**
+  `pages/Share.tsx` 里的下载按钮**没有 `onClick`**，点了什么都不发生。
+  更根本的是后端根本没有可用的下载端点：分享接收方通常没登录，
+  而登录下载接口挂在 `Auth` 中间件后面 —— 整条链路是断的。
+
+  新增 `GET /api/shares/:id/download`（挂在 `api` 组上，不带 `Auth`）：
+  校验过期 / 密码 / 提取码，可选 `?fileId=` 下载分享目录内的某个子文件，
+  用 `gorm.Expr` 在数据库侧自增 `downloads`（并发下载不会互相覆盖），
+  并记`share_download` 审计日志。
+
+- **「预览」区显示的是硬编码的假内容**
+  `Preview` 组件里图片用的是外部占位图 URL
+  （`trae-api-cn.mchost.guru/...text_to_image?prompt=Nebula cloud storage...`），
+  文本显示一段写死的假代码，视频音频只有一行字 —— 不管用户分享的是什么，都是这套内容。
+
+  现按真实类型分别接真实内容：图片走 `<img>`、视频走 `<video controls>`、
+  音频走 `<audio controls>`、文本用 fetch 读取（超过 512KB 截断并在界面上说明截了多少）。
+  新增 `GET /api/shares/:id/preview`：与下载同一套鉴权，但用
+  `Content-Disposition: inline`（用 attachment 的话 `<img src>` 只会弹下载框），
+  且**不计下载次数** —— 预览不是下载。
+
+- **`fileId` 可被构造成越权读取任意文件**
+  下载端点接受客户端传的 `?fileId=`。如果不校验，任何人拿一个有效分享 ID
+  拼上 `?fileId=<任意文件ID>` 就能把别人账号下的文件拖走 ——
+  分享链接会变成一个越权读取入口。
+  现用 `fileWithinShare` 逐级向上验证祖先链：每层都必须
+  `owner_id == 分享所有者 && 未删除`，最后落到分享根 ID，`maxDepth=64` 防parent 成环。
+  失败时不区分「不存在」与「越权」—— 告诉攻击者哪个 ID 存在本身就是信息泄露。
+
+- **分享浏览次数永远慢一拍**
+  `UpdateColumn("views", s.Views+1)` 之后直接读 `s.Views` 组 `meta.viewTimes`，
+  而下一步 `s.Views++` 在 `UpdateColumn` 已经写回新值之后又加了一次 ——
+  第一次访问显示 2、第二次显示 3。
+  改为 `gorm.Expr("views + ?", 1)` 数据库侧自增后单独回读 `views` 列。
+
+- **数据库连不上时服务仍启动，随后每个请求都 panic**
+  `bootstrap()` 里 `db.Init` 失败只打一条 `[WARN]` 就继续。
+  于是 `db.Get()` 返回 nil，之后**每一个** API 请求都在 handler 里空指针 panic，
+  由 gin Recovery 兜成 500。表现为「服务起来了但什么都不好用，日志里全是 panic」，
+  比启动失败难排查得多。现改为 `log.Fatalf` 直接退出。
+
+  最常见的触发原因是 sqlite 的 `file` 是相对路径，换个工作目录启动就打不开这个库，
+  且报错信息是极具误导性的 `out of memory (14)`。
+
+- **中文文件名下载下来是乱码**
+  `Content-Disposition` 只给了裸 `filename="中文名.txt"`，部分浏览器按 latin-1 解码。
+  现同时给出 RFC 5987 的 `filename*=UTF-8''...`，并对 ASCII 回退名做安全过滤
+  （挡 `../` 头部注入与引号/换行，同时保留扩展名）。
+
+### ♻️ 重构
+
+- **`streamFile` 抽出共享**：登录下载与分享下载共用同一套响应逻辑
+  （对象存储 302 / Range 206 / 普通流式），避免两边各写一份慢慢漂移。
+  `dispAttachment` / `dispInline` 两种模式区分「存盘」与「内联显示」。
+
+### 🧪 测试
+
+新增 `TestIntegration_ShareDownloadAndPreview`（9 组断言）与
+`TestIntegration_ShareDetailViewsIncrements`（3 次连续访问逐次断言）。
+
+覆盖：未认证可下载、密码/提取码的query 与 Header 两种传法、
+密码与提取码并存时缺一即拒、跨用户 `fileId` 越权、同 owner 但分享子树外越权、
+预览 inline 且不计下载/浏览次数、Range 206、目录拒绝、根文件被删后404。
+
+**反向验证**：把 `fileWithinShare` 的调用改成 `if false` 后，
+测试立刻报 `cross-user fileId: got 200, want 404` —— 确认断言真的在守这条边界。
+
+### ✅ 验证
+
+- `go build ./...`、`go test ./... -count=1`（13 包全绿）、`npx tsc -b` 全通过
+- i18n 五语言对称门禁通过（新增 7 个 key × 5 语言）
+- **实机冒烟 14 项全通过**（真跑二进制 + curl）：
+  未认证下载内容一致 / `attachment` / 预览 `inline` / Range 206 /
+  `downloads` 计数正确而 `preview` 不计 / 中文名 `filename*` 存在
+- **浏览器 UI 实测 11 项全通过**（系统 Edge + CDP）：
+  分享页未被路由守卫重定向、`img.src` 指向 preview 端点、
+  图片真的解码成功（`naturalWidth=64`）、文本页显示真实文件内容且不含旧的假代码
+
+  过程中抓到并修掉一个自己引入的 bug：图片成功时「预览失败」提示也叠在图上
+  （原本用 `absolute inset-0` 常驻渲染，没默认 `hidden`），改为条件渲染。
+
+---
+
 ## V26-10.0-b — Beta（2026-10-03）
 
 > 侧边栏三个入口修复 + 六项既有缺陷修复 + i18n 门禁。三平台单二进制（Windows / Linux / macOS）已重新打包。

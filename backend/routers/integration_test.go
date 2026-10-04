@@ -215,6 +215,23 @@ func doJSON(t *testing.T, env *testEnv, method, path string, body any, cookies .
 	return doReq(t, env, method, path, raw, "application/json", cookies...)
 }
 
+// doReqWithHeader 发送带自定义 Header 的请求。
+// 分享下载接受 query / Header 两种传密码方式（X-Share-Pwd、X-Share-Extract），
+// Range 请求也要带 Header，两者都不能用只支持 Cookie 的 doReq 表达。
+func doReqWithHeader(t *testing.T, env *testEnv, method, path string, _ []byte, _ string, hdr map[string]string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, bytes.NewReader(nil))
+	for k, v := range hdr {
+		req.Header.Set(k, v)
+	}
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	w := httptest.NewRecorder()
+	env.Engine.ServeHTTP(w, req)
+	return w
+}
+
 // doDAV 发送带 Basic Auth 的 WebDAV 请求（WebDAV 用 HTTP Basic，非会话/JWT）。
 // headers 为可选的可变参数，形如 [2]string{"Depth","1"}，用于覆盖默认请求头。
 func doDAV(t *testing.T, env *testEnv, method, path, body, contentType, user, pass string, headers ...[2]string) *httptest.ResponseRecorder {
@@ -801,5 +818,220 @@ func TestIntegration_TaskRetryAndTrashEndpoints(t *testing.T) {
 	// ---- 7. Purge：他人文件不可彻底删除 ----
 	if w := doJSON(t, env, http.MethodPost, "/api/files/"+itoa(upID)+"/purge", nil, otherCookie); w.Code != http.StatusForbidden {
 		t.Fatalf("purge other's file: got %d, want 403", w.Code)
+	}
+}
+
+// TestIntegration_ShareDownloadAndPreview 覆盖公开分享的下载/预览链路。
+//
+// 这组用例守的是三件容易被改坏的事：
+//  1. 分享接收方通常没登录，所以这两个端点必须真的不需要 Bearer ——
+//     挂了 Auth 就等于分享功能完全不可用；
+//  2. fileId 是客户端传的，不校验祖先链就是越权读取任意文件的后门；
+//  3. 预览必须 inline 且不计下载次数，下载必须 attachment 且计数。
+func TestIntegration_ShareDownloadAndPreview(t *testing.T) {
+	env := bootstrapForTest(t)
+	pass := "Str0ng-Pass-123!"
+	owner := makeUser(t, env.DB, "sharer", 1, false, pass)
+	other := makeUser(t, env.DB, "bystander", 1, false, pass)
+	ownerCookie := authCookie(t, owner)
+
+	const body = "share download payload 中文内容"
+	up := parseUpload(t, uploadFile(t, env, ownerCookie, "pub.txt", body))
+	fileID := up.Data.ID
+
+	// 建一个他人文件用于越权断言
+	otherUp := parseUpload(t, uploadFile(t, env, authCookie(t, other), "secret.txt", "not yours"))
+	secretID := otherUp.Data.ID
+
+	mkShare := func(fileID, ownerID uint, pwd, extract string) models.Share {
+		s := models.Share{FileID: fileID, OwnerID: ownerID, Password: pwd, ExtractCode: extract}
+		if err := env.DB.Create(&s).Error; err != nil {
+			t.Fatalf("create share: %v", err)
+		}
+		return s
+	}
+	shareCount := func(sid uint) int {
+		var s models.Share
+		env.DB.First(&s, sid)
+		return s.Downloads
+	}
+
+	// ---- 1. 无密码的公开分享：未认证也能下载，且内容一致 ----
+	pub := mkShare(fileID, owner.ID, "", "")
+	w := doReq(t, env, http.MethodGet, "/api/shares/"+itoa(pub.ID)+"/download", nil, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("public share download: %d %s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != body {
+		t.Fatalf("downloaded body = %q, want %q", w.Body.String(), body)
+	}
+	if got := w.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment") {
+		t.Fatalf("download Content-Disposition = %q, want attachment prefix", got)
+	}
+	if got := shareCount(pub.ID); got != 1 {
+		t.Fatalf("downloads after one download = %d, want 1", got)
+	}
+
+	// 第二次下载计数必须变成 2。这条专门守 UpdateColumn 绕过钩子后
+	// 内存结构体不更新的老坑：用 s.Views+1 算出来会永远停在 1。
+	w = doReq(t, env, http.MethodGet, "/api/shares/"+itoa(pub.ID)+"/download", nil, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("second download: %d", w.Code)
+	}
+	if got := shareCount(pub.ID); got != 2 {
+		t.Fatalf("downloads after two downloads = %d, want 2 (counter must actually increment)", got)
+	}
+
+	// ---- 2. 密码分享：错密码 401、对密码 200 ----
+	locked := mkShare(fileID, owner.ID, "s3cret", "")
+	if w := doReq(t, env, http.MethodGet,
+		"/api/shares/"+itoa(locked.ID)+"/download?password=wrong", nil, ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong password: got %d, want 401", w.Code)
+	}
+	w = doReq(t, env, http.MethodGet,
+		"/api/shares/"+itoa(locked.ID)+"/download?password=s3cret", nil, "")
+	if w.Code != http.StatusOK || w.Body.String() != body {
+		t.Fatalf("correct password: %d body=%q", w.Code, w.Body.String())
+	}
+
+	// Header 形式也必须认：<video>/<audio> 之类用 query，
+	// 但 fetch 走 header，两条路都得通。
+	w = doReq(t, env, http.MethodGet, "/api/shares/"+itoa(locked.ID)+"/download", nil, "")
+	w = doReqWithHeader(t, env, http.MethodGet, "/api/shares/"+itoa(locked.ID)+"/download", nil, "",
+		map[string]string{"X-Share-Pwd": "s3cret"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("password via header: got %d, want 200", w.Code)
+	}
+
+	// ---- 3. 提取码 ----
+	extracted := mkShare(fileID, owner.ID, "", "AB12")
+	if w := doReq(t, env, http.MethodGet,
+		"/api/shares/"+itoa(extracted.ID)+"/download?extract=ZZZZ", nil, ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong extract: got %d, want 401", w.Code)
+	}
+	w = doReq(t, env, http.MethodGet,
+		"/api/shares/"+itoa(extracted.ID)+"/download?extract=AB12", nil, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("correct extract: got %d, want 200", w.Code)
+	}
+
+	// 密码与提取码同时存在时，缺一个都必须被拒
+	both := mkShare(fileID, owner.ID, "pwd123", "CD34")
+	if w := doReq(t, env, http.MethodGet,
+		"/api/shares/"+itoa(both.ID)+"/download?password=pwd123", nil, ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("missing extract code: got %d, want 401", w.Code)
+	}
+	if w := doReq(t, env, http.MethodGet,
+		"/api/shares/"+itoa(both.ID)+"/download?extract=CD34", nil, ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("missing password: got %d, want 401", w.Code)
+	}
+
+	// ---- 4. 越权：拿他人文件 ID 构造 fileId 必须 404 ----
+	// 这是本组用例最要紧的一条：fileId 完全由客户端提供，
+	// 不校验祖先链的话，任何人拿一个有效分享 ID 就能拖走别人的文件。
+	if w := doReq(t, env, http.MethodGet,
+		"/api/shares/"+itoa(pub.ID)+"/download?fileId="+itoa(secretID), nil, ""); w.Code != http.StatusNotFound {
+		t.Fatalf("cross-user fileId: got %d, want 404", w.Code)
+	}
+
+	// ---- 5. 越权：分享目录外的同账号文件也不能通过 fileId 拿到 ----
+	// 同属一个 owner 但不在分享子树内。只比 owner_id 是不够的。
+	sibling := parseUpload(t, uploadFile(t, env, ownerCookie, "sibling.txt", "outside"))
+	if w := doReq(t, env, http.MethodGet,
+		"/api/shares/"+itoa(pub.ID)+"/download?fileId="+itoa(sibling.Data.ID), nil, ""); w.Code != http.StatusNotFound {
+		t.Fatalf("sibling fileId: got %d, want 404 (must stay inside the share subtree)", w.Code)
+	}
+
+	// ---- 6. 预览：inline、不计下载次数、不自增 views ----
+	before := shareCount(pub.ID)
+	viewsBefore := func() int {
+		var s models.Share
+		env.DB.First(&s, pub.ID)
+		return s.Views
+	}()
+	w = doReq(t, env, http.MethodGet, "/api/shares/"+itoa(pub.ID)+"/preview", nil, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("preview: %d %s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "inline") {
+		t.Fatalf("preview Content-Disposition = %q, want inline prefix", got)
+	}
+	if got := shareCount(pub.ID); got != before {
+		t.Fatalf("preview changed downloads: %d -> %d", before, got)
+	}
+	if got := func() int {
+		var s models.Share
+		env.DB.First(&s, pub.ID)
+		return s.Views
+	}(); got != viewsBefore {
+		t.Fatalf("preview changed views: %d -> %d (preview is not a page view)", viewsBefore, got)
+	}
+
+	// ---- 7. Range 支持（视频拖进度条依赖它） ----
+	w = doReqWithHeader(t, env, http.MethodGet, "/api/shares/"+itoa(pub.ID)+"/download", nil, "",
+		map[string]string{"Range": "bytes=0-3"})
+	if w.Code != http.StatusPartialContent {
+		t.Fatalf("range request: got %d, want 206", w.Code)
+	}
+	if w.Body.String() != body[:4] {
+		t.Fatalf("range body = %q, want %q", w.Body.String(), body[:4])
+	}
+
+	// ---- 8. 目录分享不可直接下载 ----
+	dir := models.File{OwnerID: owner.ID, Name: "folder", IsDir: true}
+	if err := env.DB.Create(&dir).Error; err != nil {
+		t.Fatalf("create dir: %v", err)
+	}
+	dirShare := mkShare(dir.ID, owner.ID, "", "")
+	if w := doReq(t, env, http.MethodGet,
+		"/api/shares/"+itoa(dirShare.ID)+"/download", nil, ""); w.Code != http.StatusBadRequest {
+		t.Fatalf("download dir share root: got %d, want 400", w.Code)
+	}
+
+	// ---- 9. 分享根被删后下载必须 404，而不是 panic 或返回空 ----
+	env.DB.Model(&models.File{}).Where("id = ?", fileID).Delete(&models.File{})
+	if w := doReq(t, env, http.MethodGet,
+		"/api/shares/"+itoa(pub.ID)+"/download", nil, ""); w.Code != http.StatusNotFound {
+		t.Fatalf("download share whose root is deleted: got %d, want 404", w.Code)
+	}
+}
+
+// TestIntegration_ShareDetailViewsIncrements 把 views 字段的顺序 bug 锁死。
+//
+// 原实现是 UpdateColumn("views", s.Views+1) 之后直接读 s.Views 组 meta，
+// 而 UpdateColumn 绕过钩子不会更新内存里的结构体 —— 于是第一次访问显示 0、
+// 第二次仍显示 1，永远慢一拍。只查数据库是查不出这个问题的，
+// 必须断言响应体里的 viewTimes。
+func TestIntegration_ShareDetailViewsIncrements(t *testing.T) {
+	env := bootstrapForTest(t)
+	pass := "Str0ng-Pass-123!"
+	owner := makeUser(t, env.DB, "counter", 1, false, pass)
+	up := parseUpload(t, uploadFile(t, env, authCookie(t, owner), "v.txt", "x"))
+	s := models.Share{FileID: up.Data.ID, OwnerID: owner.ID}
+	if err := env.DB.Create(&s).Error; err != nil {
+		t.Fatalf("create share: %v", err)
+	}
+
+	type shareDetail struct {
+		Code int `json:"code"`
+		Data struct {
+			Meta struct {
+				ViewTimes     int `json:"viewTimes"`
+				DownloadTimes int `json:"downloadTimes"`
+			} `json:"meta"`
+		} `json:"data"`
+	}
+	for i := 1; i <= 3; i++ {
+		w := doReq(t, env, http.MethodGet, "/api/shares/"+itoa(s.ID), nil, "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("share detail #%d: %d %s", i, w.Code, w.Body.String())
+		}
+		var d shareDetail
+		if err := json.Unmarshal(w.Body.Bytes(), &d); err != nil {
+			t.Fatalf("unmarshal share detail: %v", err)
+		}
+		if d.Data.Meta.ViewTimes != i {
+			t.Fatalf("viewTimes on visit #%d = %d, want %d (response must reflect the increment)", i, d.Data.Meta.ViewTimes, i)
+		}
 	}
 }

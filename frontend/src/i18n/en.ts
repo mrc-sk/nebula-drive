@@ -450,6 +450,13 @@ export default {
     notFound: 'Share not found or deleted',
     expired: 'Share expired',
     selectPreview: 'Select a file to preview',
+    downloading: 'Downloading…',
+    downloadFailed: 'Download failed',
+    noPreview: 'No preview available',
+    previewFailed: 'Preview failed',
+    dirNotDownloadable: 'Folders cannot be downloaded directly — pick a file inside',
+    textTruncated: 'File is large, showing the first {n} of {total}',
+    previewTooLarge: 'File is too large to preview inline — download it instead',
   },
   task: {
     http: 'HTTP Download',

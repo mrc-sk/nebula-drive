@@ -450,6 +450,13 @@ export default {
     notFound: '공유가 존재하지 않거나 삭제되었습니다',
     expired: '공유가 만료되었습니다',
     selectPreview: '미리볼 파일을 선택하세요',
+    downloading: '다운로드 중…',
+    downloadFailed: '다운로드 실패',
+    noPreview: '이 형식은 미리보기를 지원하지 않습니다',
+    previewFailed: '미리보기 실패',
+    dirNotDownloadable: '폴더는 직접 다운로드할 수 없습니다. 내부 파일을 선택하세요',
+    textTruncated: '파일이 커서 앞의 {n}만 표시합니다(전체 {total})',
+    previewTooLarge: '파일이 너무 커 미리볼 수 없습니다. 다운로드하세요',
   },
   task: {
     http: 'HTTP 다운로드',

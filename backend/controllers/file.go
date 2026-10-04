@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -418,6 +419,27 @@ func Download(c *gin.Context) {
 		Detail:   fmt.Sprintf("fileId=%d,size=%d", f.ID, f.Size),
 	})
 
+	// 响应发送交给共享实现：分享下载（公开、需校验密码/提取码）也走同一套
+	// Range / 对象存储 302 / 流式逻辑，避免两边各写一份慢慢漂移。
+	streamFile(c, &f, h, dispAttachment)
+}
+
+// Content-Disposition 的两种模式。
+//
+// 下载用 attachment（浏览器存盘）；预览必须用 inline ——
+// 用 attachment 的话浏览器会忽略 Content-Type 直接弹下载框，
+// <img src> 只会拿到一个空壳，图片根本显示不出来。
+const (
+	dispAttachment = "attachment"
+	dispInline     = "inline"
+)
+
+// streamFile 发送文件内容：对象存储优先 302 签名跳转，其次 Range 206，最后普通流式。
+//
+// 抽出来的原因：Download（登录用户，ownOrAdmin 校验）与 DownloadShare
+// （公开分享，需校验密码/提取码/祖先链）都要这套响应逻辑，
+// 各自写一份的话对象存储跳转与 Range 支持很容易只改一处。
+func streamFile(c *gin.Context, f *models.File, h filesystem.Handler, disp string) {
 	// 对象存储：优先签名 URL 302 跳转，避免服务器代理
 	var p models.Policy
 	policyType := ""
@@ -440,7 +462,7 @@ func Download(c *gin.Context) {
 				return
 			}
 			defer rc.Close()
-			c.Header("Content-Disposition", "attachment; filename=\""+path.Base(f.Name)+"\"")
+			c.Header("Content-Disposition", contentDisposition(disp, f.Name))
 			if f.MimeType != "" {
 				c.Header("Content-Type", f.MimeType)
 			}
@@ -463,7 +485,7 @@ func Download(c *gin.Context) {
 	}
 	defer rc.Close()
 
-	c.Header("Content-Disposition", "attachment; filename=\""+path.Base(f.Name)+"\"")
+	c.Header("Content-Disposition", contentDisposition(disp, f.Name))
 	if f.MimeType != "" {
 		c.Header("Content-Type", f.MimeType)
 	}
@@ -472,6 +494,57 @@ func Download(c *gin.Context) {
 	nbuf := util.GetBuffer()
 	io.CopyBuffer(c.Writer, rc, *nbuf)
 	util.PutBuffer(nbuf)
+}
+
+// contentDisposition 组装 Content-Disposition 响应头。
+//
+// 同时给出 filename 和 RFC 5987 的 filename*：中文文件名塞进裸 filename
+// 会被部分浏览器当成 latin-1 解码成乱码，filename* 才是标准解法。
+// 用 path.Base 是为了挡掉 ../ 造成的头部注入（名字里带引号或换行同样有害）。
+func contentDisposition(disp, name string) string {
+	base := path.Base(name)
+	ascii := sanitizeASCIIFilename(base)
+	h := disp + "; filename=\"" + ascii + "\""
+	if base != ascii {
+		h += "; filename*=UTF-8''" + url.PathEscape(base)
+	}
+	return h
+}
+
+// sanitizeASCIIFilename 把非 ASCII 字符与引号/换行替换掉，得到一个保守安全的 ASCII 回退名。
+//
+// 回退名必须保留扩展名，否则浏览器拿不到类型信息（.jpg 的图片可能直接弹"打开方式"对话框）。
+// 但扩展名本身也可能含引号，所以要单独过滤后再拼回去，不能直接拼原始扩展名。
+func sanitizeASCIIFilename(name string) string {
+	ascii := make([]byte, 0, len(name))
+	for i := 0; i < len(name); i++ {
+		ch := name[i]
+		switch {
+		case ch >= 32 && ch <= 126 && ch != '"' && ch != '\\' && ch != ';':
+			ascii = append(ascii, ch)
+		default:
+			ascii = append(ascii, '_')
+		}
+	}
+	out := string(ascii)
+	if out == "" || out == "." || out == ".." {
+		out = "download"
+	}
+
+	ext := strings.TrimPrefix(filepath.Ext(out), ".")
+	if len(ext) > 16 || ext == "" {
+		return out // 扩展名过长或本就没有，不折腾
+	}
+	for i := 0; i < len(ext); i++ {
+		ch := ext[i]
+		if !(ch >= 'a' && ch <= 'z') && !(ch >= 'A' && ch <= 'Z') && !(ch >= '0' && ch <= '9') {
+			return out // 扩展名含非字母数字，放弃保留
+		}
+	}
+	if strings.HasSuffix(strings.ToLower(out), "."+strings.ToLower(ext)) {
+		return out
+	}
+	return out + "." + ext
 }
 
 // parseRange 解析 Range 头，返回 (offset, length)。仅支持单段 bytes=START-END / bytes=START- / bytes=-N

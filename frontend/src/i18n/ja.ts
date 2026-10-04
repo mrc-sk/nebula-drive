@@ -450,6 +450,13 @@ export default {
     notFound: '共有が存在しないか削除されました',
     expired: '共有の有効期限が切れています',
     selectPreview: 'ファイルを選択してプレビュー',
+    downloading: 'ダウンロード中…',
+    downloadFailed: 'ダウンロードに失敗しました',
+    noPreview: 'この形式はプレビューできません',
+    previewFailed: 'プレビューに失敗しました',
+    dirNotDownloadable: 'フォルダは直接ダウンロードできません。中のファイルを選択してください',
+    textTruncated: 'ファイルが大きいため先頭 {n} を表示（共 {total}）',
+    previewTooLarge: 'ファイルが大きすぎるためプレビューできません。ダウンロードしてください',
   },
   task: {
     http: 'HTTPダウンロード',

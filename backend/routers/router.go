@@ -246,6 +246,12 @@ func Setup() *gin.Engine {
 		// 公开分享页读取：既支持前端 GET query 参数，也兼容前端 POST body（password/extractCode）
 		api.GET("/shares/:id", controllers.GetShare)
 		api.POST("/shares/:id", controllers.GetShare)
+		// 公开分享下载/预览。必须挂在 api 上（无 Auth 中间件）——
+		// 分享的接收方通常没登录，这是分享功能能成立的唯一途径。
+		// 权限由控制器内的密码/提取码/祖先链校验负责，见 serveShareFile 注释。
+		// preview 与 download 分开：前者 inline 且不计下载次数，后者 attachment 且计数。
+		api.GET("/shares/:id/download", controllers.DownloadShare)
+		api.GET("/shares/:id/preview", controllers.PreviewShare)
 
 		tasks := api.Group("/tasks", middleware.Auth(true))
 		{

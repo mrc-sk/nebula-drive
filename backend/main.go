@@ -230,8 +230,15 @@ func bootstrap() {
 		return
 	}
 	if err := db.Init(&cfg.DB); err != nil {
-		log.Printf("[WARN] DB 初始化失败: %v", err)
-		return
+		// DB 连不上必须直接退出，不能只打一条 WARN 继续启动。
+		// 继续启动的后果：db.Get() 返回 nil，之后每一个 API 请求都会在
+		// handler 里空指针 panic（gin Recovery 兜住返回 500），
+		// 表现为「服务起来了但什么功能都报错，日志里全是 panic」，
+		// 比启动失败难排查得多。
+		//
+		// 顺带说明最常见的触发原因：sqlite 的 file 是相对路径，
+		// 换个工作目录启动就打不开这个库了（报 out of memory (14)，很误导）。
+		log.Fatalf("数据库初始化失败: %v", err)
 	}
 	if err := models.AutoMigrate(); err != nil {
 		log.Printf("[WARN] 数据库迁移失败: %v", err)
