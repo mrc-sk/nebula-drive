@@ -2,18 +2,14 @@ package controllers
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"strconv"
-	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nebula-drive/nebula/conf"
 	"github.com/nebula-drive/nebula/middleware"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
-	"github.com/nebula-drive/nebula/pkg/plugin"
 )
 
 // ---- 存储策略 ----
@@ -177,58 +173,4 @@ func Dashboard(c *gin.Context) {
 			"info":        info,
 		},
 	})
-}
-
-// StorePluginCatalog 获取插件商店目录
-func StorePluginCatalog(c *gin.Context) {
-	var s models.Setting
-	storeURL := ""
-	if err := db.Get().Where("`key` = ?", "plugin.store.url").First(&s).Error; err == nil {
-		storeURL = s.Value
-	}
-	if storeURL == "" {
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": []any{}})
-		return
-	}
-	if !strings.HasSuffix(storeURL, "/") {
-		storeURL += "/"
-	}
-	storeURL += "com.json"
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(storeURL)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": []any{}})
-		return
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": []any{}})
-		return
-	}
-	c.Data(http.StatusOK, "application/json; charset=utf-8", body)
-}
-
-// ListPluginHooks 插件钩子列表（含文档描述）
-func ListPluginHooks(c *gin.Context) {
-	counts := plugin.List()
-	type hookItem struct {
-		Name  string `json:"name"`
-		Count int    `json:"count"`
-		Doc   string `json:"doc"`
-	}
-	list := []hookItem{}
-	names := []plugin.HookName{
-		plugin.HookEmail, plugin.HookBackup, plugin.HookRestore, plugin.HookApiAuth,
-		plugin.HookDBMigrate, plugin.HookRateLimit, plugin.HookAntiLeech, plugin.HookCLI,
-		plugin.HookCollabOpen, plugin.HookCollabSave,
-	}
-	for _, n := range names {
-		list = append(list, hookItem{
-			Name:  string(n),
-			Count: counts[n],
-			Doc:   plugin.HookDocs[n],
-		})
-	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": list})
 }

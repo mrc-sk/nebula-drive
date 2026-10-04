@@ -234,24 +234,3 @@ func UpdateGroup(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"code": 0})
 }
-
-// ---- 插件管理（轻量）----
-
-// ListPlugins 插件列表
-func ListPlugins(c *gin.Context) {
-	var plugins []models.Plugin
-	db.Get().Order("id asc").Find(&plugins)
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": plugins})
-}
-
-// TogglePlugin 启用/禁用插件
-func TogglePlugin(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
-	var p models.Plugin
-	if err := db.Get().First(&p, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 1, "message": "not found"})
-		return
-	}
-	db.Get().Model(&p).Update("enabled", !p.Enabled)
-	c.JSON(http.StatusOK, gin.H{"code": 0})
-}

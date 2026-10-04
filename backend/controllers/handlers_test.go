@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,8 +12,18 @@ import (
 	"github.com/nebula-drive/nebula/middleware"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
+	"github.com/nebula-drive/nebula/pkg/plugin"
+	"github.com/nebula-drive/nebula/pkg/plugin/host"
 	"github.com/nebula-drive/nebula/pkg/testutil"
 )
+
+// mustUnmarshal 解析 JSON 响应体，失败直接终止测试。
+func mustUnmarshal(t *testing.T, data []byte, out any) {
+	t.Helper()
+	if err := json.Unmarshal(data, out); err != nil {
+		t.Fatalf("解析响应失败: %v\n响应体: %s", err, data)
+	}
+}
 
 // makeUser 创建并返回一个已持久化的测试用户
 func makeUser(t *testing.T, name string, admin bool) *models.User {
@@ -280,38 +292,178 @@ func TestCreateGroupBadBody(t *testing.T) {
 	}
 }
 
-func TestPlugins(t *testing.T) {
+// 旧 TestPlugins 验证的是"POST /plugins/:id/toggle 翻转数据库布尔值"——
+// 那个开关从未接线，属于已废弃的行为（详见 docs/插件系统完全指南.md）。
+// 下面改为验证现行语义：协议关卡 + 列表返回真实运行状态。
+
+func TestPluginListShowsRuntimeState(t *testing.T) {
 	testutil.SetupDB(t)
 	admin := makeUser(t, "admin11", true)
-	db.Get().Create(&models.Plugin{Name: "p1", Title: "Plugin1", Enabled: false})
+	db.Get().Create(&models.Plugin{Name: "p1", Title: "Plugin1", Enabled: true})
 	r := userRouter(admin)
 	r.GET("/plugins", ListPlugins)
-	r.POST("/plugins/:id/toggle", TogglePlugin)
+	r.GET("/plugins/hooks", ListPluginHooks)
 
 	w := doJSON(r, http.MethodGet, "/plugins", nil)
 	if w.Code != http.StatusOK {
 		t.Fatalf("list status = %d", w.Code)
 	}
-	var p models.Plugin
-	db.Get().Where("name = ?", "p1").First(&p)
-	// toggle
-	w2 := doJSON(r, http.MethodPost, "/plugins/"+itoa(p.ID)+"/toggle", nil)
-	if w2.Code != http.StatusOK {
-		t.Fatalf("toggle status = %d", w2.Code)
+	var resp struct {
+		Code int          `json:"code"`
+		Data []PluginView `json:"data"`
 	}
-	var p2 models.Plugin
-	db.Get().First(&p2, p.ID)
-	if !p2.Enabled {
-		t.Fatal("plugin not toggled on")
+	mustUnmarshal(t, w.Body.Bytes(), &resp)
+	if len(resp.Data) != 1 {
+		t.Fatalf("列表长度 = %d, want 1", len(resp.Data))
+	}
+	v := resp.Data[0]
+	// 关键回归点：enabled=true 但进程没跑时，必须暴露矛盾，
+	// 否则管理员会看到"已启用"却毫无效果
+	if v.Enabled && v.Status == host.StatusStopped && v.RuntimeError == "" {
+		t.Fatal("enabled=true 但进程未运行时必须给出提示，当前 RuntimeError 为空")
+	}
+	// manifest 不存在（没装目录）必须标为无效
+	if v.ManifestValid {
+		t.Fatal("目录不存在时 ManifestValid 应为 false")
+	}
+	if v.ManifestError == "" {
+		t.Fatal("清单无效时应给出原因")
 	}
 }
 
-func TestTogglePluginNotFound(t *testing.T) {
+func TestPluginHooksReturnsRealCounts(t *testing.T) {
 	testutil.SetupDB(t)
 	admin := makeUser(t, "admin12", true)
 	r := userRouter(admin)
-	r.POST("/plugins/:id/toggle", TogglePlugin)
-	w := doJSON(r, http.MethodPost, "/plugins/9999/toggle", nil)
+	r.GET("/plugins/hooks", ListPluginHooks)
+
+	w := doJSON(r, http.MethodGet, "/plugins/hooks", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp struct {
+		Code int `json:"code"`
+		Data []struct {
+			Name  string `json:"name"`
+			Count int    `json:"count"`
+			Doc   string `json:"doc"`
+			Mode  string `json:"mode"`
+			Wired bool   `json:"wired"`
+		} `json:"data"`
+	}
+	mustUnmarshal(t, w.Body.Bytes(), &resp)
+	// 必须是全部 10 个钩子（此前前端只列 8 个，漏了 collab 两个）
+	if len(resp.Data) != 10 {
+		t.Fatalf("钩子数 = %d, want 10", len(resp.Data))
+	}
+	byName := map[string]int{}
+	for _, h := range resp.Data {
+		byName[h.Name] = h.Count
+		if h.Doc == "" {
+			t.Errorf("钩子 %s 缺描述", h.Name)
+		}
+		// 预留未接入的钩子必须标出来，不能让管理员以为可用
+		if !h.Wired && h.Count > 0 {
+			t.Errorf("未接入的钩子 %s 不应有 handler", h.Name)
+		}
+	}
+	// 无插件时全部为 0 —— 这正是此前前端用 Math.random() 伪造的东西
+	if byName["onAntiLeech"] != 0 {
+		t.Fatalf("onAntiLeech count = %d, want 0", byName["onAntiLeech"])
+	}
+}
+
+func TestPluginAgreementGate(t *testing.T) {
+	testutil.SetupDB(t)
+	admin := makeUser(t, "admin13", true)
+	r := userRouter(admin)
+	r.GET("/plugins/agreement", GetPluginAgreement)
+	r.POST("/plugins/agreement", AcceptPluginAgreement)
+	r.POST("/plugins/:name/enable", EnablePlugin)
+	r.POST("/plugins/:name/disable", DisablePlugin)
+	r.POST("/plugins/install", InstallPlugin)
+	r.POST("/plugins/:name/uninstall", UninstallPlugin)
+
+	// 初始：未同意
+	w := doJSON(r, http.MethodGet, "/plugins/agreement", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("agreement status = %d", w.Code)
+	}
+	var ag struct {
+		Code int `json:"code"`
+		Data struct {
+			Accepted bool `json:"accepted"`
+			Version  int  `json:"version"`
+		} `json:"data"`
+	}
+	mustUnmarshal(t, w.Body.Bytes(), &ag)
+	if ag.Data.Accepted {
+		t.Fatal("初始不应为已同意")
+	}
+	if ag.Data.Version != plugin.AgreementVersion {
+		t.Fatalf("协议版本 = %d, want %d", ag.Data.Version, plugin.AgreementVersion)
+	}
+
+	// 未同意时，后端必须拒绝安装/启用 —— 不能只靠前端弹窗
+	db.Get().Create(&models.Plugin{Name: "p1", Title: "P1"})
+	for _, path := range []string{"/plugins/p1/enable", "/plugins/p1/uninstall"} {
+		w := doJSON(r, http.MethodPost, path, nil)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("未同意时 %s 应 403，实际 %d", path, w.Code)
+			continue
+		}
+		if !bytes.Contains(w.Body.Bytes(), []byte("needAgreement")) {
+			t.Errorf("%s 的错误响应应带 needAgreement 标记", path)
+		}
+	}
+	w = doJSON(r, http.MethodPost, "/plugins/install", map[string]any{
+		"source": "local", "path": t.TempDir(),
+	})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("未同意时安装应 403，实际 %d", w.Code)
+	}
+
+	// 提交错误版本号应被拒（防止"同意"没读过的内容）
+	w = doJSON(r, http.MethodPost, "/plugins/agreement", map[string]any{
+		"version": plugin.AgreementVersion + 999, "accept": true,
+	})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("版本不匹配应 409，实际 %d", w.Code)
+	}
+	// accept=false 应被拒
+	w = doJSON(r, http.MethodPost, "/plugins/agreement", map[string]any{
+		"version": plugin.AgreementVersion, "accept": false,
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("accept=false 应 400，实际 %d", w.Code)
+	}
+
+	// 正确同意
+	w = doJSON(r, http.MethodPost, "/plugins/agreement", map[string]any{
+		"version": plugin.AgreementVersion, "accept": true,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("同意应成功，实际 %d: %s", w.Code, w.Body.String())
+	}
+	w = doJSON(r, http.MethodGet, "/plugins/agreement", nil)
+	mustUnmarshal(t, w.Body.Bytes(), &ag)
+	if !ag.Data.Accepted {
+		t.Fatal("同意后应为已同意")
+	}
+
+	// 同意后启用才走到"清单无效"这一步（而不是被协议关卡拦住）
+	w = doJSON(r, http.MethodPost, "/plugins/p1/enable", nil)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("清单缺失应 400，实际 %d", w.Code)
+	}
+}
+
+func TestDisablePluginNotFound(t *testing.T) {
+	testutil.SetupDB(t)
+	admin := makeUser(t, "admin14", true)
+	r := userRouter(admin)
+	r.POST("/plugins/:name/disable", DisablePlugin)
+	w := doJSON(r, http.MethodPost, "/plugins/9999/disable", nil)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d", w.Code)
 	}

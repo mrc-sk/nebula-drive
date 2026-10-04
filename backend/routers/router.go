@@ -161,10 +161,23 @@ func Setup() *gin.Engine {
 			admin.GET("/groups", controllers.ListGroups)
 			admin.POST("/groups", controllers.CreateGroup)
 			admin.PUT("/groups/:id", controllers.UpdateGroup)
+			// 插件：安装/启停/卸载/日志/钩子清单/商店
+			//
+			// 启停是热加载（拉起或杀掉子进程），不重启主服务。
+			// 卸载与安装需要 RequireConfirm —— 它们会删目录、跑第三方代码。
 			admin.GET("/plugins", controllers.ListPlugins)
-			admin.POST("/plugins/:id/toggle", controllers.TogglePlugin)
-			admin.GET("/plugins/store", controllers.StorePluginCatalog)
 			admin.GET("/plugins/hooks", controllers.ListPluginHooks)
+			admin.GET("/plugins/store", controllers.StorePluginCatalog)
+			admin.GET("/plugins/agreement", controllers.GetPluginAgreement)
+			admin.POST("/plugins/agreement", controllers.AcceptPluginAgreement)
+			admin.GET("/plugins/logs", controllers.PluginLogs)
+			admin.POST("/plugins/install", controllers.InstallPlugin)
+			admin.POST("/plugins/:name/uninstall",
+				middleware.RequireConfirm(), controllers.UninstallPlugin)
+			admin.POST("/plugins/:name/enable", controllers.EnablePlugin)
+			admin.POST("/plugins/:name/disable", controllers.DisablePlugin)
+			admin.POST("/plugins/:name/restart", controllers.RestartPlugin)
+			admin.PUT("/plugins/:name/config", controllers.UpdatePluginConfig)
 			admin.GET("/policies", controllers.ListPolicies)
 			admin.POST("/policies", controllers.CreatePolicy)
 			admin.PUT("/policies/:id", controllers.UpdatePolicy)

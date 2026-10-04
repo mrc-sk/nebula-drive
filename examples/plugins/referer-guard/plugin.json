@@ -1,0 +1,14 @@
+{
+  "name": "referer-guard",
+  "title": "防盗链（Referer 白名单）",
+  "version": "1.0.0",
+  "author": "NebulaDrive",
+  "description": "下载前校验 Referer，不在白名单内则返回 403。支持通配符与正则模式，并记录下载审计。",
+  "entry": "referer-guard",
+  "args": [],
+  "protocolVersion": 1,
+  "hooks": ["onAntiLeech"],
+  "permissions": ["read-download-metadata", "write-own-datadir", "network-none"],
+  "license": "AGPL-3.0-only",
+  "minHostVersion": "26.10.0"
+}
