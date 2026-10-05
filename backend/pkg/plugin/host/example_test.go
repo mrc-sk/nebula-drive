@@ -197,12 +197,22 @@ func TestRefererGuard_LogsAndUninstall(t *testing.T) {
 		"fileName": "x.zip", "referer": "https://evil.example.net/", "userId": float64(9),
 	})
 
-	// 宿主侧应记录拦截日志
+	// 宿主侧应记录拦截日志。
+	// onAntiLeech 是异步派发，插件日志需要一次 IPC 往返才回传，
+	// 因此这里轮询等待而不是立即断言，避免时序竞态导致的偶发失败。
 	found := false
-	for _, l := range m.Logs("referer-guard", 200) {
-		if strings.Contains(l.Message, "拦截下载") {
-			found = true
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, l := range m.Logs("referer-guard", 200) {
+			if strings.Contains(l.Message, "拦截下载") {
+				found = true
+				break
+			}
 		}
+		if found {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	if !found {
 		t.Fatalf("宿主日志缺少拦截记录: %+v", m.Logs("referer-guard", 200))
