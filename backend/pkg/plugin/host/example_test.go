@@ -1,7 +1,7 @@
 package host_test
 
 import (
-
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -112,6 +112,17 @@ func TestRefererGuard_EndToEnd(t *testing.T) {
 		StartTimeout: 30 * time.Second,
 		FireTimeout:  5 * time.Second,
 		Log:          t.Logf,
+		// 下发配置：豁免 userId=1，并显式给出允许列表。
+		// 不配的话插件用内置默认值，豁免用户表是空的 ——
+		// 「豁免用户放行」这个用例就没有前提了。
+		ConfigFor: func(name string) json.RawMessage {
+			return json.RawMessage(`{
+				"allowedReferers": ["*.localhost", "127.0.0.1", "*.127.0.0.1"],
+				"blockEmptyReferer": false,
+				"exemptUsers": [1],
+				"logDownloads": true
+			}`)
+		},
 	})
 	defer m.StopAll()
 

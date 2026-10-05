@@ -79,6 +79,27 @@ var migrations = []Migration{
 			return nil
 		},
 	},
+	{
+		Version: 6,
+		Name:    "plugin_out_of_process",
+		Up: func(db *gorm.DB) error {
+			// 插件从"进程内钩子骨架"升级为独立子进程体系，
+			// plugins 表补齐元数据与运行状态字段。
+			if err := db.AutoMigrate(&models.Plugin{}); err != nil {
+				return err
+			}
+			// 存量记录（老版本可能手工插过）补默认许可与安装时间。
+			// License 为空的记录在展示时会显示成空白。
+			if err := db.Model(&models.Plugin{}).
+				Where("license IS NULL OR license = ''").
+				Update("license", "AGPL-3.0-only").Error; err != nil {
+				return err
+			}
+			return db.Model(&models.Plugin{}).
+				Where("installed_at IS NULL OR installed_at = ?", time.Time{}).
+				Update("installed_at", time.Now()).Error
+		},
+	},
 }
 
 // Run 执行所有未执行的迁移

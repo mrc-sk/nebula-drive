@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -242,13 +244,42 @@ func (m *Manifest) DeclaredHooks() []HookName {
 //
 // dir 是插件目录。仍会做一次 filepath.Clean 与前缀校验 ——
 // Validate 已挡住分隔符，但这里是最后一道防线，成本极低。
+//
+// 平台后缀：manifest 里写 "myplugin"（不带 .exe）时，Windows 上会自动
+// 尝试 "myplugin.exe"。这样同一份 plugin.json 能跨三个平台通用 ——
+// 否则插件作者要为每个平台改一次 entry，manifest 也就没法跟二进制分开发。
 func (m *Manifest) ExecPath(dir string) (string, error) {
-	p := filepath.Clean(filepath.Join(dir, m.Entry))
 	base := filepath.Clean(dir)
-	if p != base && !strings.HasPrefix(p, base+string(filepath.Separator)) {
-		return "", fmt.Errorf("entry 越界：解析后路径 %q 超出插件目录 %q", p, base)
+	resolve := func(name string) (string, error) {
+		p := filepath.Clean(filepath.Join(base, name))
+		if p != base && !strings.HasPrefix(p, base+string(filepath.Separator)) {
+			return "", fmt.Errorf("entry 越界：解析后路径 %q 超出插件目录 %q", p, base)
+		}
+		return p, nil
+	}
+
+	p, err := resolve(m.Entry)
+	if err != nil {
+		return "", err
+	}
+	if fileExists(p) {
+		return p, nil
+	}
+	// Windows 可执行文件通常带 .exe；清单不带后缀时补一次。
+	// 仅在当前平台是 Windows 且原名**没有**扩展名时才补 ——
+	// 清单显式写了 .exe 但文件不存在，说明是真的缺文件，不该被静默掩盖。
+	if runtime.GOOS == "windows" && filepath.Ext(m.Entry) == "" {
+		if p2, err2 := resolve(m.Entry + ".exe"); err2 == nil && fileExists(p2) {
+			return p2, nil
+		}
 	}
 	return p, nil
+}
+
+// fileExists 报告路径是否为已存在的普通文件。
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.Mode().IsRegular()
 }
 
 func validateSemver(v string) error {

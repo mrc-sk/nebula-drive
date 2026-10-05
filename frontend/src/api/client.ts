@@ -14,6 +14,125 @@ export interface ApiResult<T = any> {
   code: number
   message: string
   data: T
+  /** 部分管理端接口附带运行时元信息（如插件宿主是否就绪） */
+  meta?: Record<string, any>
+}
+
+// ---- 插件相关类型（与后端 pkg/plugin 对应）----
+
+/** 插件运行状态。取自后端 host 包的状态常量。 */
+export type PluginStatus =
+  | 'running'
+  | 'stopped'
+  | 'starting'
+  | 'stopping'
+  | 'crashed'
+  | 'failed'
+  | 'disabled'
+
+/** 插件列表项：数据库记录 + 实时运行状态。 */
+export interface PluginView {
+  id: number
+  name: string
+  title: string
+  enabled: boolean
+  config: string
+  version: string
+  author: string
+  description: string
+  license: string
+  homepage: string
+  hooks: string
+  installSource: string
+  lastError: string
+  restarts: number
+  agreementVersion: number
+  installedAt: string
+  createdAt: string
+  /** 实时状态（后端从插件宿主读，不是数据库字段） */
+  status: PluginStatus
+  pid: number
+  /** 运行时错误，优先于 lastError */
+  runtimeError?: string
+  restartsNow: number
+  hooksList: string[]
+  permissions?: string[]
+  dir?: string
+  /** 磁盘上的清单是否仍可解析（文件被删/损坏时为 false） */
+  manifestValid: boolean
+  manifestError?: string
+}
+
+/** 钩子元信息。 */
+export interface HookInfo {
+  name: string
+  /** handler 总数（进程内 + 进程外） */
+  count: number
+  inProcess: number
+  outProcess: number
+  doc: string
+  /** sync = 阻塞等插件返回；async = 事件通知不等结果 */
+  mode: 'sync' | 'async'
+  /** error 含 blocked 时能否拦截请求 */
+  blockable: boolean
+  /** 后端是否已接入该钩子（有实际 Fire 调用点） */
+  wired: boolean
+}
+
+/** 商店条目。 */
+export interface StorePlugin {
+  name: string
+  title?: string
+  version?: string
+  author?: string
+  description?: string
+  url?: string
+  license?: string
+  homepage?: string
+  tags?: string[]
+  installed?: boolean
+}
+
+/** 协议的一节。 */
+export interface AgreementSection {
+  heading: string
+  paras: string[]
+  bullets?: string[]
+  critical?: boolean
+}
+
+/** 协议全文。 */
+export interface Agreement {
+  version: number
+  title: string
+  updated: string
+  required: string
+  sections: AgreementSection[]
+}
+
+/** 同意记录。 */
+export interface AgreementRecord {
+  version: number
+  acceptedAt: string
+  acceptedBy: number
+  userName: string
+  ip: string
+}
+
+/** 协议接口返回：全文 + 是否已同意。 */
+export interface AgreementState {
+  agreement: Agreement
+  accepted: boolean
+  record: AgreementRecord | null
+  version: number
+}
+
+/** 插件日志条目。 */
+export interface PluginLogEntry {
+  time: string
+  level: 'debug' | 'info' | 'warn' | 'error'
+  plugin: string
+  message: string
 }
 
 export interface LoginData {
@@ -397,10 +516,45 @@ export const api = {
     fileTypeStats: () => request<ApiResult<any[]>>('/api/admin/stats/file-types'),
     activityStats: (days: number) =>
       request<ApiResult<any[]>>(`/api/admin/stats/activity?days=${days}`),
-    plugins: () => request<ApiResult<any[]>>('/api/admin/plugins'),
-    pluginsStore: () => request<ApiResult<any[]>>('/api/admin/plugins/store'),
-    togglePlugin: (id: number | string) =>
-      request<ApiResult<any>>(`/api/admin/plugins/${id}/toggle`, { method: 'POST' }),
+    // ---- 插件（进程外子进程体系）----
+    // 注意：启停是热加载（拉起/杀掉子进程），主服务不重启。
+    // 旧的 togglePlugin 已随后端接口一起移除。
+    plugins: () => request<ApiResult<PluginView[]>>('/api/admin/plugins'),
+    pluginsHooks: () => request<ApiResult<HookInfo[]>>('/api/admin/plugins/hooks'),
+    pluginsStore: () => request<ApiResult<StorePlugin[]>>('/api/admin/plugins/store'),
+    pluginAgreement: () => request<ApiResult<AgreementState>>('/api/admin/plugins/agreement'),
+    acceptPluginAgreement: (version: number) =>
+      request<ApiResult<AgreementRecord>>('/api/admin/plugins/agreement', {
+        method: 'POST',
+        body: JSON.stringify({ version, accept: true }),
+      }),
+    installPlugin: (body: { source: 'local' | 'url'; path?: string; url?: string }) =>
+      request<ApiResult<{ plugin: any; message?: string }>>('/api/admin/plugins/install', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    uninstallPlugin: (name: string, confirmPassword: string) =>
+      request<ApiResult<any>>(`/api/admin/plugins/${encodeURIComponent(name)}/uninstall`, {
+        method: 'POST',
+        // 卸载会杀掉子进程并删除插件目录，后端要求二次确认密码
+        headers: { 'X-Confirm-Password': confirmPassword },
+      }),
+    enablePlugin: (name: string) =>
+      request<ApiResult<any>>(`/api/admin/plugins/${encodeURIComponent(name)}/enable`, { method: 'POST' }),
+    disablePlugin: (name: string) =>
+      request<ApiResult<any>>(`/api/admin/plugins/${encodeURIComponent(name)}/disable`, { method: 'POST' }),
+    restartPlugin: (name: string) =>
+      request<ApiResult<any>>(`/api/admin/plugins/${encodeURIComponent(name)}/restart`, { method: 'POST' }),
+    updatePluginConfig: (name: string, config: string) =>
+      request<ApiResult<any>>(`/api/admin/plugins/${encodeURIComponent(name)}/config`, {
+        method: 'PUT',
+        body: JSON.stringify({ config }),
+      }),
+    pluginLogs: (name?: string, limit = 200) =>
+      request<ApiResult<PluginLogEntry[]>>(
+        `/api/admin/plugins/logs?limit=${limit}${name ? `&name=${encodeURIComponent(name)}` : ''}`,
+      ),
+
     testPolicy: (id: number | string, body: any) =>
       request<ApiResult<any>>(`/api/admin/policies/${id}/test`, { method: 'POST', body: JSON.stringify(body) }),
     uploadLogo: (file: File) => {

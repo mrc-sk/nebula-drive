@@ -4,6 +4,99 @@
 
 ---
 
+## V26-10.0-d — Beta（2026-10-05）
+
+> **插件系统从「装饰品」变成真的能用。** 此前管理后台的插件页看着挺完整，
+> 但装不了、启不动、扩展点数量是随机数 —— 因为后端压根没有加载第三方代码的能力。
+
+### ✨ 插件热加载体系（独立子进程 + JSON-RPC）
+
+插件以**独立子进程**运行，通过 stdin/stdout 上的 JSON-RPC 2.0 与宿主通信。
+**启用 = 拉起进程，禁用 = 杀进程，主服务不重启。**
+
+选型说明：不用 Go 原生 `plugin.Open`（仅 Linux/macOS 且需 cgo，
+**Windows 根本编译不了**，而本项目日常在 Windows 开发、要打包给 Linux 朋友）；
+不用 WASM（需 CGO，Go host function 绑定成本过高）。
+
+- **协议层** `pkg/plugin/manifest.go`
+  `plugin.json` 清单（name/version/entry/hooks/protocolVersion/permissions/license），
+  逐字段校验。`entry` **禁止路径分隔符** —— 否则 manifest 能让宿主执行
+  插件目录外的任意文件，等于开放任意代码执行。协议版本不匹配直接拒载。
+
+- **宿主** `pkg/plugin/host/`
+  子进程生命周期、RPC 编解码、调用超时（默认 2s）、崩溃指数退避自动重启
+  （连续 5 次停止并转人工）、环形日志缓冲（500 条）。
+  进程组隔离：Windows 用 `taskkill /T` 避免留孤儿进程，Unix 用 `kill(-pgid)`。
+
+- **安装器** `pkg/plugin/install/`
+  zip slip 防护、zip bomb 限额（解压 256MB / 单文件 64MB / 条目 2000）、
+  拒绝符号链接、拦截 Windows 保留名（`CON`/`NUL`/`COM1`…）。
+
+- **示例插件** `examples/plugins/referer-guard/`
+  独立 module（不 import 宿主），实现 `onAntiLeech` 的 Referer 白名单，
+  支持前缀 / `*.` 通配 / `re:` 正则三种写法，附下载审计日志。
+
+### 🛡️ 插件协议与强制关卡
+
+首次进入插件页会弹窗要求阅读**插件协议**（8 节，含权限风险、拦截语义、
+AGPL 合规要求）。两条硬约束：
+
+- **必须滚动到底**才能勾选同意 —— 一打开就能点同意等于没要求同意；
+- **后端强制**（`requireAgreement`），未同意时安装/启用接口直接 403。
+  只靠前端弹窗的话，直接调 API 就能绕过。
+
+协议正文硬编码在宿主内置（`pkg/plugin/agreement.go`），
+不从配置文件读 —— 从外部读意味着部署者能改掉管理员看到的内容。
+协议版本升级后需重新同意。
+
+### 🔧 修复
+
+- **「启用/禁用」开关是装饰性的**
+  `models.Plugin.Enabled` **此前没有任何生产代码读取** ——
+  `grep "Enabled" | grep -i plugin` 唯一命中是测试数据。
+  `TogglePlugin` 只翻转数据库布尔值，插件代码根本不读它。
+  现在启用会真正拉起子进程，并把 `status`/`pid`/运行错误返回给前端；
+  数据库说启用但进程没跑时，列表会**显式提示这个矛盾**。
+
+- **扩展点数量是随机数**
+  前端 `client.ts` **没有 `pluginsHooks` 方法**，代码 fallback 到同样不存在的
+  `api.get`，于是走进 mock 分支：`Math.random()` 生成 handler 数量。
+  页面上显示的数字每次刷新都变，与真实情况无关。现在接真实接口。
+
+- **插件页的「安装」是 `alert()` 占位**，商店拉取失败时一律返回空数组
+  （分不清"商店为空"还是"拉取失败"）。现在真实安装，失败给明确原因，
+  商店条目逐条校验（坏条目跳过并说明原因，不让一个坏条目打不开整个商店）。
+
+- **`Config` 字段带 `json:"-"`**，管理端根本拿不到插件配置，
+  插件作者无法配置任何东西。已放开。
+
+- **宿主退出后插件变孤儿进程**。新增 signal 处理，
+  退出前 `StopPlugins()` 清理；第二次信号恢复默认行为允许强杀。
+
+### ⚙️ 其它
+
+- `onRateLimit` 是异步钩子但限流中间件需要拦截决策。
+  新增 `RateLimitGate` / `Dispatcher.DispatchSync`：
+  钩子保持异步（不拖累另外 6 个不读结果的热路径），
+  仅在需要决策处强制同步等待。
+- 进程内 handler 加 panic recover 与 5s 超时；
+  `Fire` 改为先复制 handler 快照再释放读锁（锁内做 IPC 往返会卡死 `Register`）。
+- 新增 migration v6（插件表字段 + 存量数据补默认许可）。
+- 发版脚本扩展到 5 平台（新增 linux/arm64、darwin/arm64），
+  注入版本号（插件可据此做版本判断），生成 `SHA256SUMS.txt`。
+
+### ✅ 验证
+
+- `go build ./...` / `go vet ./...` 全过
+- 交叉编译 5 平台：windows-amd64、linux-amd64、linux-arm64、darwin-arm64、darwin-amd64
+- `go test ./...` 全包通过（插件宿主 17 项：崩溃隔离、超时、20 路并发、
+  崩溃自动重启、init 失败拒绝、拦截语义）
+- 前端 `tsc -b` + `vite build` 通过，i18n 五语言门禁「全部 key 齐全」
+- 实机冒烟：真实启动二进制 → 装插件 → 启用 → 验证外站 Referer 被 403 拦截
+  → 禁用 → 验证拦截消失且**主服务未重启**、插件子进程已回收
+
+---
+
 ## V26-10.0-c — Beta（2026-10-04）
 
 > **分享页整条链路接通了。** 此前下载按钮点不动、预览区全是假内容 —— 分享功能等于只有一个链接能打开。

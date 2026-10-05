@@ -72,7 +72,9 @@ fi
 
 # -trimpath 去掉本机路径（可复现构建）
 # -ldflags="-s -w" 剥离符号表与调试信息，体积 65 MB -> 47 MB
-LDFLAGS="-s -w"
+# 同时注入版本号：main.buildVersion 会被插件宿主当作 HostVersion 传给插件，
+# 插件可据此做版本判断。不注入时后端用 "dev"。
+LDFLAGS="-s -w -X main.buildVersion=${VER}"
 export CGO_ENABLED=0
 export GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
 
@@ -133,18 +135,48 @@ case "$HOST_ARCH" in
 esac
 
 if [ "$1" = "--all" ]; then
-    build_one linux  amd64  ""   sh || exit 1
-    build_one darwin amd64  ""   sh || exit 1
+    # 全平台矩阵。用户交付对象涵盖 Windows / Linux / macOS，
+    # 且近年 ARM 设备（Apple Silicon、树莓派、ARM 云主机）占了不少，
+    # 只出 amd64 会让一半用户跑不起来。
     build_one windows amd64 ".exe" bat || exit 1
+    build_one linux   amd64  ""    sh  || exit 1
+    build_one linux   arm64  ""    sh  || exit 1
+    build_one darwin  arm64  ""    sh  || exit 1
+    build_one darwin  amd64  ""    sh  || exit 1
 else
     case "$HOST_OS" in
         linux|darwin) build_one "$HOST_OS" "$HOST_ARCH" "" sh || exit 1 ;;
         *)
             echo "  ${RED}[错误]${RST} 不支持的系统：$HOST_OS"
             echo "        Windows 请用 packaging\\build-release.bat"
+            echo "        或在任意系统上用 --all 交叉编译全部平台"
             exit 1
             ;;
     esac
+fi
+
+# ---------- 5. 生成 SHA256 校验和 ----------
+# 用户下载 zip 后可校验完整性。sha256sum（Linux/macOS）
+# 与 certutil/PowerShell（Windows）都可用。
+echo
+echo "  [校验] 生成 SHA256SUMS"
+( cd release 2>/dev/null && \
+  find . -name '*.zip' -type f 2>/dev/null | sed 's|^\./||' | sort > .ziplist )
+if [ -f release/.ziplist ]; then
+    : > release/SHA256SUMS.txt
+    while IFS= read -r z; do
+        [ -f "release/$z" ] || continue
+        if command -v sha256sum >/dev/null 2>&1; then
+            ( cd release && sha256sum "$z" >> SHA256SUMS.txt )
+        else
+            # 无 sha256sum 时退化为仅列文件名，总比没有强
+            echo "  $z" >> release/SHA256SUMS.txt
+        fi
+    done < release/.ziplist
+    rm -f release/.ziplist
+    echo "  ${GRN}[完成]${RST} release/SHA256SUMS.txt"
+else
+    echo "  ${DIM}[跳过]${RST} 未找到 zip 产物"
 fi
 
 echo

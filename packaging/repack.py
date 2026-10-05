@@ -38,13 +38,18 @@ BUILD = os.path.join(ROOT, "backend", ".ndbuild")
 PKG = os.path.join(ROOT, "packaging")
 RELEASE = os.path.join(ROOT, "release")
 
-VERSION = "V26-10.0-b"
+VERSION = "V26-10.0-d"
 
+# (目录后缀, 编译产物名, 包内二进制名, 启动脚本名, 是否 windows, 是否带 Linux 上手说明)
+#
+# 五平台：Windows/Linux 的 amd64+arm64，macOS 的 arm64(Apple Silicon)+amd64(Intel)。
+# 只出 amd64 会让一半用户跑不起来 —— ARM 云主机和树莓派用户只能看着干瞪眼。
 PLATFORMS = [
-    # (目录后缀, 编译产物名, 包内二进制名, 启动脚本名, 是否 windows)
-    ("windows-amd64", "nebula-windows.exe", "nebula.exe", "start.bat", True),
-    ("linux-amd64", "nebula-linux", "nebula", "start.sh", False),
-    ("darwin-amd64", "nebula-darwin", "nebula", "start.sh", False),
+    ("windows-amd64", "nebula-windows-amd64.exe", "nebula.exe", "start.bat", True, False),
+    ("linux-amd64", "nebula-linux-amd64", "nebula", "start.sh", False, True),
+    ("linux-arm64", "nebula-linux-arm64", "nebula", "start.sh", False, True),
+    ("darwin-arm64", "nebula-darwin-arm64", "nebula", "start.sh", False, False),
+    ("darwin-amd64", "nebula-darwin-amd64", "nebula", "start.sh", False, False),
 ]
 
 # 文档类文件：统一转 LF 后写入。LICENSE 是 AGPL 义务，不能少。
@@ -87,7 +92,7 @@ def main():
     os.makedirs(RELEASE, exist_ok=True)
     made = []
 
-    for suffix, buildname, binname, starter, is_win in PLATFORMS:
+    for suffix, buildname, binname, starter, is_win, want_linux_doc in PLATFORMS:
         src = os.path.join(BUILD, buildname)
         if not os.path.exists(src):
             print(f"[skip] 缺少编译产物 {src}")
@@ -127,8 +132,9 @@ def main():
             else:
                 raise SystemExit(f"缺少必需文件: {base}")
 
-        # 3.1) Linux 包额外带上手说明
-        if not is_win:
+        # 3.1) Linux 包额外带上手说明（macOS 不需要 —— 那份文档讲的是
+        #      chmod / bad interpreter / uname -m 等 Linux 特有的坑）
+        if want_linux_doc:
             ldoc = os.path.join(PKG, LINUX_DOC)
             if not os.path.exists(ldoc):
                 raise SystemExit(f"缺少 Linux 上手说明: {ldoc}")
@@ -169,6 +175,22 @@ def main():
     print("\n=== 产出 ===")
     for p in made:
         print(" ", p)
+
+    # SHA256 校验和：用户下载后可验证完整性。
+    # 没有它，传输损坏或下载不全只能靠用户自己发现。
+    import hashlib
+    sums = os.path.join(RELEASE, "SHA256SUMS.txt")
+    print("\n=== 生成 SHA256SUMS.txt ===")
+    with open(sums, "w", encoding="utf-8", newline="\n") as f:
+        for zp in made:
+            h = hashlib.sha256()
+            with open(zp, "rb") as fp:
+                for chunk in iter(lambda: fp.read(1 << 20), b""):
+                    h.update(chunk)
+            line = "%s  %s" % (h.hexdigest(), os.path.basename(zp))
+            f.write(line + "\n")
+            print(" ", line)
+    print(" ", sums)
 
 
 if __name__ == "__main__":

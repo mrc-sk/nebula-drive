@@ -451,10 +451,17 @@ func TestPluginAgreementGate(t *testing.T) {
 		t.Fatal("同意后应为已同意")
 	}
 
-	// 同意后启用才走到"清单无效"这一步（而不是被协议关卡拦住）
+	// 同意后启用不再被协议关卡拦住。
+	// 测试环境没有初始化插件宿主，所以会停在 503（宿主未就绪）而非 400；
+	// 关键是**不能再是 403** —— 那说明协议关卡还在拦。
 	w = doJSON(r, http.MethodPost, "/plugins/p1/enable", nil)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("清单缺失应 400，实际 %d", w.Code)
+	if w.Code == http.StatusForbidden {
+		t.Fatal("同意后启用不应再被协议关卡拦为 403")
+	}
+	if w.Code != http.StatusServiceUnavailable && w.Code != http.StatusBadRequest {
+		t.Fatalf("同意后启用应走到宿主/清单检查，"+
+			"期望 503（宿主未就绪）或 400（清单无效），实际 %d: %s",
+			w.Code, w.Body.String())
 	}
 }
 

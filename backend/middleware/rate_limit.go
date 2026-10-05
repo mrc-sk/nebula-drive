@@ -96,7 +96,10 @@ func RateLimit(category string) gin.HandlerFunc {
 			ctx["userId"] = u.ID
 			ctx["userName"] = u.UserName
 		}
-		if errs := plugin.Fire(plugin.HookRateLimit, ctx); len(errs) > 0 {
+		// onRateLimit 整体是异步钩子（7 个调用点里 6 个不读结果），
+		// 但限流中间件这一处必须做拦截决策，所以走 DispatchSync 强制同步等待。
+		// 代价是最多一个 FireTimeout 的延迟；换来的是插件能真正拦请求。
+		if errs := plugin.RateLimitGate(ctx); len(errs) > 0 {
 			for _, e := range errs {
 				if strings.Contains(e.Error(), "blocked") {
 					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": 403, "message": "blocked by rate limit plugin"})

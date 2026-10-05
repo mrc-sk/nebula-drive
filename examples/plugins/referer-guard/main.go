@@ -116,7 +116,7 @@ type compiled struct {
 	cfg       Config
 	patterns  []*regexp.Regexp
 	exts      map[string]bool
-	exempt    map[uint]bool
+	exempt    map[uint64]bool
 	logHandle *os.File
 }
 
@@ -258,8 +258,12 @@ func (v verdict) String() string {
 
 func (c *compiled) check(ctx map[string]any) (verdict, string) {
 	// 1. 用户豁免
-	if id, ok := ctx["userId"].(float64); ok {
-		if c.exempt[uint(id)] {
+	//
+	// 注意类型：ctx 经 JSON 往返后数字一律是 float64，
+	// 这里断言 uint 会永远失败（看起来"豁免不生效"）。
+	// 兼容 float64 / int / json.Number 三种来源。
+	if id, ok := numOf(ctx["userId"]); ok {
+		if c.exempt[id] {
 			return allow, "用户豁免"
 		}
 	}
@@ -288,6 +292,40 @@ func (c *compiled) check(ctx map[string]any) (verdict, string) {
 		}
 	}
 	return block, "Referer 不在允许列表: " + ref
+}
+
+// numOf 把 ctx 里的数字字段转成 uint64。
+//
+// ctx 是 map[string]any，经 JSON 反序列化后数字全是 float64。
+// 直接写 ctx["userId"].(uint) 会永远失败 —— 这类"静默不生效"的 bug
+// 极难察觉：代码没报错，功能就是不工作。
+func numOf(v any) (uint64, bool) {
+	switch n := v.(type) {
+	case float64:
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case int:
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case int64:
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case uint64:
+		return n, true
+	case uint:
+		return uint64(n), true
+	case json.Number:
+		if i, err := n.Int64(); err == nil && i >= 0 {
+			return uint64(i), true
+		}
+	}
+	return 0, false
 }
 
 func (c *compiled) audit(ctx map[string]any, v verdict, msg string) {
@@ -321,7 +359,7 @@ func (c *compiled) closeLog() {
 
 // build 把配置编译成匹配器。
 func build(cfg *Config) (*compiled, error) {
-	c := &compiled{cfg: *cfg, exts: map[string]bool{}, exempt: map[uint]bool{}}
+	c := &compiled{cfg: *cfg, exts: map[string]bool{}, exempt: map[uint64]bool{}}
 	for _, p := range cfg.AllowedReferers {
 		if strings.TrimSpace(p) == "" {
 			continue
@@ -339,7 +377,7 @@ func build(cfg *Config) (*compiled, error) {
 		}
 	}
 	for _, u := range cfg.ExemptUsers {
-		c.exempt[u] = true
+		c.exempt[uint64(u)] = true
 	}
 	return c, nil
 }
@@ -361,9 +399,15 @@ func compilePattern(p string) (*regexp.Regexp, error) {
 	return regexp.Compile(`^` + regexp.QuoteMeta(p) + `.*$`)
 }
 
+// defaultConfig 默认放行本机（便于开箱可用）。
+//
+// 这里用 "*.localhost" 与显式端口，而不是 "http://localhost:*" ——
+// 前者是本文件支持的通配写法；后者里的 * 会被当作正则元字符
+// （* 前无元素 = 无效正则），编译期不报错、运行时永不匹配。
+// 这类"看起来合理实际不工作"的配置最容易浪费排查时间。
 func defaultConfig() Config {
 	return Config{
-		AllowedReferers:  []string{"http://localhost:*", "http://127.0.0.1:*"},
+		AllowedReferers:  []string{"*.localhost", "127.0.0.1", "*.127.0.0.1"},
 		BlockEmptyReferer: false,
 		LogDownloads:     true,
 	}

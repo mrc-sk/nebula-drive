@@ -791,6 +791,11 @@ func auditPlugin(c *gin.Context, action, target, detail string) {
 	})
 }
 
+// loadSetting 读单个设置项。
+//
+// 与 GetSettings 的区别：后者是给前端铺出全量 map，这里是内部取单值。
+// 没有复用 GetSettings 是因为它会 JSON 序列化整个 settings 表，
+// 为一个键付出这个代价不划算。
 func loadSetting(key string) (string, bool) {
 	var s models.Setting
 	if err := db.Get().Where("`key` = ?", key).First(&s).Error; err != nil {
@@ -799,6 +804,8 @@ func loadSetting(key string) (string, bool) {
 	return s.Value, true
 }
 
+// saveSetting upsert 单个设置项。语义与 SaveSettings 里的分支一致，
+// 抽出来是因为插件协议同意状态需要原子地"读-改-写"。
 func saveSetting(key, value string) {
 	var s models.Setting
 	if err := db.Get().Where("`key` = ?", key).First(&s).Error; errors.Is(err, gorm.ErrRecordNotFound) {

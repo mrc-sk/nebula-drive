@@ -24,6 +24,7 @@
 package plugin
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -183,10 +184,19 @@ var (
 // Dispatcher 进程外插件派发器。由 pkg/plugin/host 在初始化时注入，
 // 避免 host 与 plugin 包互相 import（host 可以 import plugin，反之不行）。
 type Dispatcher interface {
-	// Dispatch 派发一次钩子。ctx 会被原地修改（插件写入的字段会回传）。
-	// 返回 error 列表；其中文本含 "blocked" 的会被业务判定为拦截。
-	// 仅 ModeSync 钩子会真正等待结果。
+	// Dispatch 按钩子的既定模式派发（见 HookMeta.Mode）。
+	// ctx 会被原地修改（插件写入的字段会回传）。
+	// 返回 error 列表；其中含 "blocked" 的会被业务判定为拦截。
+	// 异步钩子不返回结果，error 列表恒为空。
 	Dispatch(h HookName, ctx map[string]any) []error
+
+	// DispatchSync 无视钩子的既定模式，强制同步等待全部插件返回。
+	//
+	// 用于「钩子整体异步、但个别调用点必须读结果」的场景 ——
+	// 目前只有 onRateLimit：它在 7 处被调用，只有限流中间件那一处
+	// 需要拦截决策。给 Dispatcher 单独开这个口，比把整个钩子改成
+	// 同步（让另外 6 处每次都白等 IPC 往返）划算。
+	DispatchSync(h HookName, ctx map[string]any) []error
 
 	// Count 返回该钩子上已加载的进程外插件数。
 	Count(h HookName) int
@@ -246,7 +256,63 @@ func snapshot(h HookName) []HandlerFunc {
 	return out
 }
 
-// Fire 派发钩子。
+// IsBlockedError 判断 error 是否为拦截型。
+//
+// 这是全项目**唯一**的拦截判定实现：middleware/rate_limit.go、
+// controllers/file.go 与本包的同步门都走它。
+// 改判定语义时务必同步那几处，否则拦截行为会分裂。
+func IsBlockedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if b, ok := err.(Blockable); ok {
+		return b.IsBlocked()
+	}
+	return strings.Contains(err.Error(), "blocked")
+}
+
+// Blockable 可拦截的错误。插件返回的 error 若实现该接口，
+// 无论文本是什么都算拦截（供未来结构化拦截用）。
+type Blockable interface {
+	error
+	IsBlocked() bool
+}
+
+// RateLimitGate 是 onRateLimit 的同步拦截门。
+//
+// 背景：该钩子在 7 处被调用，只有��流中间件这一处需要读返回值做拦截
+// 决策，其余 6 处（登录/上传/下载/分享增删）都丢弃结果。
+//
+//   - 若把整个钩子设为 ModeSync，那 6 处每次都要白等一次 IPC 往返；
+//   - 若保持 ModeAsync，中间件这处的拦截就永远失效。
+//
+// 解决：钩子保持异步（不拖累 6 处热路径），仅在需要决策的地方调本函数，
+// 由它走 Dispatcher.DispatchSync 强制同步等待。
+//
+// 代价：每个请求最多多等一个 FireTimeout（默认 2s）。
+// 但仅在**有插件声明了 onRateLimit** 时才有实际等待 ——
+// 没有插件时 DispatchSync 立即返回空。
+func RateLimitGate(ctx map[string]any) []error {
+	if ctx == nil {
+		return nil
+	}
+	d := currentDispatcher()
+	if d == nil {
+		return nil
+	}
+	// 进程内 handler 走 Fire（异步语义保持不变），
+	// 进程外插件走 DispatchSync 强制同步。
+	var errs []error
+	for _, fn := range snapshot(HookRateLimit) {
+		if err := runHandler(HookRateLimit, fn, ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	errs = append(errs, d.DispatchSync(HookRateLimit, ctx)...)
+	return errs
+}
+//
+// Fire 派发钩子（按钩子既定模式）。
 //
 // 执行顺序：进程内 handler 全部执行完，再派发给进程外插件。
 //

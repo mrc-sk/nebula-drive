@@ -8,9 +8,12 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -22,12 +25,17 @@ import (
 	"github.com/nebula-drive/nebula/pkg/aria2"
 	"github.com/nebula-drive/nebula/pkg/db"
 	"github.com/nebula-drive/nebula/pkg/jwt"
+	"github.com/nebula-drive/nebula/pkg/pluginset"
 	"github.com/nebula-drive/nebula/pkg/storage"
 	tlspkg "github.com/nebula-drive/nebula/pkg/tls"
 	"github.com/nebula-drive/nebula/routers"
 	"github.com/nebula-drive/nebula/webdav"
 	"gorm.io/gorm"
 )
+
+// buildVersion 由发版脚本通过 -ldflags "-X main.buildVersion=..." 注入。
+// 缺省时用 dev，避免忘记注入导致版本显示成空白。
+var buildVersion = "dev"
 
 func main() {
 	dataDir := flag.String("data", "data", "数据目录")
@@ -82,7 +90,29 @@ func main() {
 		}()
 	}
 
+	// 退出时清理插件子进程（避免孤儿进程）
+	watchSignals()
+
 	startServer(r, addr)
+}
+
+// watchSignals 监听中断信号，退出前清理插件子进程。
+//
+// 必须做：插件是以独立子进程运行的，不清理就会在宿主退出后
+// 变成孤儿进程继续挂着（Windows 上 taskkill /T 能兜，Linux 上更明显）。
+// 第二次信号直接恢复默认行为，允许管理员用 Ctrl+C 强杀。
+func watchSignals() {
+	ch := make(chan os.Signal, 2)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-ch
+		log.Printf("[INFO] 收到退出信号，正在停止插件进程...")
+		pluginset.StopPlugins()
+		ch2 := make(chan os.Signal, 1)
+		signal.Notify(ch2, os.Interrupt, syscall.SIGTERM)
+		<-ch2
+		os.Exit(130) // 128 + SIGINT
+	}()
 }
 
 const (
@@ -282,6 +312,10 @@ func bootstrap() {
 	})
 	// 初始化默认套餐（Ultra/Pro/Pro Max）
 	controllers.SeedDefaultPlans()
+	// 插件宿主必须在版本化迁移**之前**初始化：
+	// onDBMigrate 钩子在 migrations.Run 内部触发，晚于迁移就收不到本次触发
+	// （该钩子每次启动都触发，漏掉本次下轮启动会补上，不致命但顺序更严谨）。
+	pluginset.InitPlugins(buildVersion)
 	if err := migrations.Run(db.Get()); err != nil {
 		log.Printf("[WARN] 版本化迁移失败: %v", err)
 	}

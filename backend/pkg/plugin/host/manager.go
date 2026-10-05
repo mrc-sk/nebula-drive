@@ -581,20 +581,28 @@ func (m *Manager) Count(h plugin.HookName) int {
 
 // ---- 派发（实现 plugin.Dispatcher）----
 
-// Dispatch 派发一次钩子到所有声明该钩子的插件。
-//
-// ModeSync（onAntiLeech / onCollabOpen）：串行等待每个插件返回，
-// ctx 会带上前一个插件的写入（后一个插件能看到前一个的结果）。
-//
-// ModeAsync：每个插件一个 goroutine，不等待、不回传 ctx 变更。
-// 业务拿不到异步结果，所以 ctx 副本与回传都无意义，直接发出去。
+// Dispatch 按钩子既定模式派发（见 plugin.HookMeta.Mode）。
 func (m *Manager) Dispatch(h plugin.HookName, ctx map[string]any) []error {
-	mode := plugin.HookModeOf(h)
-	if mode == plugin.ModeAsync {
+	if plugin.HookModeOf(h) == plugin.ModeAsync {
 		m.dispatchAsync(h, ctx)
 		return nil
 	}
+	return m.dispatchSync(h, ctx)
+}
 
+// DispatchSync 强制同步等待全部插件返回。
+//
+// 目前只有 onRateLimit 用这个入口：它整体是异步钩子（7 个调用点里
+// 6 个不读结果），但限流中间件那一处必须做拦截决策。
+func (m *Manager) DispatchSync(h plugin.HookName, ctx map[string]any) []error {
+	return m.dispatchSync(h, ctx)
+}
+
+// dispatchSync 串行等待每个插件，把 ctx 变更与 error 逐个带回。
+//
+// 用串行而非并行：后一个插件应能看到前一个的写入（与进程内 Fire 的
+// 顺序语义一致），且插件数量少（通常 0-2 个），串行的延迟可接受。
+func (m *Manager) dispatchSync(h plugin.HookName, ctx map[string]any) []error {
 	targets := m.targets(h)
 	if len(targets) == 0 {
 		return nil
