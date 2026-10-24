@@ -429,7 +429,7 @@ func upsertSetting(key, value string) {
 func ensureBrandSettings() {
 	upsertSetting("brand.name", "NebulaDrive")
 	upsertSetting("brand.author", "NebulaDrive Team")
-	upsertSetting("brand.version", "1.0.0")
+	upsertSetting("brand.version", "26-10.0-d")
 	upsertSetting("trash.retention_days", "30")
 	upsertSetting("file.max_versions", "10")
 	// TLS

@@ -356,6 +356,8 @@ export default {
     loading: '読み込み中…',
   },
   ns_admin: {
+    webdav: 'WebDAV',
+    noTrafficData: 'トラフィックデータなし',
     dashboard: 'ダッシュボード',
     users: 'ユーザー',
     groups: 'グループ',

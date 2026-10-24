@@ -26,7 +26,7 @@ export default function Login() {
   const [brand, setBrand] = useState<BrandInfo>({
     name: 'NebulaDrive',
     author: 'NebulaDrive Team',
-    version: '1.0.0',
+    version: '26-10.0-d',
   })
 
   useEffect(() => {
@@ -40,7 +40,7 @@ export default function Login() {
           setBrand({
             name: d['brand.name'] || d.brandName || 'NebulaDrive',
             author: d['brand.author'] || d.brandAuthor || 'NebulaDrive Team',
-            version: d['brand.version'] || d.brandVersion || '1.0.0',
+            version: d['brand.version'] || d.brandVersion || '26-10.0-d',
           })
         }
       } catch {}

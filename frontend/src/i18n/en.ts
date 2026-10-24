@@ -356,6 +356,8 @@ export default {
     loading: 'Loading…',
   },
   ns_admin: {
+    webdav: 'WebDAV',
+    noTrafficData: 'No traffic data',
     dashboard: 'Dashboard',
     users: 'Users',
     groups: 'Groups',

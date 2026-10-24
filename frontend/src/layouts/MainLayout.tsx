@@ -197,7 +197,8 @@ export default function MainLayout(props: MainLayoutProps) {
     () => (pluginData?.sidebar.admin || []).slice().sort(byOrder),
     [pluginData],
   )
-  const [brand, setBrand] = useState({ name: 'NebulaDrive', author: 'NebulaDrive Team', version: '1.0.0' })
+  // 版本默认值与发布名 V26-10.0-d 对齐（后端 brand.version 同源，见 52c70a8）
+  const [brand, setBrand] = useState({ name: 'NebulaDrive', author: 'NebulaDrive Team', version: '26-10.0-d' })
   const userRef = useRef<HTMLDivElement>(null)
   const avatarClickTimes = useRef<number[]>([])
 
@@ -212,7 +213,7 @@ export default function MainLayout(props: MainLayoutProps) {
           setBrand({
             name: d['brand.name'] || d.brandName || 'NebulaDrive',
             author: d['brand.author'] || d.brandAuthor || 'NebulaDrive Team',
-            version: d['brand.version'] || d.brandVersion || '1.0.0',
+            version: d['brand.version'] || d.brandVersion || '26-10.0-d',
           })
         }
       } catch {}

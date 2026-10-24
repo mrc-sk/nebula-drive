@@ -356,6 +356,8 @@ export default {
     loading: '載入中…',
   },
   ns_admin: {
+    webdav: 'WebDAV',
+    noTrafficData: '暫無流量數據',
     dashboard: '儀表板',
     users: '使用者',
     groups: '使用者群組',

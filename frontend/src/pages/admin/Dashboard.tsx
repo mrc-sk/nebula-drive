@@ -270,7 +270,7 @@ export default function Dashboard() {
 /* ============================== 上传/下载趋势折线图 ============================== */
 function TrafficChart({ data }: { data: { date: string; upload: number; download: number }[] }) {
   const { t } = useTranslation()
-  if (!data || data.length === 0) return <EmptyChart hint={t('noTrafficData') || '暂无流量数据'} />
+  if (!data || data.length === 0) return <EmptyChart hint={t('ns_admin.noTrafficData') || '暂无流量数据'} />
   const option = useMemo<EChartsOption>(() => {
     return {
       tooltip: {
