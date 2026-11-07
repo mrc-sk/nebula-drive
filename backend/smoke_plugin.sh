@@ -175,6 +175,20 @@ else
     bad "重启后插件宿主仍未就绪（enable 会 503）"
 fi
 
+# ---- 3b. 插件全局总开关（v2 双层默认关闭的第一层）----
+#
+# v2 起插件系统默认整体关闭（全局总开关 + 单插件 disabled 双层）。
+# 开关要求显式 acknowledge=true —— 那个免责确认不是形式，
+# 插件能注册 HTTP 页面且 /ext/* 完全透传鉴权，等同交出执行权限。
+# 冒烟本来就是站长视角的端到端验证，这里代为确认。
+echo "[3b] 开启插件全局总开关"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AUTH" \
+  -H 'Content-Type: application/json' \
+  -d '{"enabled":true,"acknowledge":true}' \
+  "$BASE/api/admin/plugins/global")
+check "插件总开关开启 200" "$CODE" "200"
+curl -s -H "$AUTH" "$BASE/api/admin/plugins/global" | grep -q '"enabled":true' \
+    && ok "总开关状态确认 enabled" || bad "总开关未生效"
 # ---- 4. 协议关卡 ----
 echo "[4/10] 插件协议关卡"
 BEFORE=$(curl -s -H "$AUTH" "$BASE/api/admin/plugins/agreement" | grep -o '"accepted":[a-z]*' | head -1)
