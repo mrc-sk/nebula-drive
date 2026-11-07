@@ -84,3 +84,5 @@ guide/build/
 *.ttc
 *.wav
 guide/
+backend/data.bak.*/
+backend/uploads/

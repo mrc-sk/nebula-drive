@@ -28,7 +28,7 @@ NebulaDrive 是一个对标 Cloudreve Pro 的**自托管云存储系统**，采�
 | 🔐 **认证安全** | bcrypt + JWT + 单设备登录、2FA(TOTP) 可选、邮箱验证码、7 天记住登录 |
 | 🔗 **分享双因子** | 提取码 + 密码两层保护，签名 URL 防盗链 5 分钟有效 |
 | 🤝 **协作编辑** | OnlyOffice 对接钩子 + MD/TXT 内置 Yjs CRDT，WebSocket 实时同步 |
-| 🧩 **插件系统** | 8 个官方扩展点（邮件/备份/恢复/API鉴权/DB迁移/限流/防盗链/CLI/协作）+ com.json 插件商店 |
+| 🧩 **插件系统** | 平台 v2：**99 个钩子**（18 组，全部真接线）+ **12 类注册型扩展点**（storage/auth/notify/backup/page…）+ 多语言运行时（php/python/node/go）+ 插件自建 HTTP 页面（`/ext/*`）+ 前端动态侧边栏/主题扩展 + **PBClus 插件包**（多平台 + Ed25519 签名 + 信任库）+ com.json 插件商店 |
 | 🔑 **开放 API** | OAuth2.0 Authorization Code + 个人访问令牌 PAT + /api/v1/* 标准接口 |
 | 🛡️ **安全加固** | CSP/X-Frame/HSTS 安全头、上传白名单+魔术字节、密码强度策略、IP 自动封禁、敏感操作二次确认 |
 | 📊 **数据统计** | KPI 卡片 + 流量趋势折线 + 文件类型饼图 + 用户活跃度热力图 |
@@ -137,28 +137,39 @@ nfpm package -p rpm
 ## 🧩 公共插件库（plugins 分支）
 
 > 社区可以做好插件往 **`plugins`** 分支提交 PR。
+> 商店目录 `com.json` 在该分支根，管理端「插件 → 商店」自动拉取展示；
+> **目录里必须有对应的插件目录**，否则条目会被移除（曾清掉 4 个空壳条目）。
 
 ### 插件目录结构
 
 ```
 plugins/
-├── smtp-email/          ← 插件名（kebab-case）
-│   ├── plugin.json      ← 元数据（名称/版本/作者/钩子）
-│   ├── main.go          ← 插件逻辑
+├── _examples/              ← 现有插件（kebab-case 目录）
+│   ├── smtp-email/         ← plugin.json + main.go + go.mod + README
+│   └── referer-guard/
+├── your-plugin/            ← 新插件放这里
+│   ├── plugin.json         ← 元数据（name/entry/protocolVersion/hooks 必需）
+│   ├── main.go             ← Go 插件逻辑（也可用 php/python/node，见 v2 契约）
 │   ├── go.mod
 │   └── README.md
-├── backup-local/
-│   ├── plugin.json
-│   └── ...
-└── README.md            ← 插件提交指南
+├── com.json                ← 商店目录（合并 PR 时更新此文件）
+└── README.md               ← 插件提交指南
 ```
 
 ### 插件提交步骤
 
 1. 从 **`plugins`** 分支 checkout 出 feature/xxx
-2. 按上述结构放好插件代码 + plugin.json
-3. 提交 PR，目标分支选 **plugins**（不是 main）
-4. CI 审核通过后合并
+2. 按上述结构放好插件代码 + plugin.json（**不要**提交运行产物——
+   该分支曾因误提交 `data/` 与数据库文件而清理过）
+3. 更新 `com.json` 加上你的条目（id 必须与目录名一致）
+4. 提交 PR，目标分支选 **plugins**（不是 main）；CI 审核通过后合并
+
+### 本仓库自带的示例插件（main 分支 `examples/plugins/`，7 个可运行）
+
+referer-guard（防盗链）· smtp-email（邮件）· hmac-auth（HMAC 鉴权）·
+notify-webhook（通知转发）· backup-mirror（备份镜像）·
+download-limiter（下载限流）· collab-redirect（协作跳转）。
+打包分发用 `pbclus-pack`（见 `docs/PBClus-格式规范.md`）。
 
 ---
 
@@ -174,7 +185,8 @@ nebula-drive/
 │   ├── pkg/
 │   │   ├── db/          # SQLite/MySQL/PostgreSQL 多库支持
 │   │   ├── jwt/         # JWT 签发解析
-│   │   ├── plugin/      # 插件钩子引擎
+│   │   ├── plugin/      # 插件平台 v2（99 钩子/注册型扩展点/三文件契约）
+│   │   │   └── pbclus/  # PBClus 插件包容器（多平台+签名+信任库）
 │   │   ├── aria2/       # aria2 JSON-RPC 客户端
 │   │   ├── tls/         # ACME + 手动证书
 │   │   └── util/        # 工具（UUID/MD5/buffer 池）
