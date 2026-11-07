@@ -61,6 +61,59 @@ export interface PluginView {
   /** 磁盘上的清单是否仍可解析（文件被删/损坏时为 false） */
   manifestValid: boolean
   manifestError?: string
+  /** 该插件的签名者是否在信任库里（后端 models.Plugin.Trusted，安装时落库） */
+  trusted?: boolean
+  /** 安装时记录的签名状态（后端 pbclus.Signature）；无签名记录时缺省 */
+  signatureInfo?: PluginSignatureInfo
+}
+
+/**
+ * 包的签名状态。
+ *
+ * **present / valid / trusted 三者刻意分开**，后端就是这么建模的：
+ *  - present  「包里有没有签名块」
+ *  - valid    「签名与内容是否自洽」—— **不代表可信**：
+ *              Ed25519 密钥任何人都能生成，任何人都能签出一个"有效"的包
+ *  - trusted  「签名者的 keyId 是否在宿主的信任库里」
+ * 界面必须严格区分 valid 与 trusted，不能把"签名有效"显示成"可信"。
+ */
+export interface PluginSignatureInfo {
+  present: boolean
+  valid: boolean
+  trusted: boolean
+  keyId?: string
+  /** 信任库里该密钥的名字；未受信任时为空 */
+  keyName?: string
+  /** present && !valid 时的原因 */
+  error?: string
+}
+
+/** 信任库里的一条记录。 */
+export interface PluginTrustKey {
+  keyId: string
+  name: string
+  /** base64 公钥；只按 keyId 登记时为空串 */
+  publicKey: string
+  addedAt: string
+}
+
+/**
+ * GET /api/admin/plugins/trust 的返回。
+ *
+ * 注意：信任库文件损坏时后端只返回 mode / path / keys / error，
+ * **三个计数字段会缺失** —— 所以它们是可选的，界面不能当成一定有值。
+ */
+export interface PluginTrustState {
+  /** off | warn | require */
+  mode: string
+  /** 信任库文件绝对路径 */
+  path: string
+  keys: PluginTrustKey[]
+  installedCount?: number
+  signedCount?: number
+  trustedCount?: number
+  /** 非空表示信任库文件损坏 —— 这不是"空库"，必须让管理员看到 */
+  error?: string
 }
 
 /** 钩子元信息。 */
@@ -77,6 +130,16 @@ export interface HookInfo {
   blockable: boolean
   /** 后端是否已接入该钩子（有实际 Fire 调用点） */
   wired: boolean
+  /**
+   * 是否还有计划内未完成的工作。
+   *
+   * 与 wired 正交：wired 说"现在能不能用"，planned 说"计划里还有没有活"。
+   * onAntiLeech 就是 wired=true + planned=true —— 它已接线，但漏掉了
+   * 公开分享下载这条路径。
+   */
+  planned: boolean
+  /** 计划说明，仅 planned 为 true 时有值 */
+  plan: string
 }
 
 /** 商店条目。 */
@@ -312,7 +375,19 @@ export async function request<T = any>(
   }
   if (!res.ok) {
     const msg = (data && data.message) || res.statusText
-    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+    // 非 2xx 的响应体挂到错误对象上，而不是只留 message。
+    //
+    // 有些接口用 4xx 传递**结构化**信息，调用方必须能读到：
+    //   - 409 needConfirm / unsigned（切到 require 前的二次确认）
+    //   - 403 needAgreement（插件协议未被接受）
+    // 只抛 message 会把它们丢掉，界面就没法提供正确的后续动作。
+    const err: any = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+    err.status = res.status
+    if (data && typeof data === 'object') {
+      err.data = data
+      err.code = data.code
+    }
+    throw err
   }
   return data as T
 }
@@ -664,6 +739,28 @@ export const api = {
       request<ApiResult<PluginContractDiag>>(
         `/api/admin/plugins/contract/${encodeURIComponent(name)}`,
       ),
+
+    // ---- 签名与信任 ----
+    // 接口只接受**公钥**：私钥贴进来后端会用 400 明确挡住（message 含「私钥」），
+    // 界面要把那条 message 原样展示，不能吞掉。
+    pluginTrust: () => request<ApiResult<PluginTrustState>>('/api/admin/plugins/trust'),
+    addPluginTrustKey: (body: { publicKey?: string; keyId?: string; name: string; force?: boolean }) =>
+      request<ApiResult<{ keyId: string; name: string; count: number; warning?: string }>>(
+        '/api/admin/plugins/trust',
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
+    removePluginTrustKey: (keyId: string) =>
+      request<ApiResult<{ keyId: string; count: number; message: string }>>(
+        `/api/admin/plugins/trust/${encodeURIComponent(keyId)}`,
+        { method: 'DELETE' },
+      ),
+    // 切到 require 且存在无签名记录的插件时，后端返回 409 + needConfirm，
+    // 需要带 confirm=true 重发（见 request()：4xx 的响应体挂在 error.data 上）。
+    setPluginTrustMode: (mode: string, confirm?: boolean) =>
+      request<ApiResult<{ mode: string; message: string }>>('/api/admin/plugins/trust/mode', {
+        method: 'PUT',
+        body: JSON.stringify({ mode, confirm: !!confirm }),
+      }),
 
     testPolicy: (id: number | string, body: any) =>
       request<ApiResult<any>>(`/api/admin/policies/${id}/test`, { method: 'POST', body: JSON.stringify(body) }),

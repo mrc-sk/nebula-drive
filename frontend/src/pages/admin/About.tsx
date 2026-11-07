@@ -19,7 +19,7 @@ export default function About() {
   const [brand, setBrand] = useState<BrandInfo>({
     name: 'NebulaDrive',
     author: 'NebulaDrive Team',
-    version: '26-10.0-d',
+    version: '1.0.0',
   })
 
   useEffect(() => {
