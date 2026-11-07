@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/nebula-drive/nebula/internal/hooks"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,12 +13,15 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nebula-drive/nebula/conf"
+	"github.com/nebula-drive/nebula/internal/hooks"
 	"github.com/nebula-drive/nebula/middleware"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
 	"github.com/nebula-drive/nebula/pkg/plugin"
 	"github.com/nebula-drive/nebula/pkg/plugin/host"
 	"github.com/nebula-drive/nebula/pkg/plugin/install"
+	"github.com/nebula-drive/nebula/pkg/plugin/pbclus"
 	"gorm.io/gorm"
 )
 
@@ -37,8 +40,32 @@ type pluginService struct {
 func pluginSvc() *pluginService {
 	return &pluginService{
 		host: host.Global(),
-		inst: install.New(pluginsRootDir()),
+		inst: newInstaller(),
 	}
+}
+
+// newInstaller 构造安装器，并接上**平台**与**签名信任**两项配置。
+//
+// 单独抽出来是因为还有一处（第 702 行附近）也要构造安装器 ——
+// 两处各写一遍配置很容易漏掉其中一处，而漏掉的后果是
+// "某个入口不受签名策略约束"这种安全缺口。
+func newInstaller() *install.Installer {
+	ins := install.New(pluginsRootDir())
+	ins.Platform = pbclus.HostPlatform()
+	ins.SignatureMode = conf.PluginSignatureMode()
+
+	// 信任库：文件不存在时是空信任库（不是错误）——
+	// 空信任库意味着"没有信任任何签名者"，与"没配置"在安全上等价，
+	// 但省去了"必须先建文件"这一步。
+	root := pluginsRootDir()
+	if dir := filepath.Dir(root); dir != "" {
+		ring, err := install.LoadTrustStore(install.TrustStorePath(dir))
+		if err != nil {
+			log.Printf("[WARN] 插件签名信任库读取失败（按空信任库处理）: %v", err)
+		}
+		ins.TrustStore = ring
+	}
+	return ins
 }
 
 // pluginsRootDir 插件安装根目录（数据目录下的 plugins）。
@@ -46,10 +73,33 @@ func pluginsRootDir() string {
 	return filepath.Join(dataDirOrCwd(), "plugins")
 }
 
+// dataDirOrCwd 返回数据目录。
+//
+// # 这里曾经是一个会导致"插件重启后消失"的 bug
+//
+// 旧实现只认 `NEBULA_DATA_DIR`，取不到就退回**进程工作目录**。
+// 而 `NEBULA_DATA_DIR` 在整个仓库里**从未被设置过**，所以它实际上
+// 永远返回 cwd，把 `-data` 指定的数据目录完全忽略掉。
+//
+// 后果很隐蔽：加载侧（`pluginset.InitPlugins`）用的是
+// `conf.DataDir()/plugins`，安装侧用的是 `cwd/plugins` ——
+// 于是"安装 + 启用"当场完全正常（控制器两处都用自己那套路径，自洽），
+// 但**重启服务后启动加载在另一个目录里找不到插件**，且没有任何提示。
+// 冒烟测试也抓不到：它在同一个进程里装完就启用，从不重启。
+//
+// 现在统一以 `conf.DataDir()` 为准 —— 那是 `-data` 与默认值 "data"
+// 的唯一事实来源，备份、密钥、数据库文件用的都是它。
+//
+// 环境变量保留为**显式覆盖**（优先级最高）：容器部署里把它指向挂载卷
+// 是常见做法，那种场景下进程工作目录与数据目录本来就不同。
 func dataDirOrCwd() string {
 	if d := os.Getenv("NEBULA_DATA_DIR"); d != "" {
 		return d
 	}
+	if d := conf.DataDir(); d != "" {
+		return d
+	}
+	// 兜底：conf 未加载时（极早期调用）退回工作目录
 	wd, err := os.Getwd()
 	if err != nil {
 		return "."
@@ -193,6 +243,12 @@ type PluginView struct {
 	ManifestValid bool `json:"manifestValid"`
 	// ManifestError 清单无效的原因。
 	ManifestError string `json:"manifestError,omitempty"`
+	// SignatureInfo 安装时记录的签名状态（解析自 Plugin.Signature）。
+	//
+	// 包文件在安装后不保留，所以签名状态只在安装那一刻能拿到 ——
+	// 这里把它解析成结构化字段供界面展示，而不是让前端去 JSON.parse
+	// 一个可能为空的字符串。
+	SignatureInfo *pbclus.Signature `json:"signatureInfo,omitempty"`
 }
 
 // ListPlugins 插件列表（含实时运行状态）。
@@ -208,6 +264,17 @@ func ListPlugins(c *gin.Context) {
 	for _, p := range plugins {
 		v := PluginView{Plugin: p, Status: host.StatusStopped}
 		v.HooksList = p.PluginHookList()
+		// 解析安装时记下的签名状态。
+		//
+		// 解析失败不报错、只是不展示：数据库里那条 JSON 可能是旧版本
+		// 或人工改过的，而"某个插件的签名徽标显示不出来"不该让
+		// 整个插件列表接口失败。
+		if p.Signature != "" {
+			var sig pbclus.Signature
+			if err := json.Unmarshal([]byte(p.Signature), &sig); err == nil {
+				v.SignatureInfo = &sig
+			}
+		}
 		if s.inst != nil {
 			v.Dir = filepath.Join(s.inst.PluginsDir, p.Name)
 			// 以磁盘上的清单为准，不信任数据库里的冗余字段
@@ -319,7 +386,14 @@ func InstallPlugin(c *gin.Context) {
 			return
 		}
 		ref = models.PluginSourceLocal + ":" + body.Path
-		res, err = s.inst.InstallFromDir(body.Path, ref)
+		// 本地来源既可以是**目录**（开发时直接指向源码目录），
+		// 也可以是**包文件**（.pbclus / .zip）。按文件系统实际情况分派，
+		// 而不是要求管理员记住"这个接口只收目录"。
+		if st, statErr := os.Stat(body.Path); statErr == nil && !st.IsDir() {
+			res, err = s.inst.InstallFromPackage(body.Path, ref)
+		} else {
+			res, err = s.inst.InstallFromDir(body.Path, ref)
+		}
 	case "url", "store":
 		if body.URL == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "缺少 url"})
@@ -364,6 +438,18 @@ func InstallPlugin(c *gin.Context) {
 	p.Hooks = hooksJoined
 	p.InstallSource = ref
 	p.AgreementVersion = plugin.AgreementVersion
+	// 签名状态落库：包文件在安装后不保留，不记下来就再也查不到
+	if res.Signature != nil {
+		if raw, mErr := json.Marshal(res.Signature); mErr == nil {
+			p.Signature = string(raw)
+			p.Trusted = res.Signature.Trusted
+		}
+	} else {
+		// zip 安装：没有签名概念。清掉旧值，免得覆盖安装后
+		// 列表页还在显示上一个 PBClus 包的签名状态。
+		p.Signature = ""
+		p.Trusted = false
+	}
 	p.InstalledAt = now
 	p.LastError = ""
 	p.Restarts = 0
@@ -472,8 +558,12 @@ func EnablePlugin(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "config 不是合法 JSON"})
 			return
 		}
-		p.Config = raw
-		if err := db.Get().Model(&p).Update("config", raw).Error; err != nil {
+		// 必须包成 models.Encrypted 再入库：Plugin.Config 的加密靠
+		// driver.Valuer，而 database/sql 只对**带类型的值**调用它。
+		// 传裸 string 会把 SMTP 密码 / HMAC 密钥以明文写进库，
+		// 且接口返回 200、GORM 不报错（详见 FIXLOG 第 17 节）。
+		p.Config = models.Encrypted(raw)
+		if err := db.Get().Model(&p).Update("config", models.Encrypted(raw)).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": err.Error()})
 			return
 		}
@@ -588,7 +678,8 @@ func UpdatePluginConfig(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": 1, "message": "plugin not found"})
 		return
 	}
-	if err := db.Get().Model(&p).Update("config", body.Config).Error; err != nil {
+	// 同上：必须包成 models.Encrypted，否则明文落库且没有任何报错。
+	if err := db.Get().Model(&p).Update("config", models.Encrypted(body.Config)).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": err.Error()})
 		return
 	}
@@ -630,15 +721,24 @@ func ListPluginHooks(c *gin.Context) {
 	list := make([]gin.H, 0, len(metas))
 	for _, m := range metas {
 		h := plugin.HookName(m.Name)
+		// v2 的 HookMeta 用 Since 取代了 Planned/Plan（v2 约定全部真接线，
+		// 不再有"规划中"状态）。v1 冻结钩子标 since=1，新增钩子标 2。
+		// 保留字段名 planned 输出 false 以兼容旧前端模板。
 		list = append(list, gin.H{
 			"name":       m.Name,
 			"count":      inProc[h] + outProc[h],
 			"inProcess":  inProc[h],
 			"outProcess": outProc[h],
 			"doc":        m.Doc,
+			"group":      m.Group,
 			"mode":       plugin.HookModeOf(h).String(),
 			"blockable":  m.Blockable,
+			"mutatable":  m.Mutatable,
 			"wired":      m.Wired,
+			"since":      m.Since,
+			"payload":    m.Payload,
+			"planned":    false,
+			"plan":       "",
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -690,7 +790,9 @@ func StorePluginCatalog(c *gin.Context) {
 		return
 	}
 
-	ins := install.New(pluginsRootDir())
+	// 与安装走同一个构造入口：少写一遍配置就少一处漏配的可能
+	// （漏掉的后果是"某个入口不受签名策略约束"）。
+	ins := newInstaller()
 	body, err := ins.FetchCatalog(catalogURL)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{

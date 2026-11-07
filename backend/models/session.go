@@ -38,9 +38,21 @@ type Plugin struct {
 	Title   string `gorm:"size:128" json:"title"`
 	Enabled bool   `gorm:"default:false" json:"enabled"`
 	// Config 插件配置（JSON 字符串），在 init 握手下发给插件。
+	//
+	// 类型是 Encrypted 而不是 string：插件配置里装的是 SMTP 密码、
+	// HMAC 共享密钥这类凭据，落库必须加密。用 Encrypted 而非
+	// BeforeSave 钩子的原因见 models/encrypted.go ——
+	// 项目里写配置走的是 Update("config", v) 这类"值来自 map"的路径，
+	// 钩子覆盖不到，而 driver.Valuer 位于所有写入路径的必经之处。
+	//
+	// ⚠ 因此**所有**写 config 的地方都必须包一层 models.Encrypted(...)：
+	// 传裸 string 时 Valuer 不参与，明文直接落库且不报任何错。
+	// 参见 controllers/plugins.go 的两处调用与 FIXLOG 第 17 节。
+	//
 	// 不加 json:"-"：管理端需要能读写它（此前该字段完全不可见，
-	// 插件作者配不了任何东西）。
-	Config string `gorm:"type:text" json:"config"`
+	// 插件作者配不了任何东西）。Encrypted 的底层类型是 string，
+	// JSON 序列化得到明文（接口本来就是给管理员的）。
+	Config Encrypted `gorm:"type:text" json:"config"`
 	// 冗余自 manifest —— 列表页不想为了显示版本号去读磁盘
 	Version     string `gorm:"size:32" json:"version"`
 	Author      string `gorm:"size:64" json:"author"`
@@ -61,9 +73,22 @@ type Plugin struct {
 	Restarts int `gorm:"default:0" json:"restarts"`
 	// AgreementVersion 安装时管理员同意的插件协议版本。
 	// 协议升级后需要重新同意才能启用 —— 见 controllers 的 requireAgreement。
-	AgreementVersion int       `gorm:"default:0" json:"agreementVersion"`
-	InstalledAt      time.Time `json:"installedAt"`
-	CreatedAt        time.Time `json:"createdAt"`
+	AgreementVersion int `gorm:"default:0" json:"agreementVersion"`
+	// Signature 安装时记录的签名状态快照（JSON，见 pbclus.Signature）。
+	//
+	// 为什么必须落库：**插件包在安装后不保留**（只留解出来的文件），
+	// 所以"这个插件是谁签的"这件事事后无法从磁盘重新推导。
+	// 不记下来的话，插件列表就永远显示不出签名状态，
+	// 管理员也就无法在事后发现"某个插件当时没有签名"。
+	Signature string `gorm:"type:text" json:"signature"`
+	// Trusted 安装时该签名是否在信任库中。
+	//
+	// 单独存一个布尔（而不是每次从 JSON 里解析）是为了让列表页
+	// 与筛选能直接用，并且**当时的判定结果被冻结下来** ——
+	// 事后往信任库里加一个 keyId，不应改变历史记录里"当时是否受信任"。
+	Trusted bool `gorm:"default:false" json:"trusted"`
+	InstalledAt time.Time `json:"installedAt"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 // PluginHookList 返回 Hooks 字段的切片形式。

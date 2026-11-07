@@ -61,8 +61,18 @@ func UpdatePolicy(c *gin.Context) {
 	if req.IsDefault {
 		db.Get().Model(&models.Policy{}).Where("id <> ?", id).Update("is_default", false)
 	}
+	// config 必须包成 models.Encrypted 再进 map。
+	//
+	// 为什么不能直接传 req.Config（裸 string）：Policy.Config 的加密靠
+	// driver.Valuer（models.Encrypted），而 database/sql 只对**实现了 Valuer
+	// 的值**调用它。传裸 string 时 Valuer 完全不参与，SFTP 密码 / OSS / COS
+	// 密钥会被以**明文**写进 policies.config（已用实测确认，见
+	// models/encrypted_test.go 的 TestEncryptedBareStringIsNotIntercepted）。
+	//
+	// 启动时的 MigrateSensitiveFields → migratePolicyConfig 会兜底把它转回密文，
+	// 但那是"下次重启才修" —— 在两次重启之间，密钥就是裸的。
 	db.Get().Model(&models.Policy{}).Where("id = ?", id).Updates(map[string]any{
-		"name": req.Name, "type": req.Type, "config": req.Config, "is_default": req.IsDefault,
+		"name": req.Name, "type": req.Type, "config": models.From(req.Config), "is_default": req.IsDefault,
 	})
 
 	cur := middleware.CurrentUser(c)

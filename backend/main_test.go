@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net"
 	"testing"
 )
@@ -34,5 +35,27 @@ func TestFindFreePortReturnsStartWhenFree(t *testing.T) {
 	}
 	if p != 5212 {
 		t.Logf("5212 当前被占用（其他测试遗留），返回 %d —— 也算正确", p)
+	}
+}
+
+// TestPositiveIntAcceptsPluginNumberTypes 插件命令行退出码的类型兼容性。
+//
+// 进程内 handler 写的是 Go 的 int，进程外插件的回写经 JSON 往返后是 float64。
+// 只认一种的后果是插件的 cliExitCode **静默失效** ——
+// 插件明明用非 0 退出码表达了失败，脚本却以为命令成功了。
+func TestPositiveIntAcceptsPluginNumberTypes(t *testing.T) {
+	ok := []any{0, 3, int64(3), float64(3), json.Number("3")}
+	for _, v := range ok {
+		if _, good := positiveInt(v); !good {
+			t.Errorf("positiveInt(%#v) 应被接受", v)
+		}
+	}
+	if n, _ := positiveInt(float64(3)); n != 3 {
+		t.Errorf("float64(3) → %d, want 3", n)
+	}
+	for _, v := range []any{nil, -1, "3", float64(1.5)} {
+		if _, good := positiveInt(v); good {
+			t.Errorf("positiveInt(%#v) 应返回 false", v)
+		}
 	}
 }

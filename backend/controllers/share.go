@@ -285,6 +285,50 @@ func serveShareFile(c *gin.Context, disp string) {
 		return
 	}
 
+	// 防盗链钩子（onAntiLeech）。
+	//
+	// 位置是刻意的，不能更早也不能更晚：
+	//   - 更早：target 与分享还没解析出来，拿不到 fileId/fileName/shareId；
+	//   - 更晚：文件已开始流式输出（streamFile），再想 403 已经来不及。
+	//
+	// **下载与预览必须都过闸。** 两者是同一批字节的两个出口 ——
+	// preview 虽然用 `Content-Disposition: inline`，返回的仍是完整文件内容。
+	// 只拦 download 等于留下一条完整的 exfil 通道，防盗链形同虚设。
+	//
+	// shareKind 就是为了让插件能自行区分这两种场景（例如只想保护下载、
+	// 放行本站分享页的内联预览）。这个取舍交给插件，宿主不替它决定。
+	//
+	// 访问者是**匿名**的：ctx 里 userId 恒为 0、userName 恒为空 ——
+	// 分享链接的接收方通常没有账号。插件绝不能假设 userId 非空，
+	// 也不会像登录下载那样天然有「所有者」可比。分享所有者放在
+	// shareOwnerId，语义明确、不会与访问者混淆。
+	shareKind := "preview"
+	if disp == dispAttachment {
+		shareKind = "download"
+	}
+	antiCtx := map[string]any{
+		"userId":       uint(0),
+		"userName":     "",
+		"ip":           c.ClientIP(),
+		"ua":           c.Request.UserAgent(),
+		"fileId":       target.ID,
+		"fileName":     target.Name,
+		"referer":      c.GetHeader("Referer"),
+		"shareId":      s.ID,
+		"shareKind":    shareKind,
+		"shareOwnerId": s.OwnerID,
+	}
+	if errs := plugin.Fire(plugin.HookAntiLeech, antiCtx); len(errs) > 0 {
+		for _, e := range errs {
+			// 走统一的判定实现（plugin.IsBlockedError），不要在这里再写一遍
+			// strings.Contains —— 判定语义只允许有一处。
+			if plugin.IsBlockedError(e) {
+				c.JSON(http.StatusForbidden, gin.H{"code": 1, "message": "blocked by anti-leech"})
+				return
+			}
+		}
+	}
+
 	h, err := handlerForFile(&target)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": err.Error()})

@@ -66,12 +66,60 @@ type RedisConfig struct {
 	DB       int    `json:"db"`
 }
 
+// PluginConfig 插件相关的部署级设置。
+type PluginConfig struct {
+	// SignatureMode 插件包签名策略：off / warn / require。
+	//
+	//   - off      完全不看签名
+	//   - warn     照装，但把签名状态作为告警展示（**默认**）
+	//   - require  只接受受信任签名的包
+	//
+	// 默认 warn 而不是 require：require 会让所有存量无签名插件
+	// 在升级后立刻装不上，而建立信任库需要管理员先做一步操作。
+	// 需要严格的环境显式设成 require，那时不存在降级空间。
+	SignatureMode string `json:"signatureMode"`
+}
+
 type Config struct {
 	DB     DBConfig     `json:"db"`
 	System SystemConfig `json:"system"`
 	Admin  AdminConfig  `json:"admin"`
 	Mail   MailConfig   `json:"mail"`
 	Redis  RedisConfig  `json:"redis"`
+	Plugin PluginConfig `json:"plugin"`
+}
+
+// PluginSignatureMode 返回插件签名策略。
+//
+// 配置缺失时返回空串，由安装器按 warn 处理 —— 默认值只在一处定义，
+// 避免"conf 说 off、installer 说 warn"这种两套默认值打架。
+func PluginSignatureMode() string {
+	currentMu.RLock()
+	defer currentMu.RUnlock()
+	if current == nil {
+		return ""
+	}
+	return current.Plugin.SignatureMode
+}
+
+// SetPluginSignatureMode 只修改签名策略这一个字段并落盘。
+//
+// 为什么不把"读-改-写整个 Config"交给调用方：
+// `Save` 会把传进来的指针直接挂成 `current`。如果调用方就地修改
+// `Current()` 返回的对象再 Save，就会出现"写盘失败但内存里已经变了"
+// 的半状态 —— 表现为"界面显示已改、实际没生效"，重启后又变回去。
+// 所以这里先整份复制再改，只有 Save 成功才会换掉内存里的配置。
+func SetPluginSignatureMode(mode string) error {
+	currentMu.RLock()
+	cur := current
+	currentMu.RUnlock()
+	if cur == nil {
+		return errors.New("配置尚未加载")
+	}
+	// Config 里全是值类型字段（无 map/slice），浅拷贝就是完整拷贝
+	cp := *cur
+	cp.Plugin.SignatureMode = mode
+	return Save(&cp)
 }
 
 var (

@@ -270,16 +270,28 @@ func (m *Manifest) DeclaredHooks() []HookName {
 
 // ExecPath 返回可执行文件的绝对路径。
 //
-// dir 是插件目录。仍会做一次 filepath.Clean 与前缀校验 ——
+// dir 是插件目录。仍会做一次 Clean 与前缀校验 ——
 // Validate 已挡住分隔符，但这里是最后一道防线，成本极低。
+//
+// 两侧都先转成绝对路径再比前缀。早期实现只用 filepath.Clean，
+// 于是 dir="." 时会算出 base="." 而 p="entry"，前缀判断失败并误报
+// "entry 越界"—— 明明就是这个目录里的文件。
+// 绝对路径化之后，"。"、"./x"、"x/.." 这些写法都归一到同一个结果，
+// 与 install.mustBeUnder 的判定方式也一致了。
 //
 // 平台后缀：manifest 里写 "myplugin"（不带 .exe）时，Windows 上会自动
 // 尝试 "myplugin.exe"。这样同一份 plugin.json 能跨三个平台通用 ——
 // 否则插件作者要为每个平台改一次 entry，manifest 也就没法跟二进制分开发。
 func (m *Manifest) ExecPath(dir string) (string, error) {
-	base := filepath.Clean(dir)
+	base, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
 	resolve := func(name string) (string, error) {
-		p := filepath.Clean(filepath.Join(base, name))
+		p, err := filepath.Abs(filepath.Join(base, name))
+		if err != nil {
+			return "", err
+		}
 		if p != base && !strings.HasPrefix(p, base+string(filepath.Separator)) {
 			return "", fmt.Errorf("entry 越界：解析后路径 %q 超出插件目录 %q", p, base)
 		}

@@ -352,21 +352,30 @@ func TestPluginHooksReturnsRealCounts(t *testing.T) {
 		} `json:"data"`
 	}
 	mustUnmarshal(t, w.Body.Bytes(), &resp)
-	// v2 把钩子表扩到 99 个且「全部真接线」，写死 10 会让测试随协议演进腐化。
-	// 改成与注册表全表对齐，并逐项检查文档与接线标记。
-	if want := len(plugin.Hooks); len(resp.Data) != want {
-		t.Fatalf("钩子数 = %d, want %d（应等于 pkg/plugin.Hooks 全表）", len(resp.Data), want)
+	// 数量与 plugin.Hooks 全表对齐，而不是写死魔数 —— 写死 10 时每接通
+	// 一个钩子就要改一次，最终退化成"反正红了就忽略"。
+	// v2 把钩子表扩到 99 个且要求「全部真接线」，这里同时守住：
+	//   - 全表出现（不截断）
+	//   - 全部 wired（v2 明确不允许装饰性占位钩子）
+	//   - v1 冻结的 10 个钩子名仍在（示例插件 referer-guard 等依赖它们）
+	if len(resp.Data) != len(plugin.Hooks) {
+		t.Fatalf("钩子数 = %d, want %d（应等于 pkg/plugin.Hooks 全表）", len(resp.Data), len(plugin.Hooks))
 	}
-	if len(resp.Data) < 90 {
+	if len(resp.Data) < 10 {
 		t.Fatalf("钩子表疑似被截断：仅 %d 个", len(resp.Data))
 	}
+	seen := map[string]bool{}
 	byName := map[string]int{}
 	for _, h := range resp.Data {
+		if seen[h.Name] {
+			t.Errorf("钩子 %s 重复出现 —— 注册表里多半被插入了两份", h.Name)
+		}
+		seen[h.Name] = true
 		byName[h.Name] = h.Count
 		if h.Doc == "" {
 			t.Errorf("钩子 %s 缺描述", h.Name)
 		}
-		// 按站长要求「全部真接线」，不允许再有 Wired=false 的装饰性占位钩子
+		// v2 约定「全部真接线」：不允许再有 Wired=false 的装饰性占位钩子
 		if !h.Wired {
 			t.Errorf("钩子 %s 仍标记 wired=false", h.Name)
 		}
@@ -374,9 +383,17 @@ func TestPluginHooksReturnsRealCounts(t *testing.T) {
 			t.Errorf("未接入的钩子 %s 不应有 handler", h.Name)
 		}
 	}
+	// 双向对齐：注册表里的每个钩子都要出现在接口响应里
+	for _, m := range plugin.Hooks {
+		if !seen[m.Name] {
+			t.Errorf("注册表里的钩子 %s 没出现在接口响应里", m.Name)
+		}
+	}
 	// v1 冻结钩子必须仍在列表里，否则示例插件 referer-guard 会失效
-	if _, ok := byName["onAntiLeech"]; !ok {
-		t.Fatal("v1 钩子 onAntiLeech 丢失，破坏向后兼容")
+	for _, frozen := range []string{"onAntiLeech", "onEmail", "onApiAuth", "onBackup", "onRestore", "onCLI", "onCollabOpen", "onCollabSave", "onDBMigrate", "onRateLimit"} {
+		if _, ok := byName[frozen]; !ok {
+			t.Errorf("v1 冻结钩子 %s 丢失，破坏向后兼容", frozen)
+		}
 	}
 	// 无插件时全部为 0 —— 这正是此前前端用 Math.random() 伪造的东西
 	if byName["onAntiLeech"] != 0 {

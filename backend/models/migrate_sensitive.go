@@ -29,7 +29,7 @@ func MigrateSensitiveFields() {
 	if db.Get() == nil {
 		return
 	}
-	var stats [5]int
+	var stats [6]int
 
 	steps := []struct {
 		name string
@@ -38,6 +38,7 @@ func MigrateSensitiveFields() {
 		{"User.TwoFactor → 加密", func(n *int) { *n = migrateTwoFactor() }},
 		{"OAuthApp.ClientSecret → 加密", func(n *int) { *n = migrateClientSecret() }},
 		{"Policy.Config → 加密", func(n *int) { *n = migratePolicyConfig() }},
+		{"Plugin.Config → 加密", func(n *int) { *n = migratePluginConfig() }},
 		{"AccessToken.Token → 哈希", func(n *int) { *n = migrateAccessTokens() }},
 		{"PersonalAccessToken.Token → 哈希", func(n *int) { *n = migratePATs() }},
 	}
@@ -58,8 +59,8 @@ func MigrateSensitiveFields() {
 		total += n
 	}
 	if total > 0 {
-		log.Printf("[migrate] 敏感字段存量转换完成：2FA %d 条、ClientSecret %d 条、StorageConfig %d 条、AccessToken %d 条、PAT %d 条",
-			stats[0], stats[1], stats[2], stats[3], stats[4])
+		log.Printf("[migrate] 敏感字段存量转换完成：2FA %d 条、ClientSecret %d 条、StorageConfig %d 条、PluginConfig %d 条、AccessToken %d 条、PAT %d 条",
+			stats[0], stats[1], stats[2], stats[3], stats[4], stats[5])
 	}
 }
 
@@ -154,6 +155,41 @@ func migratePolicyConfig() int {
 	}
 }
 
+// migratePluginConfig 把 Plugin.Config 的明文 JSON 转为密文。
+//
+// 为什么要转：插件配置里装的是 SMTP 密码、HMAC 共享密钥这类凭据 ——
+// 与 Policy.Config 的风险性质相同，只是过去没被纳入。
+//
+// 与 migratePolicyConfig 完全同构：读取时 Encrypted.Scan 已把存量明文
+// 原样还原，所以这里只需原样 Save，由 Valuer 完成加密。
+func migratePluginConfig() int {
+	n := 0
+	for {
+		var batch []Plugin
+		err := db.Get().Where("config <> '' AND config NOT LIKE ?", cryptox.Prefix()+"%").
+			Limit(migrateBatch).Find(&batch).Error
+		if err != nil || len(batch) == 0 {
+			if err != nil {
+				log.Printf("[migrate] Plugin.Config 查询失败: %v", err)
+			}
+			return n
+		}
+		for i := range batch {
+			if batch[i].Config.IsEmpty() {
+				continue
+			}
+			if err := db.Get().Save(&batch[i]).Error; err != nil {
+				log.Printf("[migrate] Plugin#%d config 转换失败: %v", batch[i].ID, err)
+				continue
+			}
+			n++
+		}
+		if len(batch) < migrateBatch {
+			return n
+		}
+	}
+}
+
 // migrateAccessTokens 把 AccessToken.Token 的明文转为 SHA-256 哈希。
 //
 // 识别方式：哈希固定 64 位十六进制，历史明文是 32 位随机串。
@@ -229,6 +265,7 @@ func SensitiveFieldsEncrypted() (ok bool, detail string) {
 		{"User.TwoFactor", &User{}, "two_factor <> '' AND two_factor NOT LIKE ?", []any{cryptox.Prefix() + "%"}},
 		{"OAuthApp.ClientSecret", &OAuthApp{}, "client_secret <> '' AND client_secret NOT LIKE ?", []any{cryptox.Prefix() + "%"}},
 		{"Policy.Config", &Policy{}, "config <> '' AND config NOT LIKE ?", []any{cryptox.Prefix() + "%"}},
+		{"Plugin.Config", &Plugin{}, "config <> '' AND config NOT LIKE ?", []any{cryptox.Prefix() + "%"}},
 	}
 	all := true
 	var msgs []string

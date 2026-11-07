@@ -2,18 +2,22 @@
 //
 // 安装来源三种：
 //   - 本地目录（管理员把插件目录放到服务器上，或从共享盘拷入）
-//   - 远端 zip URL
+//   - 远端 URL（PBClus 容器或 zip，按魔术字识别）
 //   - 插件商店（远端清单里的条目，最终也是 URL）
 //
-// 安全要点（这一层是防"解压一个 zip 就跑任意代码"的唯一屏障）：
-//   - zip slip：所有条目路径必须落在目标目录内，否则拒绝
-//   - 解压大小/条目数上限：防 zip bomb
-//   - 不保留可执行位与符号链接：跨平台 zip 语义混乱，符号链接尤其危险
+// 安全要点（这一层是防"解压一个包就跑任意代码"的唯一屏障）：
+//   - 路径逃逸：所有条目路径必须落在目标目录内，否则拒绝
+//   - 解压大小/条目数上限：防解压炸弹
+//   - 不保留可执行位与符号链接：跨平台语义混乱，符号链接尤其危险
 //   - manifest 必须先校验通过才落库，entry 必须真实存在
+//
+// PBClus 与 zip 两条路在"解包到临时目录"之后汇聚到同一个
+// InstallFromDir，所以清单校验、插件名检查、落库语义只有一套。
 package install
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,17 +26,25 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/nebula-drive/nebula/pkg/plugin"
+	"github.com/nebula-drive/nebula/pkg/plugin/pbclus"
 )
 
 // 解压安全上限。
 const (
 	// MaxZipBytes 压缩包最大字节数（64MB）。
+	//
+	// 这个名字是历史包袱（早期只支持 zip）。它同时是**所有**插件包
+	// 的大小上限，包括 PBClus 容器 —— 两种格式共用一个上限，
+	// 避免出现"格式说能到 512MB、安装器只收 64MB"这种自相矛盾。
 	MaxZipBytes = 64 << 20
+	// MaxPackageBytes 是 MaxZipBytes 的语义化别名，新代码用它更清楚。
+	MaxPackageBytes = MaxZipBytes
 	// MaxExtractedBytes 解压后总大小上限（256MB）。
 	MaxExtractedBytes = 256 << 20
 	// MaxZipEntries 条目数上限。
@@ -55,6 +67,17 @@ type Result struct {
 	Source   string           `json:"source"`
 	// Replaced 覆盖了同名旧插件时为 true。
 	Replaced bool `json:"replaced"`
+	// Platform 本次安装面向的平台（多平台包据此只解出本平台的文件）。
+	Platform string `json:"platform,omitempty"`
+	// Platforms 包声明支持的平台（zip 安装时为空 —— zip 没有这个信息）。
+	Platforms []string `json:"platforms,omitempty"`
+	// Skipped 因平台不匹配被跳过的条目数。
+	Skipped int `json:"skipped,omitempty"`
+	// Signature 签名状态（zip 安装时为 nil —— zip 没有签名概念）。
+	Signature *pbclus.Signature `json:"signature,omitempty"`
+	// Warnings 非致命但需要让管理员知道的事情（如"这个包没有签名"）。
+	// 与 error 分开：warn 策略下包能装，但界面必须如实展示风险。
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Installer 插件安装器。
@@ -65,6 +88,103 @@ type Installer struct {
 	Client *http.Client
 	// MaxBytes 单次下载上限。
 	MaxBytes int64
+
+	// Platform 是"当前平台"标签（<goos>/<goarch>）。
+	//
+	// 之所以是个字段而不是直接读 runtime：测试要能模拟任意平台，
+	// 否则"跨平台包在别的平台上装不上/装得上"这件事在单台机器上根本测不了 ——
+	// 而它恰恰是最需要测的部分。空值时取当前运行平台。
+	Platform string
+	// TrustStore 是签名信任库。nil 表示没有信任任何签名者
+	// （**不会**退化成"信任所有签名"，见 SignatureMode 的说明）。
+	TrustStore pbclus.TrustStore
+	// SignatureMode 签名策略：off / warn / require。
+	//
+	//   - off      完全不看签名
+	//   - warn     照装，但把签名状态放进 Result.Warnings 供界面展示
+	//   - require  只接受**受信任**签名的包
+	//
+	// 默认（空值）按 warn 处理：直接把 require 设成默认会让所有存量插件
+	// 在升级后立刻装不上，而"签名"这件事需要管理员先建立信任库。
+	// 需要严格的环境把它设成 require 即可，那时不存在降级空间。
+	SignatureMode string
+}
+
+// 签名策略取值。
+const (
+	SignatureOff     = "off"
+	SignatureWarn    = "warn"
+	SignatureRequire = "require"
+)
+
+// TrustStoreFileName 是信任库的文件名（放在数据目录下）。
+const TrustStoreFileName = "plugin-trust.json"
+
+// TrustStorePath 返回数据目录下的信任库路径。
+func TrustStorePath(dataDir string) string {
+	return filepath.Join(dataDir, TrustStoreFileName)
+}
+
+// LoadTrustStore 读取信任库。
+//
+// 文件不存在时返回**空信任库**而不是错误：空信任库的语义是
+// "还没有信任任何发布者"，这与"没配置"在安全上是一回事，
+// 但省掉了"必须先建一个文件"的步骤。
+//
+// 文件存在但内容非法时**返回错误**（调用方应视为空信任库并告警）：
+// 静默当成空库会让"我明明配了信任库"变成一个查不出原因的问题。
+func LoadTrustStore(path string) (*pbclus.KeyRing, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return pbclus.NewEmptyKeyRing(), nil
+		}
+		return nil, err
+	}
+	var ring pbclus.KeyRing
+	if err := json.Unmarshal(b, &ring); err != nil {
+		return nil, fmt.Errorf("信任库 %s 不是合法 JSON: %w", path, err)
+	}
+	if err := ring.Validate(); err != nil {
+		return nil, fmt.Errorf("信任库 %s 自身不一致: %w", path, err)
+	}
+	if ring.Keys == nil {
+		ring.Keys = []pbclus.TrustedKey{}
+	}
+	return &ring, nil
+}
+
+// SaveTrustStore 写入信任库（供管理端/工具建立信任关系）。
+func SaveTrustStore(path string, ring *pbclus.KeyRing) error {
+	if err := ring.Validate(); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(ring, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o600)
+}
+
+// resultPlatform 返回生效的平台标签。
+func (i *Installer) resultPlatform() string {
+	if i.Platform != "" {
+		return i.Platform
+	}
+	return pbclus.HostPlatform()
+}
+
+// signaturePolicy 规范化签名策略。
+func (i *Installer) signaturePolicy() string {
+	switch i.SignatureMode {
+	case SignatureOff, SignatureWarn, SignatureRequire:
+		return i.SignatureMode
+	case "":
+		return SignatureWarn
+	default:
+		// 写错的值按最严格处理：配置笔误不该悄悄降低安全门槛
+		return SignatureRequire
+	}
 }
 
 // New 构造安装器。
@@ -137,7 +257,12 @@ func (i *Installer) InstallFromDir(src, sourceRef string) (*Result, error) {
 	}, nil
 }
 
-// InstallFromURL 从远端 zip 安装。
+// InstallFromURL 从远端安装插件包。
+//
+// 下载后交给 InstallFromPackage 按**魔术字**识别格式：
+// PBClus 容器与 zip 都支持（zip 是历史格式，继续兼容）。
+// 这里不再假定是 zip —— 早期版本把下载文件命名成 plugin.zip 并直接走 zip 路径，
+// 结果是 PBClus 包永远装不上。
 func (i *Installer) InstallFromURL(rawURL, sourceRef string) (*Result, error) {
 	if err := validateURL(rawURL); err != nil {
 		return nil, err
@@ -148,11 +273,192 @@ func (i *Installer) InstallFromURL(rawURL, sourceRef string) (*Result, error) {
 	}
 	defer os.RemoveAll(tmp)
 
-	zipPath := filepath.Join(tmp, "plugin.zip")
-	if err := i.download(rawURL, zipPath); err != nil {
+	// 下载文件名带上原扩展名：安装器要据此给出"zip 改后缀"这类具体提示，
+	// 名字全叫 plugin.zip 的话这个判断就失效了。
+	name := "plugin"
+	if ext := strings.ToLower(path.Ext(parseURLPath(rawURL))); ext != "" {
+		switch ext {
+		case pbclus.Extension, ".zip":
+			name += ext
+		default:
+			name += ".pkg"
+		}
+	} else {
+		name += ".pkg"
+	}
+	pkgPath := filepath.Join(tmp, name)
+	if err := i.download(rawURL, pkgPath); err != nil {
 		return nil, err
 	}
-	return i.InstallFromZip(zipPath, sourceRef)
+	return i.InstallFromPackage(pkgPath, sourceRef)
+}
+
+// InstallFromPackage 按魔术字识别包格式并安装。
+//
+// 识别依据是**内容**而不是扩展名：扩展名是给人看的提示，
+// 不是格式的判据。
+func (i *Installer) InstallFromPackage(pkgPath, sourceRef string) (*Result, error) {
+	st, err := os.Stat(pkgPath)
+	if err != nil {
+		return nil, err
+	}
+	if st.IsDir() {
+		return nil, fmt.Errorf("%s 是目录，不是插件包（本地目录请用 InstallFromDir）", pkgPath)
+	}
+
+	kind, err := pbclus.SniffFile(pkgPath)
+	if err != nil {
+		return nil, err
+	}
+	switch kind {
+	case pbclus.KindPBClus:
+		return i.InstallFromPBClus(pkgPath, sourceRef)
+	case pbclus.KindZip:
+		// 后缀写成 .pbclus 但内容是 zip：这不是"格式兼容问题"，
+		// 而是用户以为改了后缀就换了格式。必须把这件事说清楚，
+		// 否则他会以为 PBClus 校验没生效。
+		if strings.EqualFold(filepath.Ext(pkgPath), pbclus.Extension) {
+			return nil, fmt.Errorf(
+				"这个文件的扩展名是 %s，但内容是 zip —— 改后缀不会改变格式。"+
+					"请用 pbclus-pack 重新打包成真正的 PBClus 容器", pbclus.Extension)
+		}
+		return i.InstallFromZip(pkgPath, sourceRef)
+	default:
+		return nil, fmt.Errorf("无法识别的插件包：既不是 %s 容器也不是 zip "+
+			"（前 8 字节为 % x）。PBClus 包的头部应以 %s 魔术字开头",
+			pbclus.FormatName, firstBytes(pkgPath, 8), pbclus.Magic)
+	}
+}
+
+// InstallFromPBClus 安装 PBClus 容器。
+//
+// 流程：完整校验 → 解包到临时目录 → 交给 InstallFromDir 走既有路径
+// （清单解析、插件名检查、entry 存在性校验、复制、落库都由那条路径负责）。
+// 这样 PBClus 与 zip 两条路在"装进 PluginsDir"之后的处理完全一致，
+// 不会出现两套安装语义。
+func (i *Installer) InstallFromPBClus(pkgPath, sourceRef string) (*Result, error) {
+	st, err := os.Stat(pkgPath)
+	if err != nil {
+		return nil, err
+	}
+	if st.Size() > int64(pbclus.MaxPackageBytes) {
+		return nil, fmt.Errorf("插件包 %d 字节，超过上限 %d", st.Size(), int64(pbclus.MaxPackageBytes))
+	}
+
+	rd, err := pbclus.Open(pkgPath)
+	if err != nil {
+		// 包装一层：调用方（管理端）拿到的是"包格式错误"这个层次的信息，
+		// 而不是裸的"清单摘要不匹配" —— 后者看起来像内部 bug。
+		return nil, fmt.Errorf("%s 包无法解析: %w", pbclus.FormatName, err)
+	}
+	defer rd.Close()
+
+	// 先做整体校验再解包：损坏的包能立刻说清"坏在哪"，
+	// 而不是解到一半失败留下一个半成品目录。
+	if err := rd.Verify(); err != nil {
+		return nil, fmt.Errorf("%s 包校验失败: %w", pbclus.FormatName, err)
+	}
+
+	platform := i.resultPlatform()
+
+	// 平台检查放在解包**之前**。
+	//
+	// 顺序很重要：不支持当前平台的包如果先解包，错误会变成
+	// "entry 指向的文件不存在" —— 与本平台的插件目录混在一起，
+	// 排查方向完全跑偏。先在门口拒掉，错误信息才能直说"平台不匹配"。
+	if !rd.Supports(platform) {
+		return nil, pbclus.PlatformError(rd.RequiresPlatforms(), platform)
+	}
+
+	// 签名检查
+	sig := rd.Status(i.TrustStore)
+	warnings, err := i.checkSignature(&sig)
+	if err != nil {
+		return nil, err
+	}
+
+	tmp, err := os.MkdirTemp("", "nebula-plugin-pbclus-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+
+	rep, err := rd.ExtractForPlatform(tmp, platform)
+	if err != nil {
+		return nil, err
+	}
+	root := tmp
+	if sub, err := findPluginRoot(tmp); err == nil {
+		root = sub
+	}
+	res, err := i.InstallFromDir(root, sourceRef)
+	if err != nil {
+		return nil, err
+	}
+	res.Platform = platform
+	res.Platforms = rd.Platforms()
+	res.Skipped = rep.Skipped
+	res.Signature = &sig
+	res.Warnings = append(res.Warnings, warnings...)
+	return res, nil
+}
+
+// checkSignature 按策略判定签名，返回需要展示的告警。
+//
+// 这里只用 **Trusted** 做决策，绝不用 Valid：
+// 公钥内嵌在包里，攻击者可以用自己的密钥签一个包并让 Valid 为 true。
+// 拿 Valid 当"这个包可信"等于没做校验 —— 这是本类设计最危险的误用，
+// 所以两个状态从一开始就分成两个字段，不给顺手写错的机会。
+func (i *Installer) checkSignature(sig *pbclus.Signature) ([]string, error) {
+	policy := i.signaturePolicy()
+	if policy == SignatureOff {
+		return nil, nil
+	}
+
+	// 判定结果先算清楚，三种策略只是对同一个判定做不同处置
+	var problem string
+	switch {
+	case !sig.Present:
+		problem = "插件包没有签名，无法确认来源"
+	case !sig.Valid:
+		problem = "签名无效：" + sig.Err
+	case !sig.Trusted:
+		problem = fmt.Sprintf("签名者 %s 不在信任库里（包本身完整且签名自洽，但这个密钥未被信任）", sig.KeyID)
+	}
+
+	if problem == "" {
+		name := sig.KeyName
+		if name == "" {
+			name = sig.KeyID
+		}
+		return []string{fmt.Sprintf("已由受信任的发布者签名：%s（%s）", name, sig.KeyID)}, nil
+	}
+
+	if policy == SignatureRequire {
+		return nil, fmt.Errorf("%s（当前策略为 require，已拒绝安装）", problem)
+	}
+	return []string{problem}, nil
+}
+
+// parseURLPath 取 URL 的路径部分（用于推断下载文件的扩展名）。
+func parseURLPath(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Path
+}
+
+// firstBytes 读文件开头若干字节，仅用于把错误信息写得具体一点。
+func firstBytes(p string, n int) []byte {
+	f, err := os.Open(p)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	b := make([]byte, n)
+	got, _ := io.ReadFull(f, b)
+	return b[:got]
 }
 
 // InstallFromZip 从本地 zip 文件安装。

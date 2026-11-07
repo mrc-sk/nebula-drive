@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -84,6 +85,18 @@ func main() {
 	// 启动时加载配置；未安装则保持 installed=false，由前端安装向导接管
 	if err := conf.Load(); err != nil {
 		log.Printf("[WARN] 加载配置失败（可能未安装）: %v", err)
+	}
+
+	// 子命令分发：`nebula plugin <cmd> [args...]` 把命令派发给插件（onCLI 钩子）。
+	//
+	// 放在 flag.Parse 之后是有意的：这样 -data 这类全局参数在子命令里照常可用
+	// （`nebula -data /srv/x plugin hello`）。放在之前会让子命令自己解析参数，
+	// 两套解析迟早会打架。
+	//
+	// 子命令**不启动 HTTP 服务**：初始化依赖、派发、退出。
+	if flag.Arg(0) == "plugin" {
+		runPluginCLI(flag.Args()[1:])
+		return
 	}
 
 	// 已安装：初始化 DB、迁移、JWT、默认数据
@@ -296,6 +309,10 @@ func bootstrap() {
 	if cfg == nil {
 		return
 	}
+	// 应用暂存的恢复**必须在 db.Init 之前**：那时本进程还没打开数据库，
+	// 换文件是安全的；一旦连上再换，活动连接与 WAL 会造成数据损坏。
+	// 管理端的恢复之所以是"暂存 + 重启生效"，就是为了走到这里。
+	controllers.ApplyPendingRestore()
 	if err := db.Init(&cfg.DB); err != nil {
 		// DB 连不上必须直接退出，不能只打一条 WARN 继续启动。
 		// 继续启动的后果：db.Get() 返回 nil，之后每一个 API 请求都会在
@@ -394,6 +411,91 @@ func siteURLForBoot() string {
 		return "https://" + c.System.Domain
 	}
 	return "http://127.0.0.1:5212"
+}
+
+// runPluginCLI 执行 `nebula plugin <cmd> [args...]`：把命令派发给插件（onCLI 钩子）。
+//
+// onCLI 是**同步**钩子（与其它通知型钩子不同），因为命令行必须拿到输出：
+// 插件往 ctx 写 cliOutput（字符串）与 cliExitCode（数字），这里负责打印与退出码。
+//
+// 退出码约定：
+//
+//	0  成功
+//	1  用法错误，或被插件拦截（error 含 "blocked"）
+//	2  系统尚未安装
+//
+// 这套约定让插件命令行能被脚本安全地调用（`nebula plugin x && ...`）。
+func runPluginCLI(args []string) {
+	if !conf.IsInstalled() {
+		fmt.Fprintln(os.Stderr, "系统尚未安装，插件命令行不可用")
+		os.Exit(2)
+	}
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "用法: nebula plugin <command> [args...]")
+		os.Exit(1)
+	}
+
+	// 复用正常的启动路径：插件宿主、数据库、迁移都在 bootstrap 里。
+	// 代价是会一并拉起 aria2 与几个后台 goroutine —— 本进程派发完就退出，
+	// 不做单独的精简初始化（少一条路径就少一处行为分叉）。
+	bootstrap()
+	defer pluginset.StopPlugins()
+
+	ctx := map[string]any{
+		"command": args[0],
+		"args":    args[1:],
+		"argsRaw": strings.Join(args[1:], " "),
+	}
+
+	blocked := false
+	for _, e := range plugin.Fire(plugin.HookCLI, ctx) {
+		if plugin.IsBlockedError(e) {
+			blocked = true
+			fmt.Fprintln(os.Stderr, "命令被插件拒绝: "+e.Error())
+		} else {
+			fmt.Fprintln(os.Stderr, "[WARN] 插件返回错误: "+e.Error())
+		}
+	}
+
+	if out, ok := ctx["cliOutput"].(string); ok && out != "" {
+		fmt.Print(out)
+		if !strings.HasSuffix(out, "\n") {
+			fmt.Println()
+		}
+	}
+
+	if blocked {
+		os.Exit(1)
+	}
+	if code, ok := positiveInt(ctx["cliExitCode"]); ok && code != 0 {
+		os.Exit(code)
+	}
+}
+
+// positiveInt 从 ctx 里取一个非负整数。
+//
+// 必须兼容 float64：进程外插件的回写经 JSON 往返后数字都是 float64，
+// 只认 int 会让插件的退出码**静默失效**。
+func positiveInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		if n >= 0 {
+			return n, true
+		}
+	case int64:
+		if n >= 0 {
+			return int(n), true
+		}
+	case float64:
+		if n >= 0 && n == float64(int(n)) {
+			return int(n), true
+		}
+	case json.Number:
+		if i, err := n.Int64(); err == nil && i >= 0 {
+			return int(i), true
+		}
+	}
+	return 0, false
 }
 
 // ensureDefaults 确保默认用户组与存储策略存在（幂等）

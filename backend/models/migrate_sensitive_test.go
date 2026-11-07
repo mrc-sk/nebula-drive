@@ -20,6 +20,8 @@ func seedLegacyPlaintext(t *testing.T) {
 		"INSERT INTO policies (name, type, config, is_default, created_at, updated_at) VALUES ('legacy-sftp', 'sftp', '{\"password\":\"LEGACYSFTP\"}', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
 		"INSERT INTO access_tokens (token, user_id, app_id, scope, expires_at, created_at) VALUES ('LEGACYACCESSTOKEN', 1, 0, 'profile', '2999-01-01 00:00:00', CURRENT_TIMESTAMP)",
 		"INSERT INTO personal_access_tokens (user_id, name, token, prefix, scope, created_at) VALUES (1, 'legacy', 'LEGACYPATTOKEN', 'nd_pat_LE', 'profile', CURRENT_TIMESTAMP)",
+		// 插件配置里装的是 SMTP 密码 / HMAC 密钥，与 policies.config 同性质
+		"INSERT INTO plugins (name, title, enabled, config, version, hooks, installed_at, created_at) VALUES ('legacy-plugin', 'Legacy', 0, '{\"sharedSecret\":\"LEGACYPLUGINSECRET\"}', '1.0.0', 'onApiAuth', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
 	}
 	for i, s := range stmts {
 		if err := db.Get().Exec(s).Error; err != nil {
@@ -64,6 +66,7 @@ func TestMigrateSensitiveFields(t *testing.T) {
 		{"users", "two_factor"},
 		{"o_auth_apps", "client_secret"},
 		{"policies", "config"},
+		{"plugins", "config"},
 	} {
 		if n := countPlaintext(t, c.table, c.column); n != 0 {
 			t.Errorf("%s.%s 迁移后仍有 %d 条明文", c.table, c.column, n)
@@ -78,6 +81,10 @@ func TestMigrateSensitiveFields(t *testing.T) {
 	raw = rawString(t, "SELECT config FROM policies WHERE name = 'legacy-sftp'")
 	if strings.Contains(raw, "LEGACYSFTP") {
 		t.Error("policies.config 仍含明文 SFTP 密码")
+	}
+	raw = rawString(t, "SELECT config FROM plugins WHERE name = 'legacy-plugin'")
+	if strings.Contains(raw, "LEGACYPLUGINSECRET") {
+		t.Error("plugins.config 仍含明文插件密钥")
 	}
 
 	// 迁移后：业务层仍能读出原文（否则老用户会直接掉线）
@@ -94,6 +101,15 @@ func TestMigrateSensitiveFields(t *testing.T) {
 	}
 	if app.ClientSecret.String() != "LEGACYSECRET" {
 		t.Errorf("迁移后 ClientSecret 应仍为 %q，实际 %q", "LEGACYSECRET", app.ClientSecret.String())
+	}
+	// 插件配置：迁移后必须仍能被宿主读成明文 JSON 下发给插件，
+	// 否则插件会拿到一串密文、把它当配置解析失败（静默用默认值）。
+	var pl models.Plugin
+	if err := db.Get().Where("name = ?", "legacy-plugin").First(&pl).Error; err != nil {
+		t.Fatalf("read plugin: %v", err)
+	}
+	if !strings.Contains(pl.Config.String(), "LEGACYPLUGINSECRET") {
+		t.Errorf("迁移后插件配置应仍能读出明文，实际 %q", pl.Config.String())
 	}
 }
 

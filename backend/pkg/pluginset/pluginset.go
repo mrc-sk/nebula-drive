@@ -173,7 +173,8 @@ func pluginConfig(name string) json.RawMessage {
 	if err := db.Get().Where("name = ?", name).First(&p).Error; err != nil {
 		return nil
 	}
-	cfg := p.Config
+	// Scan 已把密文还原成明文，这里拿到的就是可直接下发给插件的 JSON。
+	cfg := p.Config.String()
 	if cfg == "" {
 		return nil
 	}

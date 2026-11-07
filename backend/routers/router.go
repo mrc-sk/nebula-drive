@@ -179,6 +179,23 @@ func Setup() *gin.Engine {
 			admin.POST("/plugins/:name/disable", controllers.DisablePlugin)
 			admin.POST("/plugins/:name/restart", controllers.RestartPlugin)
 			admin.PUT("/plugins/:name/config", controllers.UpdatePluginConfig)
+			// 备份 / 恢复
+			//
+			// 恢复挂 RequireConfirm：它会替换整个数据库文件，
+			// 需要管理员输入密码二次确认（与卸载插件同一道门槛）。
+			admin.POST("/backup", controllers.CreateBackup)
+			admin.GET("/backup/download", controllers.DownloadBackup)
+			admin.POST("/backup/restore",
+				middleware.RequireConfirm(), controllers.RestoreBackup)
+
+			// 插件签名与信任
+			//
+			// 移除信任不需要 RequireConfirm：它是可逆的（再加回来即可），
+			// 而且撤销签名信任往往是应急操作，多一道密码门槛会拖慢处置。
+			admin.GET("/plugins/trust", controllers.GetPluginTrust)
+			admin.POST("/plugins/trust", controllers.AddPluginTrustKey)
+			admin.DELETE("/plugins/trust/:keyId", controllers.RemovePluginTrustKey)
+			admin.PUT("/plugins/trust/mode", controllers.SetPluginTrustMode)
 			admin.GET("/policies", controllers.ListPolicies)
 			admin.POST("/policies", controllers.CreatePolicy)
 			admin.PUT("/policies/:id", controllers.UpdatePolicy)
