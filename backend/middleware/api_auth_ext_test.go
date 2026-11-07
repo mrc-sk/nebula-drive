@@ -155,22 +155,27 @@ func TestAPIAuthPluginUnknownPrincipal(t *testing.T) {
 	}
 }
 
-// TestAPIAuthValidTokenSkipsHook 内置鉴权成功时**不得**触发钩子。
+// TestAPIAuthValidTokenHotPathFree 内置鉴权成功路径的**热路径成本**约束。
 //
-// 两个原因，任一都足够：
-//   - 热路径不能为一次 IPC 往返买单（/api/v1/* 的每个请求都会走这里）；
-//   - 内置凭据必须优先，插件不该能否决一个已经有效的令牌。
-func TestAPIAuthValidTokenSkipsHook(t *testing.T) {
+// v2 把成功路径改成了"插件可否决有效令牌"（apiAuthHook → FireIf）——
+// 这与本地最初的"内置成功即终局"语义不同，取舍后保留 v2 语义：
+// 它防得住被盗 PAT 继续滥用，是更强的安全层。
+//
+// 但本地关切的热路径成本仍然成立，只是保证方式变了：
+// FireIf 在**无订阅者时短路**，所以没装任何 onApiAuth 插件的部署
+// （绝大多数）在成功路径上零 IPC 成本。本测试守住这一点：
+// 不注册任何钩子时，有效 PAT 必须 200。
+//
+// 插件否决有效令牌的行为由 v2 上游测试覆盖；本地插件（hmac-auth）
+// 走的是失败路径的 pluginAPIAuth，语义互不干扰。
+func TestAPIAuthValidTokenHotPathFree(t *testing.T) {
 	testutil.SetupDB(t)
-	u := &models.User{UserName: "pat-skip"}
+	u := &models.User{UserName: "pat-hotpath"}
 	db.Get().Create(u)
 	db.Get().Create(&models.PersonalAccessToken{Token: "valid-pat", UserID: u.ID, Prefix: "valid-pat"})
 
-	called := false
-	registerAPIAuth(t, func(ctx map[string]any) (map[string]any, error) {
-		called = true
-		return nil, errors.New("blocked should never be consulted")
-	})
+	// 关键：不注册任何 onApiAuth 钩子 —— 模拟"没装扩展鉴权插件"的常见部署
+	plugin.UnregisterAll(plugin.HookApiAuth)
 
 	r := apiAuthRouter(func(c *gin.Context) { c.String(http.StatusOK, "ok") })
 
@@ -180,10 +185,12 @@ func TestAPIAuthValidTokenSkipsHook(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("有效 PAT 应 200，实际 %d", w.Code)
+		t.Fatalf("无插件时有效 PAT 应 200（热路径不得有无谓失败），实际 %d", w.Code)
 	}
-	if called {
-		t.Error("内置鉴权成功时不该触发 onApiAuth（热路径与凭据优先级都被破坏）")
+	// HasSubscribers 是 FireIf 短路的依据，这里直接验证它是 false ——
+	// 若它误报 true，成功路径就会为一次空派发买单。
+	if plugin.HasSubscribers(plugin.HookApiAuth) {
+		t.Error("无注册时 HasSubscribers 应为 false（热路径短路的前提）")
 	}
 }
 

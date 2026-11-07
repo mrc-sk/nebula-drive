@@ -179,13 +179,18 @@ func Setup() *gin.Engine {
 			admin.POST("/plugins/:name/disable", controllers.DisablePlugin)
 			admin.POST("/plugins/:name/restart", controllers.RestartPlugin)
 			admin.PUT("/plugins/:name/config", controllers.UpdatePluginConfig)
-			// 备份 / 恢复
+			// 系统备份 / 恢复（宿主自己生成 zip：SQLite 库 + 文件清单）
+			//
+			// 前缀用 /system/ 而不是裸 /backup：v2 的注册型 backup 插件
+			// 扩展点占了 /api/admin/backup（pluginAdmin 组，语义是
+			// "由插件导出数据"）。两者是不同的东西 —— 系统备份是宿主
+			// 自己做的事，插件备份是委托插件做，混在一个路径上迟早误调。
 			//
 			// 恢复挂 RequireConfirm：它会替换整个数据库文件，
 			// 需要管理员输入密码二次确认（与卸载插件同一道门槛）。
-			admin.POST("/backup", controllers.CreateBackup)
-			admin.GET("/backup/download", controllers.DownloadBackup)
-			admin.POST("/backup/restore",
+			admin.POST("/system/backup", controllers.CreateBackup)
+			admin.GET("/system/backup/download", controllers.DownloadBackup)
+			admin.POST("/system/backup/restore",
 				middleware.RequireConfirm(), controllers.RestoreBackup)
 
 			// 插件签名与信任

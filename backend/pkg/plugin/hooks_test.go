@@ -61,46 +61,59 @@ func TestHookDocs(t *testing.T) {
 	}
 }
 
-// TestHookPlanMetadata 守住「规划中」占位元数据的完整性。
+// TestV1FrozenHooksPreserved v1 冻结的 10 个钩子在 v2 里必须原样保留。
 //
-// 管理端把 Planned 当成新功能占位状态的唯一数据源：漏标会让一个
-// 实际没接入的钩子显示成可用，等于对管理员撒谎；标了却不写 Plan
-// 则会让界面出现一个没有任何解释的空徽章。
-func TestHookPlanMetadata(t *testing.T) {
-	for _, m := range Hooks {
-		if m.Planned && strings.TrimSpace(m.Plan) == "" {
-			t.Errorf("钩子 %s 标了 Planned 却没有 Plan 说明", m.Name)
+// 这是 v2 合并时新增的守卫：v2 把钩子表扩到 99 个并引入 Since 字段，
+// 但 v1 插件（referer-guard、smtp-email、hmac-auth 及全部示例）依赖的
+// 钩子名与语义不能变 —— 变了等于悄悄废掉所有存量插件。
+// Wired 校验见 plugin_v2_test.go 的 TestHookTableFullyWired。
+func TestV1FrozenHooksPreserved(t *testing.T) {
+	for _, h := range []HookName{HookEmail, HookBackup, HookRestore, HookApiAuth, HookDBMigrate, HookRateLimit, HookAntiLeech, HookCLI, HookCollabOpen, HookCollabSave} {
+		m, ok := MetaOf(h)
+		if !ok {
+			t.Errorf("v1 冻结钩子 %s 不在表里", h)
+			continue
 		}
-		if !m.Planned && m.Plan != "" {
-			t.Errorf("钩子 %s 没标 Planned 却写了 Plan（界面不会展示，属于失效文案）", m.Name)
+		if m.Since != 1 {
+			t.Errorf("v1 冻结钩子 %s 的 Since=%d，应为 1", h, m.Since)
 		}
-		// 未接线的钩子必须进计划，否则它就是个没人认领的死钩子
-		if !m.Wired && !m.Planned {
-			t.Errorf("钩子 %s 既未接入也未列入计划", m.Name)
+		if !m.Wired {
+			t.Errorf("v1 冻结钩子 %s 应保持 Wired=true", h)
+		}
+		if HookDocs[h] == "" {
+			t.Errorf("v1 冻结钩子 %s 缺文档", h)
 		}
 	}
-
-	// onAntiLeech 的公开分享覆盖**曾经缺失**（分享下载与预览都不过闸，
-	// 分享链接因此没有任何防盗链能力）。现已补齐，所以这里反向断言。
-	//
-	// 反向断言的价值：将来若有人把分享路径的调用点删掉（例如重构
-	// serveShareFile 时漏了），必须同时把 Planned/Plan 加回来，
-	// 否则管理端会显示"可用"而实际不管分享 —— 那正是这套元数据要防的谎报。
-	// 行为层面的守卫另见 controllers 的分享防盗链测试。
+	// 本地接线成果的语义锚点：onAntiLeech 必须是同步可拦截（referer-guard 依赖），
+	// onApiAuth 必须是同步可拦截（扩展鉴权依赖，见 FIXLOG §22/§23）。
 	anti, ok := MetaOf(HookAntiLeech)
 	if !ok {
 		t.Fatal("缺少 onAntiLeech")
 	}
-	if !anti.Wired {
-		t.Error("onAntiLeech 应保持 Wired=true（登录下载与公开分享都有调用点）")
+	if anti.Mode != ModeSync || !anti.Blockable {
+		t.Errorf("onAntiLeech 应为同步可拦截，实际 mode=%v blockable=%v", anti.Mode, anti.Blockable)
 	}
-	if anti.Planned {
-		t.Errorf("onAntiLeech 的分享覆盖已补齐，不应再标 Planned（当前 Plan=%q）", anti.Plan)
+	api, ok := MetaOf(HookApiAuth)
+	if !ok {
+		t.Fatal("缺少 onApiAuth")
 	}
-	for _, want := range []string{"shareKind", "shareId"} {
-		if !strings.Contains(anti.Doc, want) {
-			t.Errorf("onAntiLeech 的 Doc 应说明分享路径的 %s 字段：%q", want, anti.Doc)
-		}
+	if api.Mode != ModeSync || !api.Blockable {
+		t.Errorf("onApiAuth 应为同步可拦截（扩展鉴权依赖），实际 mode=%v blockable=%v", api.Mode, api.Blockable)
+	}
+	// v2 用 onShareDownloadBefore 承接公开分享下载/预览（v1 的 onAntiLeech
+	// 只管登录用户）。这个钩子必须存在且可拦截，否则 FIXLOG §20 补上的
+	// "分享链接也要过防盗链闸"在 v2 里就断了。
+	share, ok := MetaOf(HookShareDownloadBefore)
+	if !ok {
+		t.Fatal("缺少 onShareDownloadBefore（v2 的分享下载闸）")
+	}
+	if !share.Blockable {
+		t.Error("onShareDownloadBefore 应可拦截（分享下载的防盗链/限流依赖它）")
+	}
+	// v2 的 onAntiLeech Doc 明确说"公开分享下载不走本钩子"并指路新钩子 ——
+	// 这条指路必须保留，否则 v1 插件作者会误以为自己的插件也保护分享链接。
+	if !strings.Contains(anti.Doc, "onFileDownloadBefore") && !strings.Contains(anti.Doc, "onShareDownloadBefore") {
+		t.Errorf("onAntiLeech 的 Doc 应指路新钩子（v1 插件作者据此迁移）：%q", anti.Doc)
 	}
 }
 
