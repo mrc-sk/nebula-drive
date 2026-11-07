@@ -1,0 +1,4 @@
+backend/data/
+backend/cover.out
+*.db
+secret.key

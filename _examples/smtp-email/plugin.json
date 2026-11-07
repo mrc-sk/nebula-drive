@@ -1,19 +1,15 @@
 {
-  "id": "smtp-email",
-  "name": "SMTP 邮件插件",
+  "name": "smtp-email",
+  "title": "SMTP 邮件外发",
   "version": "1.0.0",
-  "author": "mrc-sk",
-  "homepage": "https://github.com/mrc-sk/nebula-drive/tree/plugins/_examples/smtp-email",
-  "description": "通过 SMTP 协议发送邮件通知。支持 QQ/163/Gmail/SendCloud。触发 onEmail 钩子。",
-  "tags": ["email", "smtp", "notification"],
+  "author": "NebulaDrive",
+  "description": "把站内通知通过 SMTP 投递到用户邮箱。支持 starttls / implicit / none 三种 TLS 模式，中文主题与正文正确编码，失败时明确记录原因。",
+  "entry": "smtp-email",
+  "args": [],
+  "protocolVersion": 1,
   "hooks": ["onEmail"],
-  "minAppVersion": "1.0.0",
-  "dependencies": [],
-  "settings": [
-    {"key": "smtp_host", "type": "string", "label": "SMTP 地址", "default": "smtp.qq.com"},
-    {"key": "smtp_port", "type": "number", "label": "SMTP 端口", "default": 465},
-    {"key": "smtp_user", "type": "string", "label": "发件账号", "default": ""},
-    {"key": "smtp_pass", "type": "password", "label": "授权码/密码", "default": ""},
-    {"key": "smtp_ssl", "type": "boolean", "label": "启用 SSL", "default": true}
-  ]
+  "permissions": ["read-notification-content", "network-outbound"],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/mrc-sk/nebula-drive",
+  "minHostVersion": "26.10.0"
 }
