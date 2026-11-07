@@ -1,0 +1,93 @@
+name: Smoke
+
+# 端到端冒烟测试。
+#
+# 为什么单独一个 workflow 而不是塞进 go-ci：
+#   - go-ci 是 go vet / go test -race，秒级到分钟级；冒烟要起真实进程、建真实 SQLite、
+#     走真实 HTTP，时间与失败模式都不同。混在一起会让"单元测试挂了"和
+#     "端到端挂了"难以区分。
+#   - 这两处覆盖此前**名义存在、实际为零**（见 FIXLOG 第 18 节）：
+#     smoke_plugin.sh 在第 2 步就挂，从未跑到过插件部分；
+#     而密钥静态加密根本没有端到端守卫。
+#     脚本腐坏时不会发出任何信号，所以必须有人定期真的执行它们。
+on:
+  push:
+    branches: [main]
+    # examples/plugins/** 也要触发：示例插件是独立 module，go-ci 覆盖不到它，
+    # 而冒烟测试会现场编译并加载它。
+    paths: ['backend/**', 'examples/plugins/**', '.github/workflows/smoke.yml']
+  pull_request:
+    paths: ['backend/**', 'examples/plugins/**', '.github/workflows/smoke.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: end-to-end smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      # smoke_policy_config.sh 的核心断言是直接读数据库原始列，
+      # 没有 sqlite3 它就什么都验证不了。显式安装，避免依赖 runner 镜像的偶然性。
+      - name: Install sqlite3
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+
+      # 插件热加载：安装 → 启用拉起子进程 → onAntiLeech 拦截 403 → 禁用回收子进程。
+      # 同时验证插件协议关卡与钩子计数是真实数据。
+      - name: Plugin hot-reload smoke
+        run: bash backend/smoke_plugin.sh
+
+      # 示例插件自身的检查。
+      #
+      # 每个示例插件都是**独立 module**，backend 的 `go test ./...` 覆盖不到它们 ——
+      # 不在这里跑，就等于没有任何 CI 校验（而 `smtp-email` 的
+      # main_test.go 里有真实 SMTP 协议往返、RFC 2047 编码、
+      # 头注入防护、三种 TLS 模式的断言，不跑就白写了）。
+      #
+      # 列表**动态枚举**而不是写死：写死的话，新加的插件不会被检查，
+      # 而"加了插件但 CI 没覆盖"这件事在绿色流水线里完全看不出来
+      # （这个仓库里已经发生过一次：脚本腐坏没人发现，见 FIXLOG §18）。
+      - name: Example plugin checks
+        run: |
+          set -e
+          found=0
+          for dir in examples/plugins/*/; do
+            p=$(basename "$dir")
+            [ -f "$dir/go.mod" ] || { echo "跳过 $p（不是独立 module）"; continue; }
+            case "$p" in
+              _*|.*) echo "跳过 $p"; continue ;;
+            esac
+            echo "=== $p ==="
+            (cd "$dir" && go vet ./... && go test ./... -count=1)
+            found=$((found + 1))
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "::error::没有找到任何示例插件 —— 枚举逻辑可能坏了"
+            exit 1
+          fi
+          echo "共检查 $found 个示例插件"
+
+      # 密钥静态加密：Create/Update 两条写入路径后，数据库原始列都必须是密文，
+      # 且数据库文件里不得出现明文密钥；最后用上传/下载证明解密链路仍可用。
+      #
+      # SMOKE_REQUIRE_SQLITE3=1：CI 里不允许"缺依赖就静默跳过"，
+      # 否则这个门禁会变成永远绿色的假门禁。
+      - name: Policy config encryption smoke
+        env:
+          SMOKE_REQUIRE_SQLITE3: '1'
+        run: bash backend/smoke_policy_config.sh

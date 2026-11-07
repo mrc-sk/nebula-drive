@@ -32,6 +32,12 @@ backend/filesystem/uploads/
 backend/.ndbuild/
 # 冒烟测试临时目录（跑发布产物时用，会建 sqlite 库与截图）
 backend/.smoke/
+# 冒烟脚本的临时产物：正常退出由 trap 清理，被 Ctrl+C / kill 中断时会残留
+# （数据目录里有真实 SQLite 库，不忽略就有被误提交的风险）
+backend/.smoke-nebula
+backend/.smoke-nebula.exe
+backend/.smoke-plugindata/
+backend/.smoke-policydata/
 # gofmt 行尾归一化检测的临时目录
 backend/.fmtcheck/
 
@@ -60,3 +66,21 @@ coverage.out
 
 # 发布包（含几十 MB 的单二进制，不应进版本库）
 release/
+
+# 打包工具产物
+#
+# tools/ 只放构建结果（pbclus-pack 可执行文件、试打的 .pbclus 包），
+# 源码在 backend/cmd/pbclus-pack/。可执行文件本来就由上面的 *.exe 覆盖，
+# 这里额外挡一下 .pbclus —— 它是产物，不该被当成"示例包"提交进来。
+tools/
+
+# 运行产物（真实数据库、密钥、上传文件 —— plugins 分支曾因此泄露，见 FIXLOG）
+record_run/
+guide/shots/
+guide/build/
+
+# 发布素材（200MB+ 的 mp4/png/wav/ttc，不该进 git）
+*.mp4
+*.ttc
+*.wav
+guide/
