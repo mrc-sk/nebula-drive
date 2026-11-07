@@ -1,0 +1,15 @@
+{
+  "name": "backup-mirror",
+  "title": "备份包异地镜像与轮转",
+  "version": "1.0.0",
+  "author": "NebulaDrive",
+  "description": "把宿主生成的备份包流式镜像到多个异地目录，按保留数只轮转匹配命名规则的备份文件，并把每次提交恢复的操作追加进本地审计日志。",
+  "entry": "backup-mirror",
+  "args": [],
+  "protocolVersion": 1,
+  "hooks": ["onBackup", "onRestore", "onCLI"],
+  "permissions": ["write-backup-target", "read-backup-metadata", "write-own-datadir"],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/mrc-sk/nebula-drive",
+  "minHostVersion": "26.10.0"
+}

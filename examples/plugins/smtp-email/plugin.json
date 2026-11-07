@@ -1,0 +1,15 @@
+{
+  "name": "smtp-email",
+  "title": "SMTP 邮件外发",
+  "version": "1.0.0",
+  "author": "NebulaDrive",
+  "description": "把站内通知通过 SMTP 投递到用户邮箱。支持 starttls / implicit / none 三种 TLS 模式，中文主题与正文正确编码，失败时明确记录原因。",
+  "entry": "smtp-email",
+  "args": [],
+  "protocolVersion": 1,
+  "hooks": ["onEmail"],
+  "permissions": ["read-notification-content", "network-outbound"],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/mrc-sk/nebula-drive",
+  "minHostVersion": "26.10.0"
+}

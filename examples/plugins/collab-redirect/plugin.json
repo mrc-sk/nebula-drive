@@ -1,0 +1,15 @@
+{
+  "name": "collab-redirect",
+  "title": "协作编辑跳转（OnlyOffice / Collabora）",
+  "version": "1.0.0",
+  "author": "NebulaDrive",
+  "description": "按扩展名或 MIME 前缀判断文件是否交给外部编辑器，命中时把协作打开请求 302 跳转到模板化的编辑器地址。只做跳转，不代理文件、不做鉴权。",
+  "entry": "collab-redirect",
+  "args": [],
+  "protocolVersion": 1,
+  "hooks": ["onCollabOpen", "onCLI"],
+  "permissions": ["read-collab-metadata"],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/mrc-sk/nebula-drive",
+  "minHostVersion": "26.10.0"
+}

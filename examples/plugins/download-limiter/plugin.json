@@ -1,0 +1,14 @@
+{
+  "name": "download-limiter",
+  "title": "下载频率限制（按 IP 防批量抓取）",
+  "version": "1.0.0",
+  "author": "NebulaDrive",
+  "description": "按客户端 IP 做滑动窗口下载限流：1 分钟与 1 小时双阈值，超出返回 403。支持登录用户豁免、分享预览豁免与跟踪 IP 数上限。",
+  "entry": "download-limiter",
+  "args": [],
+  "protocolVersion": 1,
+  "hooks": ["onAntiLeech", "onCLI"],
+  "permissions": ["read-download-metadata"],
+  "license": "AGPL-3.0-only",
+  "minHostVersion": "26.10.0"
+}

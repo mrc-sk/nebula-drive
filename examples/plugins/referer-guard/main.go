@@ -1,8 +1,20 @@
 // Command referer-guard 是一个 NebulaDrive 示例插件：防盗链。
 //
-// 它实现 onAntiLeech 钩子 —— 目前宿主唯一下载拦截点。
-// 当下载请求的 Referer 不在允许列表内时，插件返回含 "blocked"
-// 的 error，请求被宿主以 403 拒绝。
+// 它实现 onAntiLeech 钩子。宿主在两个地方触发它：
+//
+//  1. 登录下载     GET /api/files/:id/download
+//  2. 公开分享     GET /api/shares/:id/download 与 /preview
+//
+// 当请求的 Referer 不在允许列表内时，插件返回含 "blocked" 的 error，
+// 请求被宿主以 403 拒绝。
+//
+// 分享路径的 ctx 里多两个字段：shareId 与 shareKind（download / preview）。
+// **preview 同样是完整文件内容的出口** —— 只保护 download 等于留了一条
+// 绕过防盗链的通道，所以本插件对两者一视同仁。
+// 若你的站点需要放行本站分享页的内联预览，请在 check() 里对
+// shareKind=="preview" 提前放行（见下方 TODO 位置）。
+//
+// 注意分享访问者是匿名的：ctx.userId 恒为 0，exemptUsers 对分享下载无效。
 //
 // 用法（安装后配置 JSON）：
 //
@@ -340,8 +352,13 @@ func (c *compiled) audit(ctx map[string]any, v verdict, msg string) {
 		"fileId":   ctx["fileId"],
 		"fileName": ctx["fileName"],
 		"referer":  ctx["referer"],
-		"verdict":  v.String(),
-		"reason":   msg,
+		// 分享路径才有这两个字段（登录下载时为 nil）——
+		// 记下来才能区分"谁在盗刷我的分享链接"与"谁在盗刷站内下载"，
+		// 两者该采取的措施往往不同（前者通常要吊销分享）。
+		"shareId":   ctx["shareId"],
+		"shareKind": ctx["shareKind"],
+		"verdict":   v.String(),
+		"reason":    msg,
 	}
 	b, err := json.Marshal(rec)
 	if err != nil {

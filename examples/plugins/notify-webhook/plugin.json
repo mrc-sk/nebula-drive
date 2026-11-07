@@ -1,0 +1,15 @@
+{
+  "name": "notify-webhook",
+  "title": "通知 Webhook 转发",
+  "version": "1.0.0",
+  "author": "NebulaDrive",
+  "description": "把站内通知转发到 Slack、飞书、钉钉、Discord 或任意通用 webhook。URL 日志脱敏，单请求超时，网络错误与 5xx 自动重试一次。",
+  "entry": "notify-webhook",
+  "args": [],
+  "protocolVersion": 1,
+  "hooks": ["onEmail", "onCLI"],
+  "permissions": ["read-notification-metadata", "network-outbound"],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/mrc-sk/nebula-drive",
+  "minHostVersion": "26.10.0"
+}

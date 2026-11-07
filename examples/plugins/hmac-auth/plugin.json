@@ -1,0 +1,15 @@
+{
+  "name": "hmac-auth",
+  "title": "开放 API HMAC 签名鉴权",
+  "version": "1.0.0",
+  "author": "NebulaDrive",
+  "description": "为 /api/v1/* 提供 PAT/OAuth 之外的 HMAC-SHA256 签名鉴权：校验通过后认定调用者身份，签名不符或时间戳超窗一律拒绝。",
+  "entry": "hmac-auth",
+  "args": [],
+  "protocolVersion": 1,
+  "hooks": ["onApiAuth"],
+  "permissions": ["read-request-metadata", "network-none"],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/mrc-sk/nebula-drive",
+  "minHostVersion": "26.10.0"
+}
