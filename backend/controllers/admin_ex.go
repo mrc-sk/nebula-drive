@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"encoding/json"
+	"github.com/nebula-drive/nebula/internal/hooks"
+	"github.com/nebula-drive/nebula/pkg/plugin"
 	"net/http"
 	"strconv"
 
@@ -30,6 +32,8 @@ func ListPolicies(c *gin.Context) {
 
 // CreatePolicy 创建策略
 func CreatePolicy(c *gin.Context) {
+	// [plugin-hook] HookStoragePolicyChange（完成后）
+	defer hooks.Emit(plugin.HookStoragePolicyChange, hooks.ReqCtx(c, nil))
 	var req policyReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
@@ -101,6 +105,8 @@ func GetSettings(c *gin.Context) {
 
 // SaveSettings 批量保存设置
 func SaveSettings(c *gin.Context) {
+	// [plugin-hook] HookConfigChanged（完成后）
+	defer hooks.Emit(plugin.HookConfigChanged, hooks.ReqCtx(c, nil))
 	var body map[string]string
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
@@ -136,6 +142,16 @@ var _ = json.Marshal
 
 // Dashboard 首页统计
 func Dashboard(c *gin.Context) {
+	// [plugin-hook] HookDashboardQuery（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookDashboardQuery, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
+	// [plugin-hook] HookStatsCollect（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookStatsCollect, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	var userCount int64
 	var fileCount int64
 	var shareCount int64

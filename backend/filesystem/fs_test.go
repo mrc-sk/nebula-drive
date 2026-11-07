@@ -150,8 +150,13 @@ func TestLocalConfigJSONEscaping(t *testing.T) {
 	}
 
 	// 2) 畸形 config：未转义反斜杠。必须报错，而不是回落到相对目录 uploads。
-	//    （conf 未加载时 confUploadPath() 为空，因此这里期望 error）
-	broken := `{"path":"` + dir + `"}`
+	//
+	// 不能用 t.TempDir() 拼这个串：Windows 上临时目录是 C:\Users\...\Temp，
+	// 拼出来恰好是畸形 JSON；但 Linux 上是 /tmp/...，反而是完全合法的 JSON，
+	// 于是 cfg.Path 解析成功、New 返回 nil error，测试在 Linux 必然失败。
+	// 这里显式写死一个跨平台都非法的转义序列，锁死「畸形配置必须报错」。
+	// （本包单测不初始化 conf，confUploadPath() 为空，走的就是 error 分支）
+	broken := `{"path":"C:\Temp\nebula-uploads"}`
 	if _, err := filesystem.New("local", broken); err == nil {
 		t.Fatal("malformed config must return an error, not silently fall back to a relative dir")
 	}

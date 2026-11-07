@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nebula-drive/nebula/internal/hooks"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -157,7 +158,7 @@ func requireAgreement(c *gin.Context) bool {
 	}
 	cur := plugin.CurrentAgreement()
 	c.JSON(http.StatusForbidden, gin.H{
-		"code": 403,
+		"code":    403,
 		"message": "尚未同意插件协议",
 		"data": gin.H{
 			"needAgreement": true,
@@ -285,6 +286,8 @@ func orDefault(s, def string) string {
 // 装完**不自动启用**：先让管理员确认协议与权限，再显式启用。
 // 自动启用会让"同意协议"这一步形同虚设。
 func InstallPlugin(c *gin.Context) {
+	// [plugin-hook] HookPluginInstall（完成后）
+	defer hooks.Emit(plugin.HookPluginInstall, hooks.ReqCtx(c, nil))
 	if !requireAgreement(c) {
 		return
 	}
@@ -429,6 +432,8 @@ func UninstallPlugin(c *gin.Context) {
 // 成功与否立即反映到 HTTP 返回值 —— 管理员能看到"启动失败：缺少配置 x"
 // 而不是开关变绿却毫无作用。
 func EnablePlugin(c *gin.Context) {
+	// [plugin-hook] HookPluginEnable（完成后）
+	defer hooks.Emit(plugin.HookPluginEnable, hooks.ReqCtx(c, nil))
 	if !requireAgreement(c) {
 		return
 	}
@@ -494,6 +499,8 @@ func EnablePlugin(c *gin.Context) {
 
 // DisablePlugin 禁用插件：杀掉子进程。热加载，不需要重启主服务。
 func DisablePlugin(c *gin.Context) {
+	// [plugin-hook] HookPluginDisable（完成后）
+	defer hooks.Emit(plugin.HookPluginDisable, hooks.ReqCtx(c, nil))
 	s := pluginSvc()
 	name := c.Param("name")
 	var p models.Plugin
@@ -560,6 +567,8 @@ func RestartPlugin(c *gin.Context) {
 
 // UpdatePluginConfig 更新插件配置（下次启用/重启时生效）。
 func UpdatePluginConfig(c *gin.Context) {
+	// [plugin-hook] HookPluginConfigChange（完成后）
+	defer hooks.Emit(plugin.HookPluginConfigChange, hooks.ReqCtx(c, nil))
 	name := c.Param("name")
 	var body struct {
 		Config string `json:"config"`

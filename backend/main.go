@@ -19,12 +19,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/nebula-drive/nebula/conf"
 	"github.com/nebula-drive/nebula/controllers"
+	"github.com/nebula-drive/nebula/internal/hooks"
 	"github.com/nebula-drive/nebula/internal/service"
 	"github.com/nebula-drive/nebula/migrations"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/aria2"
 	"github.com/nebula-drive/nebula/pkg/db"
 	"github.com/nebula-drive/nebula/pkg/jwt"
+	"github.com/nebula-drive/nebula/pkg/plugin"
 	"github.com/nebula-drive/nebula/pkg/pluginset"
 	"github.com/nebula-drive/nebula/pkg/storage"
 	tlspkg "github.com/nebula-drive/nebula/pkg/tls"
@@ -37,7 +39,40 @@ import (
 // 缺省时用 dev，避免忘记注入导致版本显示成空白。
 var buildVersion = "dev"
 
+// runHookCLI 实现 v1 预留、v2 真接线的 onCLI 扩展点。
+// 用法：nebula hook <command> [args...]
+// 插件把结果写进 ctx.output，宿主打印到 stdout；没有插件订阅时输出空。
+func runHookCLI(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "用法: nebula hook <command> [args...]")
+		os.Exit(2)
+	}
+	dataDir := "data"
+	for i, a := range args {
+		if a == "-data" && i+1 < len(args) {
+			dataDir = args[i+1]
+		}
+	}
+	conf.SetDataDir(dataDir)
+	if err := conf.Load(); err != nil {
+		log.Printf("[WARN] 加载配置失败: %v", err)
+	}
+	if conf.IsInstalled() {
+		bootstrap()
+	}
+	ctx := map[string]any{
+		"command": args[0], "args": args[1:], "output": "",
+	}
+	plugin.FireIf(plugin.HookCLI, ctx)
+	fmt.Println(hooks.Str(ctx, "output", ""))
+}
+
 func main() {
+	// CLI 子命令要在 flag.Parse 之前拦截，否则 "hook" 会被当成未知 flag。
+	if len(os.Args) >= 2 && os.Args[1] == "hook" {
+		runHookCLI(os.Args[2:])
+		return
+	}
 	dataDir := flag.String("data", "data", "数据目录")
 	listen := flag.String("listen", "", "监听地址，留空则读配置")
 	autoport := flag.Bool("autoport", false, "自动挑选空闲端口（5212 起），用于试用/一键启动场景")
@@ -107,6 +142,8 @@ func watchSignals() {
 	go func() {
 		<-ch
 		log.Printf("[INFO] 收到退出信号，正在停止插件进程...")
+		// v2：给插件一次 flush 的机会（同步钩子，最多等 FireTimeout）
+		plugin.FireIf(plugin.HookShutdown, map[string]any{"reason": "signal"})
 		pluginset.StopPlugins()
 		ch2 := make(chan os.Signal, 1)
 		signal.Notify(ch2, os.Interrupt, syscall.SIGTERM)
@@ -334,6 +371,29 @@ func bootstrap() {
 	controllers.StartTrashCleanup()
 	// 启动 WebDAV 过期锁回收（LOCK 现在会真实记录锁，必须有对应回收）
 	webdav.StartLockGC()
+
+	// v2：插件定时心跳（每 5 分钟）与过期事件
+	controllers.StartPluginScheduler()
+
+	// v2：宿主就绪事件，插件可在此初始化自己的周期任务
+	plugin.FireIf(plugin.HookBoot, map[string]any{
+		"version":         buildVersion,
+		"protocolVersion": plugin.ProtocolVersion,
+		"dataDir":         conf.DataDir(),
+		"siteURL":         siteURLForBoot(),
+	})
+}
+
+// siteURLForBoot 供 onBoot 使用（与 pluginset.siteURL 同规则）。
+func siteURLForBoot() string {
+	c := conf.Current()
+	if c == nil {
+		return ""
+	}
+	if c.System.Domain != "" {
+		return "https://" + c.System.Domain
+	}
+	return "http://127.0.0.1:5212"
 }
 
 // ensureDefaults 确保默认用户组与存储策略存在（幂等）

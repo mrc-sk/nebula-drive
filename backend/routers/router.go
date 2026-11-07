@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/nebula-drive/nebula/conf"
 	"github.com/nebula-drive/nebula/controllers"
+	"github.com/nebula-drive/nebula/internal/pluginhttp"
 	"github.com/nebula-drive/nebula/middleware"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
@@ -124,11 +125,11 @@ func Setup() *gin.Engine {
 	r.Use(middleware.InstallGuard())
 	r.Use(middleware.StaticCache())
 
-	r.GET("/api/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true, "installed": conf.IsInstalled()})
-	})
+	r.GET("/api/health", controllers.HealthCheck)
 
 	api := r.Group("/api")
+	// v2 请求边界钩子：覆盖全部 /api 请求（含 /api/health 之外的所有路由）。
+	api.Use(middleware.PluginRequestHooks())
 	{
 		api.GET("/install/status", controllers.InstallStatus)
 		inst := api.Group("", middleware.InstalledBlock())
@@ -315,12 +316,32 @@ func Setup() *gin.Engine {
 
 		// 开放 API v1（OAuth Token / PAT 鉴权）
 		v1 := api.Group("/v1", middleware.APIAuth())
+		v1.Use(middleware.PluginOpenAPIHooks())
 		{
 			v1.GET("/files", controllers.List)
 			v1.POST("/files/upload", middleware.RateLimit("upload"), controllers.Upload)
 			v1.GET("/files/:id/download", controllers.Download)
 		}
+
+		// ---- v2 插件扩展端点 ----
+		api.GET("/plugins/ui", middleware.Auth(true), controllers.PluginUI)
+		api.POST("/plugins/ui/settings/:plugin", middleware.Auth(true), controllers.PluginUISettingsSave)
+		api.POST("/reports", controllers.CreateReport)
+		api.POST("/pay/callback/:provider", controllers.PaymentCallback)
+
+		pluginAdmin := api.Group("/admin", middleware.Auth(true), middleware.AdminOnly())
+		{
+			pluginAdmin.GET("/plugins/global", controllers.PluginGlobalStatus)
+			pluginAdmin.POST("/plugins/global", controllers.EnablePluginGlobal)
+			pluginAdmin.GET("/plugins/contract/:name", controllers.PluginContractDiagnose)
+			pluginAdmin.POST("/backup", middleware.RequireConfirm(), controllers.Backup)
+			pluginAdmin.POST("/restore", middleware.RequireConfirm(), controllers.PluginRestore)
+		}
 	}
+
+	// 插件 HTTP 页面：/ext/<plugin>/* → 反代到插件自己的 HTTP 服务。
+	// 宿主完全透传鉴权（插件自负责），但全局开关关闭时一律 404。
+	pluginhttp.Global().RegisterRoutes(r)
 
 	r.Match(davAllMethods, "/dav/*p", func(c *gin.Context) {
 		if !conf.IsInstalled() {

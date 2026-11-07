@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"github.com/nebula-drive/nebula/internal/hooks"
+	"github.com/nebula-drive/nebula/pkg/plugin"
 	"log"
 	"math/big"
 	"net/http"
@@ -164,7 +166,7 @@ func ListCodes(c *gin.Context) {
 type generateCodesReq struct {
 	PlanID   uint   `json:"planId" binding:"required"`
 	Count    int    `json:"count" binding:"required"`
-	MaxUses  int    `json:"maxUses"`  // 0=不限次数
+	MaxUses  int    `json:"maxUses"` // 0=不限次数
 	Note     string `json:"note"`
 	ExpireAt string `json:"expireAt"` // RFC3339 可选
 }
@@ -230,7 +232,7 @@ func GenerateCodes(c *gin.Context) {
 	db.Get().Create(&models.AuditLog{
 		UserID: cur.ID, UserName: cur.UserName, Action: "admin_generate_codes",
 		Target: fmt.Sprintf("plan=%d count=%d", req.PlanID, len(codes)),
-		IP: c.ClientIP(), UA: c.Request.UserAgent(), Detail: string(detail),
+		IP:     c.ClientIP(), UA: c.Request.UserAgent(), Detail: string(detail),
 	})
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": codes, "generated": len(codes)})
 }
@@ -333,11 +335,11 @@ func GetMySubscription(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{
-			"hasActive":     hasActive,
-			"current":       sub,
-			"planId":        u.PlanID,
-			"planExpireAt":  u.PlanExpireAt,
-			"history":       history,
+			"hasActive":    hasActive,
+			"current":      sub,
+			"planId":       u.PlanID,
+			"planExpireAt": u.PlanExpireAt,
+			"history":      history,
 		},
 	})
 }
@@ -348,6 +350,15 @@ type redeemReq struct {
 
 // RedeemCode 兑换码兑换
 func RedeemCode(c *gin.Context) {
+	// [plugin-hook] HookPlanSubscribe（完成后）
+	defer hooks.Emit(plugin.HookPlanSubscribe, hooks.ReqCtx(c, nil))
+	// [plugin-hook] HookCodeRedeemAfter（完成后）
+	defer hooks.Emit(plugin.HookCodeRedeemAfter, hooks.ReqCtx(c, nil))
+	// [plugin-hook] HookCodeRedeemBefore（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookCodeRedeemBefore, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	var req redeemReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "请输入兑换码"})
@@ -413,7 +424,7 @@ func RedeemCode(c *gin.Context) {
 
 	// 更新用户当前套餐
 	db.Get().Model(&models.User{}).Where("id = ?", u.ID).Updates(map[string]any{
-		"plan_id":       plan.ID,
+		"plan_id":        plan.ID,
 		"plan_expire_at": endTime,
 	})
 
@@ -433,7 +444,7 @@ func RedeemCode(c *gin.Context) {
 		"success", "system")
 
 	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
+		"code":    0,
 		"message": fmt.Sprintf("兑换成功！%s 套餐有效期至 %s", plan.DisplayName, endTime.Format("2006-01-02")),
 		"data": gin.H{
 			"planName":  plan.DisplayName,

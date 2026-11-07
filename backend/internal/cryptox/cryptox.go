@@ -11,7 +11,9 @@
 // # 为什么不用 GORM hook
 //
 // 钩子（BeforeSave/AfterFind）只对 struct 字段生效，无法覆盖
-//   db.Model(&u).Update("two_factor", secret)   // 值来自 map，不经过 struct
+//
+//	db.Model(&u).Update("two_factor", secret)   // 值来自 map，不经过 struct
+//
 // 这类写法。项目里 2FA 开关与重置恰好就是这种写法，所以本包配合
 // models.Encrypted 类型的 driver.Valuer / sql.Scanner 实现，
 // 覆盖**所有**数据库写入路径。

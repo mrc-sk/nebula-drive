@@ -3,6 +3,7 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/nebula-drive/nebula/internal/hooks"
 	"net/http"
 	"strconv"
 	"time"
@@ -58,6 +59,13 @@ func readShareAccessParams(c *gin.Context) (id int, pwd, extract string) {
 
 // CreateShare 创建分享
 func CreateShare(c *gin.Context) {
+	// [plugin-hook] HookShareCreateAfter（完成后）
+	defer hooks.Emit(plugin.HookShareCreateAfter, hooks.ReqCtx(c, nil))
+	// [plugin-hook] HookShareCreateBefore（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookShareCreateBefore, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	u := middleware.CurrentUser(c)
 	var req shareReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -113,6 +121,16 @@ func CreateShare(c *gin.Context) {
 
 // GetShare 获取分享（公开，校验密码/过期/提取码）。同时根据 file 目录或单文件构造 meta + tree 返回前端，避免前端 404 兜底假数据。
 func GetShare(c *gin.Context) {
+	// [plugin-hook] HookShareVerify（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookShareVerify, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
+	// [plugin-hook] HookShareAccess（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookShareAccess, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	id, pwd, extract := readShareAccessParams(c)
 	if pwd == "" {
 		pwd = c.Query("password")
@@ -181,6 +199,11 @@ func GetShare(c *gin.Context) {
 //
 // 可选 query fileId —— 下载分享目录内的某个子文件；不给则下载分享根本身。
 func DownloadShare(c *gin.Context) {
+	// [plugin-hook] HookShareDownloadBefore（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookShareDownloadBefore, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	serveShareFile(c, dispAttachment)
 }
 
@@ -408,6 +431,8 @@ func ListShares(c *gin.Context) {
 
 // DeleteShare 删除分享
 func DeleteShare(c *gin.Context) {
+	// [plugin-hook] HookShareDelete（完成后）
+	defer hooks.Emit(plugin.HookShareDelete, hooks.ReqCtx(c, nil))
 	id, _ := strconv.Atoi(c.Param("id"))
 	u := middleware.CurrentUser(c)
 	var s models.Share

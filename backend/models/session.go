@@ -61,9 +61,9 @@ type Plugin struct {
 	Restarts int `gorm:"default:0" json:"restarts"`
 	// AgreementVersion 安装时管理员同意的插件协议版本。
 	// 协议升级后需要重新同意才能启用 —— 见 controllers 的 requireAgreement。
-	AgreementVersion int `gorm:"default:0" json:"agreementVersion"`
-	InstalledAt time.Time `json:"installedAt"`
-	CreatedAt  time.Time `json:"createdAt"`
+	AgreementVersion int       `gorm:"default:0" json:"agreementVersion"`
+	InstalledAt      time.Time `json:"installedAt"`
+	CreatedAt        time.Time `json:"createdAt"`
 }
 
 // PluginHookList 返回 Hooks 字段的切片形式。

@@ -25,7 +25,7 @@ type SFTPHandler struct {
 }
 
 type sftpConfig struct {
-	Host     string `json:"host"`     // host:port
+	Host     string `json:"host"` // host:port
 	User     string `json:"user"`
 	Password string `json:"password"` // 密码认证
 	Key      string `json:"key"`      // 私钥认证（PEM），与密码二选一
@@ -234,13 +234,13 @@ func (h *SFTPHandler) Copy(src, dst string) error {
 
 // 远程 WebDAV 存储
 type WebDAVRemoteHandler struct {
-	cfg    webdavRemoteConfig
-	root   string
+	cfg     webdavRemoteConfig
+	root    string
 	baseURL string
 }
 
 type webdavRemoteConfig struct {
-	URL      string `json:"url"`      // https://dav.example.com/path/
+	URL      string `json:"url"` // https://dav.example.com/path/
 	User     string `json:"user"`
 	Password string `json:"password"`
 }

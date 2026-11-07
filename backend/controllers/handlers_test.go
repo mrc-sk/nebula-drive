@@ -352,9 +352,13 @@ func TestPluginHooksReturnsRealCounts(t *testing.T) {
 		} `json:"data"`
 	}
 	mustUnmarshal(t, w.Body.Bytes(), &resp)
-	// 必须是全部 10 个钩子（此前前端只列 8 个，漏了 collab 两个）
-	if len(resp.Data) != 10 {
-		t.Fatalf("钩子数 = %d, want 10", len(resp.Data))
+	// v2 把钩子表扩到 99 个且「全部真接线」，写死 10 会让测试随协议演进腐化。
+	// 改成与注册表全表对齐，并逐项检查文档与接线标记。
+	if want := len(plugin.Hooks); len(resp.Data) != want {
+		t.Fatalf("钩子数 = %d, want %d（应等于 pkg/plugin.Hooks 全表）", len(resp.Data), want)
+	}
+	if len(resp.Data) < 90 {
+		t.Fatalf("钩子表疑似被截断：仅 %d 个", len(resp.Data))
 	}
 	byName := map[string]int{}
 	for _, h := range resp.Data {
@@ -362,10 +366,17 @@ func TestPluginHooksReturnsRealCounts(t *testing.T) {
 		if h.Doc == "" {
 			t.Errorf("钩子 %s 缺描述", h.Name)
 		}
-		// 预留未接入的钩子必须标出来，不能让管理员以为可用
+		// 按站长要求「全部真接线」，不允许再有 Wired=false 的装饰性占位钩子
+		if !h.Wired {
+			t.Errorf("钩子 %s 仍标记 wired=false", h.Name)
+		}
 		if !h.Wired && h.Count > 0 {
 			t.Errorf("未接入的钩子 %s 不应有 handler", h.Name)
 		}
+	}
+	// v1 冻结钩子必须仍在列表里，否则示例插件 referer-guard 会失效
+	if _, ok := byName["onAntiLeech"]; !ok {
+		t.Fatal("v1 钩子 onAntiLeech 丢失，破坏向后兼容")
 	}
 	// 无插件时全部为 0 —— 这正是此前前端用 Math.random() 伪造的东西
 	if byName["onAntiLeech"] != 0 {

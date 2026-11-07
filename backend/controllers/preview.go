@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"github.com/nebula-drive/nebula/internal/hooks"
+	"github.com/nebula-drive/nebula/pkg/plugin"
 	"io"
 	"net/http"
 	"strconv"
@@ -15,6 +17,11 @@ import (
 
 // Preview 在线预览（inline 流式返回）
 func Preview(c *gin.Context) {
+	// [plugin-hook] HookFilePreview（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookFilePreview, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var f models.File
 	if err := db.Get().First(&f, id).Error; err != nil {
@@ -53,6 +60,8 @@ func Preview(c *gin.Context) {
 
 // Thumb 缩略图：优先走 ThumbHandler（OSS/COS 图片处理或本地缓存），否则返回原图
 func Thumb(c *gin.Context) {
+	// [plugin-hook] HookFileThumb
+	hooks.Emit(plugin.HookFileThumb, hooks.ReqCtx(c, nil))
 	id, _ := strconv.Atoi(c.Param("id"))
 	var f models.File
 	if err := db.Get().First(&f, id).Error; err != nil {

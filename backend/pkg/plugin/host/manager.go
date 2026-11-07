@@ -34,13 +34,13 @@ import (
 
 // 进程状态。
 const (
-	StatusStopped   = "stopped"   // 未运行（已禁用或未安装）
-	StatusStarting  = "starting"  // 正在拉起
-	StatusRunning   = "running"   // 正常运行
-	StatusCrashed   = "crashed"   // 异常退出
-	StatusFailed    = "failed"    // 启动失败（manifest 错误、init 失败等）
-	StatusStopping  = "stopping"  // 正在停止
-	StatusDisabled  = "disabled"  // 管理员禁用
+	StatusStopped  = "stopped"  // 未运行（已禁用或未安装）
+	StatusStarting = "starting" // 正在拉起
+	StatusRunning  = "running"  // 正常运行
+	StatusCrashed  = "crashed"  // 异常退出
+	StatusFailed   = "failed"   // 启动失败（manifest 错误、init 失败等）
+	StatusStopping = "stopping" // 正在停止
+	StatusDisabled = "disabled" // 管理员禁用
 )
 
 // 自动重启的退避参数。
@@ -224,6 +224,20 @@ type LoadSpec struct {
 //
 // 若同名插件已在运行，会先停止旧的再拉新的 —— 这是"重载"的语义。
 // 任一步失败都不会污染 registry：失败时实例被移除并返回 error。
+// handshakeProtocol 决定 init 握手时下发给插件的协议号。
+//
+// v2 宿主自动兼容 v1：老插件（典型是仓库自带的 examples/plugins/referer-guard）
+// 在 init 里硬校验 HostProtocol == 1，宿主若直接下发 2，插件会明确拒绝启动。
+// v1 的钩子名与派发语义本来就冻结了，所以对声明 v1 的插件，宿主在握手时
+// 「表现为 v1」即可 —— 老插件不需要改一行代码，也不用重新编译。
+// v2 插件仍然收到 2，能用上注册型能力与三文件契约。
+func handshakeProtocol(declared int) int {
+	if declared >= plugin.MinSupportedProtocolVersion && declared < plugin.ProtocolVersion {
+		return declared
+	}
+	return plugin.ProtocolVersion
+}
+
 func (m *Manager) Load(spec LoadSpec) error {
 	if spec.Manifest == nil {
 		return errors.New("manifest 为空")
@@ -330,7 +344,7 @@ func (m *Manager) start(in *Instance) error {
 	// init 握手
 	initParams := plugin.InitParams{
 		HostVersion:        m.cfg.HostVersion,
-		HostProtocol:       plugin.ProtocolVersion,
+		HostProtocol:       handshakeProtocol(in.Manifest.ProtocolVersion),
 		PluginName:         in.Name,
 		DataDir:            in.DataDir,
 		StartTimeoutMillis: int(m.cfg.StartTimeout / time.Millisecond),
@@ -362,11 +376,25 @@ func (m *Manager) start(in *Instance) error {
 		return errors.New(msg)
 	}
 
+	// v2：插件在 init 握手时动态上报的注册型能力 / 页面写入全局表。
+	// 用 Add（追加）而不是覆盖，因为 co.BEGG 里的静态声明已由 pluginset 登记过。
+	if len(ir.Providers) > 0 || len(ir.Pages) > 0 {
+		regs := make([]plugin.Registration, 0, len(ir.Providers))
+		for _, r := range ir.Providers {
+			if err := r.Validate(); err != nil {
+				m.appendLog(in.Name, "warn", "忽略非法注册项: "+err.Error())
+				continue
+			}
+			regs = append(regs, r)
+		}
+		plugin.GlobalRegistry().Add(in.Name, regs, ir.Pages, nil, "")
+	}
+
 	// 监视进程退出
 	go m.waitProc(in)
 
-	m.appendLog(in.Name, "info", fmt.Sprintf("已启动 pid=%d 声明钩子=%v",
-		in.pid, ir.Hooks))
+	m.appendLog(in.Name, "info", fmt.Sprintf("已启动 pid=%d 协议=v%d 声明钩子=%v",
+		in.pid, in.Manifest.ProtocolVersion, ir.Hooks))
 	return nil
 }
 
@@ -640,7 +668,15 @@ func (m *Manager) dispatchSync(h plugin.HookName, ctx map[string]any) []error {
 			m.appendLog(in.Name, level, l.Message)
 		}
 		mergeCtx(work, fr.CtxPatch)
-		if fr.Error != "" {
+		// v2 结构化决策归一：decision=deny 转成含 "blocked" 的 error，
+		// 让 IsBlockedError / DecisionOf 对 v1 与 v2 插件行为完全一致。
+		if fr.Decision == "deny" {
+			reason := fr.Reason
+			if reason == "" {
+				reason = "denied by plugin"
+			}
+			errs = append(errs, fmt.Errorf("plugin %s: blocked: %s", in.Name, reason))
+		} else if fr.Error != "" {
 			errs = append(errs, fmt.Errorf("plugin %s: %s", in.Name, fr.Error))
 		}
 	}

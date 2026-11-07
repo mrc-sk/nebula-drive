@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -24,13 +24,35 @@ import {
   ListTodo,
   Puzzle,
   Info,
+  Box,
+  Globe,
+  Star,
+  Zap,
+  FileText,
+  Palette,
+  Terminal,
+  Code2,
+  Bell,
+  Link2,
+  Sparkles,
+  SlidersHorizontal,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { LANGUAGES } from '../i18n'
 import { useThemeStore } from '../store/theme'
 import ThemeToggle from '../components/ThemeToggle'
 import LangSwitcher from '../components/LangSwitcher'
 import NotificationBell from '../components/NotificationBell'
 import ProfileSettings from '../components/ProfileSettings'
+import PluginThemePicker from '../components/PluginThemePicker'
+import PluginSettingsPanel from '../components/PluginSettingsPanel'
+import {
+  normalizePageURL,
+  pluginPagePath,
+  shouldOpenNewTab,
+  usePluginUIStore,
+} from '../store/pluginUI'
+import type { PluginSidebarItem } from '../api/client'
 import { useAuthStore } from '../store/auth'
 import { useUserPrefsStore } from '../store/user'
 import { api } from '../api/client'
@@ -63,6 +85,90 @@ const ADMIN_SUB = [
   { to: '/admin/about', key: 'about', Icon: Info, labelKey: 'about' },
 ] as const
 
+const byOrder = (a: PluginSidebarItem, b: PluginSidebarItem) =>
+  (a.order || 0) - (b.order || 0) || a.title.localeCompare(b.title)
+
+// 插件只能声明 lucide 图标名（字符串），宿主用白名单映射成组件。
+// 白名单而非 `import * as Icons`：后者会把整个图标库打进主 chunk。
+// 未知名字一律回退到 Puzzle，不会因为拼错图标名就渲染崩。
+const PLUGIN_ICON_MAP: Record<string, LucideIcon> = {
+  puzzle: Puzzle, box: Box, package: Box, globe: Globe, link: Link2,
+  star: Star, zap: Zap, file: FileText, filetext: FileText,
+  palette: Palette, terminal: Terminal, code: Code2, bell: Bell,
+  sparkles: Sparkles, home: Home, folder: FolderOpen, share: Share2,
+  download: Download, trash: Trash2, shield: ShieldCheck, user: User,
+  users: Users, database: Database, settings: Settings,
+  dashboard: LayoutDashboard, list: ListTodo, info: Info,
+}
+
+/** 插件注册的侧边栏项：桌面侧栏与移动抽屉共用一套渲染。 */
+function PluginNavItems({
+  items, collapsed = false, onNavigate,
+}: {
+  items: PluginSidebarItem[]
+  collapsed?: boolean
+  onNavigate?: () => void
+}) {
+  const { t } = useTranslation()
+  if (!items.length) return null
+  return (
+    <>
+      {!collapsed && (
+        <div className="mt-4 mb-1 px-3 text-[10px] uppercase tracking-wider text-slate-400">
+          {t('pluginUI.extensions')}
+        </div>
+      )}
+      {items.map((it) => {
+        const Icon = PLUGIN_ICON_MAP[(it.icon || '').toLowerCase()] || Puzzle
+        const base = `group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
+          collapsed ? 'justify-center px-2' : ''
+        }`
+        const inner = (
+          <>
+            <Icon className="h-5 w-5 shrink-0" />
+            {!collapsed && <span className="truncate">{it.title}</span>}
+          </>
+        )
+        const key = `${it.plugin}-${it.name}`
+        // 外部 https 页面或插件显式声明 newtab → 直接开新标签，
+        // 不塞进站内 iframe（外部站点常有 X-Frame-Options）。
+        if (shouldOpenNewTab(it)) {
+          return (
+            <a
+              key={key}
+              href={normalizePageURL(it.url || '')}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={onNavigate}
+              title={collapsed ? it.title : undefined}
+              className={`${base} text-slate-200 hover:bg-white/10 hover:text-white`}
+            >
+              {inner}
+            </a>
+          )
+        }
+        return (
+          <NavLink
+            key={key}
+            to={pluginPagePath(it.plugin, it.name)}
+            onClick={onNavigate}
+            title={collapsed ? it.title : undefined}
+            className={({ isActive }) =>
+              `${base} ${
+                isActive
+                  ? 'bg-gradient-to-r from-nebula-500/30 to-cyan-glow/15 text-white shadow-inner-glow'
+                  : 'text-slate-200 hover:bg-white/10 hover:text-white'
+              }`
+            }
+          >
+            {inner}
+          </NavLink>
+        )
+      })}
+    </>
+  )
+}
+
 export default function MainLayout(props: MainLayoutProps) {
   const { mode = 'app', toolbar, breadcrumb, allExpanded, onToggleAllExpand, children } = props
   const { t } = useTranslation()
@@ -76,6 +182,21 @@ export default function MainLayout(props: MainLayoutProps) {
   const [isMobile, setIsMobile] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [prefsOpen, setPrefsOpen] = useState(false)
+  const [pluginSettingsOpen, setPluginSettingsOpen] = useState(false)
+  const pluginData = usePluginUIStore((s) => s.data)
+  const pluginSettingsCount = usePluginUIStore((s) =>
+    Object.values(s.data?.settings || {}).filter((f) => (f || []).length > 0).length,
+  )
+  // public 页面也放在主侧栏；后端已按 role 过滤过，这里只做排序。
+  const mainPluginItems = useMemo(
+    () => [...(pluginData?.sidebar.main || []), ...(pluginData?.public || [])]
+      .slice().sort(byOrder),
+    [pluginData],
+  )
+  const adminPluginItems = useMemo(
+    () => (pluginData?.sidebar.admin || []).slice().sort(byOrder),
+    [pluginData],
+  )
   const [brand, setBrand] = useState({ name: 'NebulaDrive', author: 'NebulaDrive Team', version: '1.0.0' })
   const userRef = useRef<HTMLDivElement>(null)
   const avatarClickTimes = useRef<number[]>([])
@@ -158,6 +279,8 @@ export default function MainLayout(props: MainLayoutProps) {
             {!collapsed && <span className="truncate">{t(labelKey)}</span>}
           </NavLink>
         ))}
+        {/* 主界面侧边栏扩展点：插件在 co.BEGG 里声明 area=main / public */}
+        <PluginNavItems items={mainPluginItems} collapsed={collapsed} />
         {isAdmin && (
           <>
             {!collapsed && (
@@ -182,6 +305,8 @@ export default function MainLayout(props: MainLayoutProps) {
                 {!collapsed && <span className="truncate">{t(`ns_admin.${labelKey}`)}</span>}
               </NavLink>
             ))}
+            {/* 后台侧边栏扩展点：area=admin */}
+            <PluginNavItems items={adminPluginItems} collapsed={collapsed} />
           </>
         )}
       </nav>
@@ -231,6 +356,10 @@ export default function MainLayout(props: MainLayoutProps) {
               <span>{t(labelKey)}</span>
             </NavLink>
           ))}
+          <PluginNavItems
+            items={mainPluginItems}
+            onNavigate={() => setMobileOpen(false)}
+          />
           {isAdmin && (
             <>
               <div className="mt-4 mb-1 px-3 text-[10px] uppercase tracking-wider text-slate-400">
@@ -253,6 +382,10 @@ export default function MainLayout(props: MainLayoutProps) {
                   <span>{t(`ns_admin.${labelKey}`)}</span>
                 </NavLink>
               ))}
+              <PluginNavItems
+                items={adminPluginItems}
+                onNavigate={() => setMobileOpen(false)}
+              />
             </>
           )}
         </nav>
@@ -306,6 +439,7 @@ export default function MainLayout(props: MainLayoutProps) {
       )}
       {toolbar}
       <ThemeToggle />
+      <PluginThemePicker />
       <NotificationBell />
       <LangSwitcher />
       <div className="relative" ref={userRef}>
@@ -353,6 +487,16 @@ export default function MainLayout(props: MainLayoutProps) {
               <SettingsIcon className="h-4 w-4" />
               {t('profile')}
             </button>
+            {pluginSettingsCount > 0 && (
+              <button
+                type="button"
+                onClick={() => { setPluginSettingsOpen(true); setMenuOpen(false) }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 transition hover:bg-white/10"
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                {t('pluginUI.settingsTitle')}
+              </button>
+            )}
             <button
               type="button"
               onClick={handleLogout}
@@ -379,6 +523,10 @@ export default function MainLayout(props: MainLayoutProps) {
         </main>
         {isMobile && <MobileTabBar />}
       </div>
+      <PluginSettingsPanel
+        open={pluginSettingsOpen}
+        onClose={() => setPluginSettingsOpen(false)}
+      />
     </div>
   )
 }

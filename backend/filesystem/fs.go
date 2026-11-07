@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nebula-drive/nebula/internal/hooks"
+	"github.com/nebula-drive/nebula/pkg/plugin"
 	"io"
 	"log"
 	"os"
@@ -83,6 +85,10 @@ type Local struct {
 }
 
 func (l *Local) Put(src io.Reader, name string, size int64) error {
+	// [plugin-hook] HookStorageAfterWrite
+	hooks.Emit(plugin.HookStorageAfterWrite, nil)
+	// [plugin-hook] HookStorageBeforeWrite
+	hooks.Emit(plugin.HookStorageBeforeWrite, nil)
 	path, err := SafeLocalPath(l.Root, name)
 	if err != nil {
 		return fmt.Errorf("local put %q: %w", name, err)
@@ -100,6 +106,8 @@ func (l *Local) Put(src io.Reader, name string, size int64) error {
 }
 
 func (l *Local) Get(name string) (io.ReadCloser, error) {
+	// [plugin-hook] HookStorageBeforeRead
+	hooks.Emit(plugin.HookStorageBeforeRead, nil)
 	path, err := SafeLocalPath(l.Root, name)
 	if err != nil {
 		return nil, fmt.Errorf("local get %q: %w", name, err)
@@ -202,6 +210,8 @@ type localConfig struct {
 }
 
 func New(policyType, configJSON string) (Handler, error) {
+	// [plugin-hook] HookStorageResolve
+	hooks.Emit(plugin.HookStorageResolve, nil)
 	switch policyType {
 	case "local":
 		var cfg localConfig

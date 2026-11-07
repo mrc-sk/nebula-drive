@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"fmt"
+	"github.com/nebula-drive/nebula/internal/hooks"
+	"github.com/nebula-drive/nebula/pkg/plugin"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,7 +17,8 @@ import (
 
 // Search 全局文件搜索（10 维度）
 // GET /api/files/search?keyword=xxx&type=doc&ext=pdf&owner=me&minSize=1024&maxSize=1048576
-//   &after=2026-01-01&before=2026-12-31&tag=重要&trash=1&share=1&sort=size&order=desc&page=1&size=20
+//
+//	&after=2026-01-01&before=2026-12-31&tag=重要&trash=1&share=1&sort=size&order=desc&page=1&size=20
 func Search(c *gin.Context) {
 	u := middleware.CurrentUser(c)
 
@@ -230,10 +233,12 @@ func ClearSearchHistory(c *gin.Context) {
 
 // UpdateTag 更新标签（改名/改色）
 func UpdateTag(c *gin.Context) {
+	// [plugin-hook] HookFileTagChange（完成后）
+	defer hooks.Emit(plugin.HookFileTagChange, hooks.ReqCtx(c, nil))
 	u := middleware.CurrentUser(c)
 	var req struct {
-		OldTag  string `json:"oldTag" binding:"required"`
-		NewTag  string `json:"newTag"`
+		OldTag   string `json:"oldTag" binding:"required"`
+		NewTag   string `json:"newTag"`
 		NewColor string `json:"newColor"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {

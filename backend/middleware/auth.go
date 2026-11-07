@@ -6,9 +6,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nebula-drive/nebula/internal/hooks"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
 	"github.com/nebula-drive/nebula/pkg/jwt"
+	"github.com/nebula-drive/nebula/pkg/plugin"
 )
 
 // CtxUserKey 当前用户在 context 中的键
@@ -55,6 +57,18 @@ func Auth(required bool) gin.HandlerFunc {
 			return
 		}
 		c.Set(CtxUserKey, &u)
+
+		// v2 细粒度权限：身份校验通过之后再问插件一次（ABAC / 部门策略）。
+		// 走 Decide 轻量门，无插件订阅时零开销。
+		if allowed, reason := hooks.Decide(plugin.HookPermissionCheck, map[string]any{
+			"userId": u.ID, "userName": u.UserName,
+			"path": c.FullPath(), "action": c.Request.Method, "ip": c.ClientIP(),
+		}); !allowed {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"code": 403, "message": defaultMsg(reason, "权限被插件拒绝"),
+			})
+			return
+		}
 		c.Next()
 	}
 }

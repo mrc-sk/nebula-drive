@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"encoding/json"
+	"github.com/nebula-drive/nebula/internal/hooks"
+	"github.com/nebula-drive/nebula/pkg/plugin"
 	"net/http"
 	"strconv"
 
@@ -42,6 +44,8 @@ type createUserReq struct {
 
 // CreateUser 管理员创建账号（关闭公开注册，账号归管理员管理）
 func CreateUser(c *gin.Context) {
+	// [plugin-hook] HookUserCreate（完成后）
+	defer hooks.Emit(plugin.HookUserCreate, hooks.ReqCtx(c, nil))
 	var req createUserReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
@@ -81,6 +85,8 @@ type updateUserReq struct {
 
 // UpdateUser 更新用户
 func UpdateUser(c *gin.Context) {
+	// [plugin-hook] HookUserUpdate（完成后）
+	defer hooks.Emit(plugin.HookUserUpdate, hooks.ReqCtx(c, nil))
 	id, _ := strconv.Atoi(c.Param("id"))
 	var req updateUserReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -146,6 +152,8 @@ func UpdateUser(c *gin.Context) {
 
 // DeleteUser 删除用户
 func DeleteUser(c *gin.Context) {
+	// [plugin-hook] HookUserDelete（完成后）
+	defer hooks.Emit(plugin.HookUserDelete, hooks.ReqCtx(c, nil))
 	id, _ := strconv.Atoi(c.Param("id"))
 	cur := middleware.CurrentUser(c)
 	if cur != nil && uint(id) == cur.ID {
@@ -175,6 +183,8 @@ type groupReq struct {
 
 // CreateGroup 创建用户组
 func CreateGroup(c *gin.Context) {
+	// [plugin-hook] HookGroupChange（完成后）
+	defer hooks.Emit(plugin.HookGroupChange, hooks.ReqCtx(c, nil))
 	var req groupReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})

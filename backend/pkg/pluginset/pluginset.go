@@ -7,33 +7,69 @@ package pluginset
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/nebula-drive/nebula/conf"
+	"github.com/nebula-drive/nebula/internal/pluginhttp"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
 	"github.com/nebula-drive/nebula/pkg/plugin"
 	"github.com/nebula-drive/nebula/pkg/plugin/host"
-	"github.com/nebula-drive/nebula/pkg/plugin/install"
 )
 
 // InitPlugins 初始化插件宿主，并拉起已启用的插件。
 //
 // 必须在 db.Init 成功之后调用（要读 plugins 表），且应在
-// migrations.Run 之前 —— 因为 onDBMigrate 钩子在迁移内部触发，
-// 晚于迁移初始化就会错过本次启动的唯一一次触发机会。
-// （该钩子每次启动都触发，漏掉本次下轮启动也能补上，不算致命。）
+// migrations.Run 之前 —— 因为 onDBMigrate 钩子在迁移内部触发。
 //
-// 单个插件启动失败只记日志不中断：插件是可选增强，
-// 不该因为第三方插件坏了就让整个网盘起不来。
+// **双层默认关闭**（按站长的选择）：
+//  1. 全局插件总开关默认 false，站长需在后台显式开启并确认免责；
+//  2. 单个插件安装后默认 disabled，需手动启用（启用时再弹一次风险提示）。
+//
+// 关闭时宿主完全不拉起任何插件子进程，也不注册可访问的插件页面。
+var currentHostVersion string
+
 func InitPlugins(hostVersion string) {
+	currentHostVersion = hostVersion
 	dataDir := conf.DataDir()
 	pluginsDir := filepath.Join(dataDir, "plugins")
 	if err := os.MkdirAll(pluginsDir, 0o750); err != nil {
 		log.Printf("[WARN] 创建插件目录失败: %v", err)
 	}
 
+	enabled := readGlobalEnabled()
+	pluginhttp.Global().SetGlobalEnabled(enabled)
+	if !enabled {
+		log.Printf("[plugin] 插件系统默认关闭：后台「插件总开关」开启后才会拉起插件。" +
+			"开启即表示站长已知悉风险（插件可注册 HTTP 页面、宿主透传鉴权）")
+		return
+	}
+	startHost(hostVersion)
+}
+
+// EnableGlobal 站长在后台开启总开关后补初始化宿主。
+// InitPlugins 在开关关闭时会提前 return，此时进程仍在运行，需要这个入口。
+func EnableGlobal() {
+	if !readGlobalEnabled() {
+		return
+	}
+	pluginhttp.Global().SetGlobalEnabled(true)
+	if host.Global() == nil {
+		startHost(currentHostVersion)
+		return
+	}
+	LoadEnabledPlugins()
+}
+
+func startHost(hostVersion string) {
+	dataDir := conf.DataDir()
+	pluginsDir := filepath.Join(dataDir, "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o750); err != nil {
+		log.Printf("[WARN] 创建插件目录失败: %v", err)
+	}
 	m := host.InitGlobal(host.Config{
 		PluginsDir:  pluginsDir,
 		DataDir:     dataDir,
@@ -47,14 +83,25 @@ func InitPlugins(hostVersion string) {
 		log.Printf("[WARN] 插件宿主初始化失败，插件功能不可用")
 		return
 	}
-	log.Printf("[INFO] 插件宿主就绪，目录: %s（协议版本 v%d）", pluginsDir, plugin.ProtocolVersion)
+	log.Printf("[INFO] 插件宿主就绪，目录: %s（协议版本 v%d，兼容 v%d）",
+		pluginsDir, plugin.ProtocolVersion, plugin.MinSupportedProtocolVersion)
 
 	LoadEnabledPlugins()
 }
 
+// readGlobalEnabled 读取全局开关，缺省 false（默认关闭）。
+func readGlobalEnabled() bool {
+	if db.Get() == nil {
+		return false
+	}
+	var s models.Setting
+	if err := db.Get().Where("`key` = ?", "plugin.global_enabled").First(&s).Error; err != nil {
+		return false
+	}
+	return s.Value == "1" || strings.EqualFold(s.Value, "true")
+}
+
 // LoadEnabledPlugins 拉起数据库中标记为启用的插件。
-//
-// 逐个独立处理：一个插件的清单损坏/二进制丢失，不该拖垮其他插件。
 func LoadEnabledPlugins() {
 	m := host.Global()
 	if m == nil || db.Get() == nil {
@@ -81,29 +128,43 @@ func LoadEnabledPlugins() {
 	log.Printf("[INFO] 已启用插件 %d/%d 载入成功", okCount, len(list))
 }
 
+// loadOne 加载单个插件：先校验三文件契约（含解释器探测），
+// 再启动 HTTP 页面服务，最后拉起 JSON-RPC 子进程。
+//
+// v1 插件自动走老路径（不要求 register.go / co.BEGG）。
+// 纯页面插件（hooks 为空、pages 非空）不拉起 JSON-RPC 子进程。
 func loadOne(p models.Plugin) error {
-	m := host.Global()
 	dir := filepath.Join(dirOf(), p.Name)
-	// 以磁盘上的清单为准：数据库里的冗余字段可能过期
-	// （插件被手工删了、换了版本、或只改了库没改文件）。
-	man, err := install.ReadManifest(dir)
+	contract, err := plugin.LoadContract(dir, true)
 	if err != nil {
 		return err
 	}
-	return m.Load(host.LoadSpec{Name: p.Name, Dir: dir, Manifest: man})
+
+	// 登记 UI 扩展点并拉起插件自己的 HTTP 页面服务（PHP/Python/Node 均适用）
+	if !contract.V1 && contract.Begg != nil {
+		if err := pluginhttp.Global().Start(contract,
+			siteURL(), domainOf(), boundIPOf(), listenAddrOf()); err != nil {
+			return err
+		}
+	}
+
+	// 纯页面插件没有 JSON-RPC 子进程
+	if len(contract.Manifest.Hooks) == 0 {
+		return nil
+	}
+	m := host.Global()
+	return m.Load(host.LoadSpec{Name: p.Name, Dir: dir, Manifest: contract.Manifest})
 }
 
-// StopPlugins 停止全部插件进程。宿主退出前调用，避免留下孤儿进程。
+// StopPlugins 停止全部插件进程（含页面服务）。
 func StopPlugins() {
+	pluginhttp.Global().StopAll()
 	if m := host.Global(); m != nil {
 		m.StopAll()
 	}
 }
 
 // pluginConfig 提供某插件的配置（init 握手下发给插件）。
-//
-// 读失败返回 nil 而不是空 JSON：插件能据此判断"管理员没配过"，
-// 便于它决定用默认值还是报错退出。
 func pluginConfig(name string) json.RawMessage {
 	if db.Get() == nil {
 		return nil
@@ -123,7 +184,6 @@ func pluginConfig(name string) json.RawMessage {
 	return json.RawMessage(cfg)
 }
 
-// dirOf 插件安装根目录。
 func dirOf() string { return filepath.Join(conf.DataDir(), "plugins") }
 
 func recordError(name, msg string) {
@@ -138,9 +198,7 @@ func recordError(name, msg string) {
 		Update("last_error", msg)
 }
 
-// siteURL 推导站点根 URL，供需要回调宿主的插件使用。
-//
-// 优先用配置里的域名（对外可达），退回监听地址（本机调试）。
+// siteURL 推导站点根 URL。
 func siteURL() string {
 	c := conf.Current()
 	if c == nil {
@@ -159,8 +217,38 @@ func siteURL() string {
 	return ""
 }
 
-// normalizePort 从监听地址里取出端口部分。
-// ":8080" → ":8080"；"0.0.0.0:8080" → ":8080"；无冒号则原样返回。
+func domainOf() string {
+	c := conf.Current()
+	if c == nil {
+		return ""
+	}
+	return c.System.Domain
+}
+
+// boundIPOf 从监听地址取绑定的 IP（0.0.0.0 / :: 视为未绑定具体 IP）。
+func boundIPOf() string {
+	c := conf.Current()
+	if c == nil || c.System.Listen == "" {
+		return ""
+	}
+	hostPart, _, err := net.SplitHostPort(c.System.Listen)
+	if err != nil {
+		return ""
+	}
+	if hostPart == "" || hostPart == "0.0.0.0" || hostPart == "::" {
+		return ""
+	}
+	return hostPart
+}
+
+func listenAddrOf() string {
+	c := conf.Current()
+	if c == nil {
+		return ""
+	}
+	return c.System.Listen
+}
+
 func normalizePort(listen string) string {
 	for i := len(listen) - 1; i >= 0; i-- {
 		if listen[i] == ':' {

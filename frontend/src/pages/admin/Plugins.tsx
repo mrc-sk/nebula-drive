@@ -1,17 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  AlertTriangle, CheckCircle2, Download, ExternalLink, Loader2, Package, Plug, Power,
-  Puzzle, RefreshCw, ScrollText, Square, Store, Trash2, XCircle,
+  AlertTriangle, CheckCircle2, Download, ExternalLink, FileCode2, LayoutGrid,
+  Loader2, Package, Plug, Power, Puzzle, RefreshCw, ScrollText, Square, Store,
+  Trash2, XCircle,
 } from 'lucide-react'
 import {
   api,
-  type AgreementRecord, type HookInfo, type PluginLogEntry, type PluginView,
+  type AgreementRecord, type HookInfo, type PluginContractDiag,
+  type PluginGlobalState, type PluginLogEntry, type PluginUIData, type PluginView,
   type StorePlugin,
 } from '../../api/client'
+import { notifyPluginUIChanged } from '../../store/pluginUI'
 import PluginAgreementModal from './PluginAgreementModal'
+import {
+  ContractModal, GlobalSwitchCard, PluginRiskModal, UIExtensionsPanel,
+} from './PluginV2Panels'
 
-type Tab = 'installed' | 'store' | 'hooks'
+type Tab = 'installed' | 'store' | 'hooks' | 'ui'
 
 const STATUS_STYLE: Record<string, { cls: string; icon: any }> = {
   running: { cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/25', icon: CheckCircle2 },
@@ -45,13 +51,24 @@ export default function Plugins() {
   const [confirmPwd, setConfirmPwd] = useState('')
   const [confirmErr, setConfirmErr] = useState('')
 
+  // v2 插件平台：全局总开关、风险确认、三文件契约诊断、UI 扩展点
+  const [global, setGlobal] = useState<PluginGlobalState | null>(null)
+  const [globalBusy, setGlobalBusy] = useState(false)
+  const [riskOpen, setRiskOpen] = useState(false)
+  const [diagFor, setDiagFor] = useState('')
+  const [diag, setDiag] = useState<PluginContractDiag | null>(null)
+  const [diagBusy, setDiagBusy] = useState('')
+  const [uiData, setUiData] = useState<PluginUIData | null>(null)
+
   const load = useCallback(async () => {
     try {
-      const [p, h, s, ag] = await Promise.allSettled([
+      const [p, h, s, ag, g, ui] = await Promise.allSettled([
         api.admin.plugins(),
         api.admin.pluginsHooks(),
         api.admin.pluginsStore(),
         api.admin.pluginAgreement(),
+        api.admin.pluginsGlobal(),
+        api.pluginsUI(),
       ])
 
       if (p.status === 'fulfilled' && p.value?.code === 0) {
@@ -60,6 +77,8 @@ export default function Plugins() {
       }
       if (h.status === 'fulfilled' && h.value?.code === 0) setHooks(h.value.data || [])
       if (s.status === 'fulfilled' && s.value?.code === 0) setStore(s.value.data || [])
+      if (g.status === 'fulfilled' && g.value?.code === 0) setGlobal(g.value.data || null)
+      if (ui.status === 'fulfilled' && ui.value?.code === 0) setUiData(ui.value.data || null)
 
       // 首次进入或协议升级 → 弹协议
       if (ag.status === 'fulfilled' && ag.value?.code === 0) {
@@ -71,6 +90,8 @@ export default function Plugins() {
       setMsg({ type: 'err', text: e?.message || t('plugin.loadFailed') })
     } finally {
       setLoading(false)
+      // 启停插件 / 切换总开关后，让主布局的侧边栏与主题立即同步
+      notifyPluginUIChanged()
     }
   }, [t])
 
@@ -90,6 +111,49 @@ export default function Plugins() {
   }
 
   const errMsg = (e: any, fallback: string) => e?.message || fallback
+
+  // 开启必须先过风险确认弹窗；关闭不需要二次确认（降风险方向）。
+  const turnGlobal = (enabled: boolean) => {
+    if (enabled) {
+      setRiskOpen(true)
+      return
+    }
+    void setGlobalEnabled(false, false)
+  }
+
+  const setGlobalEnabled = async (enabled: boolean, acknowledge: boolean) => {
+    setGlobalBusy(true)
+    try {
+      const r = await api.admin.setPluginsGlobal(enabled, acknowledge)
+      if (r?.code === 0) {
+        flash('ok', enabled ? t('pluginV2.turnedOn') : t('pluginV2.turnedOff'))
+        setRiskOpen(false)
+        load()
+      } else {
+        flash('err', r?.message || t('pluginV2.globalFailed'))
+      }
+    } catch (e: any) {
+      flash('err', errMsg(e, t('pluginV2.globalFailed')))
+    } finally {
+      setGlobalBusy(false)
+    }
+  }
+
+  const openDiag = async (name: string) => {
+    setDiagFor(name)
+    setDiag(null)
+    setDiagBusy(name)
+    try {
+      const r = await api.admin.pluginContract(name)
+      if (r?.code === 0) setDiag(r.data || null)
+      else flash('err', r?.message || t('pluginV2.diagFailed'))
+    } catch (e: any) {
+      flash('err', errMsg(e, t('pluginV2.diagFailed')))
+      setDiagFor('')
+    } finally {
+      setDiagBusy('')
+    }
+  }
 
   const doEnable = async (p: PluginView) => {
     setBusy(p.name)
@@ -229,11 +293,19 @@ export default function Plugins() {
         </div>
       )}
 
+      <GlobalSwitchCard
+        state={global}
+        busy={globalBusy}
+        onTurnOn={() => turnGlobal(true)}
+        onTurnOff={() => turnGlobal(false)}
+      />
+
       <div className="glass inline-flex w-fit gap-1.5 rounded-2xl p-1.5">
         {([
           ['installed', Package, t('plugin.tabInstalled')],
           ['store', Store, t('plugin.tabStore')],
           ['hooks', Plug, t('plugin.tabHooks')],
+          ['ui', LayoutGrid, t('pluginV2.uiTitle')],
         ] as const).map(([k, Icon, label]) => (
           <button
             key={k}
@@ -261,16 +333,20 @@ export default function Plugins() {
           busy={busy}
           logFor={logFor}
           logs={logs}
+          diagBusy={diagBusy}
           onEnable={doEnable}
           onDisable={doDisable}
           onRestart={doRestart}
           onUninstall={(p) => { setUninstalling(p); setConfirmPwd(''); setConfirmErr('') }}
           onOpenLogs={openLogs}
+          onDiagnose={openDiag}
         />
       ) : tab === 'store' ? (
         <StoreList store={store} busy={busy} onInstall={doInstall} />
-      ) : (
+      ) : tab === 'hooks' ? (
         <HooksList hooks={hooks} wiredCount={wiredCount} handlerCount={handlerCount} />
+      ) : (
+        <UIExtensionsPanel data={uiData} />
       )}
 
       {uninstalling && (
@@ -340,6 +416,21 @@ export default function Plugins() {
           // 用户必须滚动读完并勾选才能继续。
         }}
       />
+
+      {/* v2：开启插件总开关前的强制风险确认（后端也会校验 acknowledge=true） */}
+      <PluginRiskModal
+        open={riskOpen}
+        busy={globalBusy}
+        onConfirm={() => void setGlobalEnabled(true, true)}
+        onClose={() => setRiskOpen(false)}
+      />
+      {diagFor && (
+        <ContractModal
+          name={diagFor}
+          data={diag}
+          onClose={() => { setDiagFor(''); setDiag(null) }}
+        />
+      )}
     </div>
   )
 }
@@ -347,17 +438,20 @@ export default function Plugins() {
 // ---- 已安装 ----
 
 function InstalledList({
-  rows, busy, logs, logFor, onEnable, onDisable, onRestart, onUninstall, onOpenLogs,
+  rows, busy, logs, logFor, diagBusy,
+  onEnable, onDisable, onRestart, onUninstall, onOpenLogs, onDiagnose,
 }: {
   rows: PluginView[]
   busy: string
   logs: PluginLogEntry[]
   logFor: string
+  diagBusy: string
   onEnable: (p: PluginView) => void
   onDisable: (p: PluginView) => void
   onRestart: (p: PluginView) => void
   onUninstall: (p: PluginView) => void
   onOpenLogs: (name: string) => void
+  onDiagnose: (name: string) => void
 }) {
   const { t } = useTranslation()
 
@@ -463,6 +557,16 @@ function InstalledList({
                   title={t('plugin.restart')}
                 >
                   <RefreshCw className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDiagnose(p.name)}
+                  className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/10"
+                  title={t('pluginV2.diag')}
+                >
+                  {diagBusy === p.name
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <FileCode2 className="h-4 w-4" />}
                 </button>
                 <button
                   type="button"

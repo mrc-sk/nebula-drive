@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -46,12 +47,12 @@ const (
 
 // Result 安装结果。
 type Result struct {
-	Name     string             `json:"name"`
-	Dir      string             `json:"dir"`
-	Manifest *plugin.Manifest   `json:"manifest"`
-	Files    int                `json:"files"`
-	Bytes    int64              `json:"bytes"`
-	Source   string             `json:"source"`
+	Name     string           `json:"name"`
+	Dir      string           `json:"dir"`
+	Manifest *plugin.Manifest `json:"manifest"`
+	Files    int              `json:"files"`
+	Bytes    int64            `json:"bytes"`
+	Source   string           `json:"source"`
 	// Replaced 覆盖了同名旧插件时为 true。
 	Replaced bool `json:"replaced"`
 }
@@ -85,12 +86,18 @@ func New(pluginsDir string) *Installer {
 
 // InstallFromDir 从一个已存在的目录安装插件（复制到 PluginsDir）。
 //
-// src 会被递归复制。src 内的 plugin.json 是必需的。
+// 目录形式不限定：plugin.json / register.go / co.BEGG 可以分散在任意子目录，
+// 由 plugin.LoadContract 递归定位（深度 <= MaxContractDepth）。
+// 因此这里复制**整个 src**，绝不裁到「含 plugin.json 的那一层」——
+// 裁层会把散落在兄弟目录里的 co.BEGG / .php 文件丢掉。
 func (i *Installer) InstallFromDir(src, sourceRef string) (*Result, error) {
-	man, err := readManifestFile(filepath.Join(src, plugin.ManifestFileName))
+	contract, err := plugin.LoadContract(src, false)
 	if err != nil {
 		return nil, err
 	}
+	man := contract.Manifest
+	hasPages := len(man.Pages) > 0 ||
+		(contract.Begg != nil && len(contract.Begg.Pages) > 0)
 	dst := filepath.Join(i.PluginsDir, man.Name)
 	if err := checkNameForFS(man.Name); err != nil {
 		return nil, err
@@ -111,9 +118,18 @@ func (i *Installer) InstallFromDir(src, sourceRef string) (*Result, error) {
 		return nil, err
 	}
 	// 复制后再校验一次 entry 真实存在 —— 复制可能漏文件
-	if err := verifyEntry(dst, man); err != nil {
+	if err := verifyEntry(dst, man, hasPages); err != nil {
 		os.RemoveAll(dst)
 		return nil, err
+	}
+	// v2 三文件契约：安装阶段就检查 register.go / co.BEGG 是否齐全且声明一致。
+	// 解释器探测放到启用时做（loadOne），这里 probe=false 避免装了插件但
+	// 服务器还没装解释器时连安装都做不了。
+	if man.ProtocolVersion >= 2 {
+		if _, err := plugin.LoadContract(dst, false); err != nil {
+			os.RemoveAll(dst)
+			return nil, fmt.Errorf("v2 插件契约校验失败: %w", err)
+		}
 	}
 	return &Result{
 		Name: man.Name, Dir: dst, Manifest: man,
@@ -144,6 +160,7 @@ func (i *Installer) InstallFromURL(rawURL, sourceRef string) (*Result, error) {
 // 支持两种 zip 布局：
 //   - 根目录直接是 plugin.json
 //   - 单一顶层目录，plugin.json 在其中（GitHub 源码 zip 的常见形态）
+//
 // 后者会自动剥掉那一层。
 func (i *Installer) InstallFromZip(zipPath, sourceRef string) (*Result, error) {
 	st, err := os.Stat(zipPath)
@@ -173,26 +190,41 @@ func (i *Installer) InstallFromZip(zipPath, sourceRef string) (*Result, error) {
 
 // findPluginRoot 在解压结果中定位含 plugin.json 的目录。
 //
-// 优先根目录；否则找唯一含 plugin.json 的子目录；
-// 有多个候选时报错（不猜）。
+// v2 允许插件把清单放进任意子目录（例如 ASS/ 里一堆 .php + register.go +
+// plugin.json），所以这里必须递归，不能只看一级。
+// 优先根目录；否则找唯一含 plugin.json 的子目录；有多个候选时报错（不猜）。
 func findPluginRoot(base string) (string, error) {
 	if fileExists(filepath.Join(base, plugin.ManifestFileName)) {
 		return base, nil
 	}
-	entries, err := os.ReadDir(base)
-	if err != nil {
-		return "", err
-	}
 	var hits []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	_ = filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		p := filepath.Join(base, e.Name())
-		if fileExists(filepath.Join(p, plugin.ManifestFileName)) {
-			hits = append(hits, p)
+		rel, _ := filepath.Rel(base, p)
+		depth := 0
+		if rel != "." {
+			depth = strings.Count(rel, string(os.PathSeparator)) + 1
 		}
-	}
+		if d.IsDir() {
+			if depth > plugin.MaxContractDepth {
+				return fs.SkipDir
+			}
+			if p != base {
+				n := d.Name()
+				if strings.HasPrefix(n, ".") || n == "node_modules" ||
+					n == "__pycache__" || n == "vendor" {
+					return fs.SkipDir
+				}
+			}
+			return nil
+		}
+		if d.Name() == plugin.ManifestFileName {
+			hits = append(hits, filepath.Dir(p))
+		}
+		return nil
+	})
 	switch len(hits) {
 	case 0:
 		return "", fmt.Errorf("压缩包内未找到 %s", plugin.ManifestFileName)
@@ -201,7 +233,7 @@ func findPluginRoot(base string) (string, error) {
 	default:
 		names := make([]string, len(hits))
 		for i, h := range hits {
-			names[i] = filepath.Base(h)
+			names[i], _ = filepath.Rel(base, h)
 		}
 		return "", fmt.Errorf("压缩包内有多个插件目录，无法确定安装哪个: %s",
 			strings.Join(names, ", "))
@@ -244,23 +276,33 @@ func readManifestFile(path string) (*plugin.Manifest, error) {
 	return plugin.ParseManifest(raw)
 }
 
-// ReadManifest 解析并校验指定目录下的 plugin.json。
+// ReadManifest 解析并校验指定目录下的插件清单。
 //
 // 供重载流程使用：启用/重启插件时不该信任数据库里的冗余字段，
-// 要以磁盘上真实的清单为准。
+// 要以磁盘上真实的清单为准。走 LoadContract 递归定位，兼容三文件散落布局。
 func ReadManifest(dir string) (*plugin.Manifest, error) {
-	m, err := readManifestFile(filepath.Join(dir, plugin.ManifestFileName))
+	c, err := plugin.LoadContract(dir, false)
 	if err != nil {
 		return nil, err
 	}
+	m := c.Manifest
+	hasPages := len(m.Pages) > 0 ||
+		(c.Begg != nil && len(c.Begg.Pages) > 0)
 	// 顺便确认 entry 真的在 —— 数据库说装好了但文件被删的情况很常见
-	if err := verifyEntry(dir, m); err != nil {
+	if err := verifyEntry(dir, m, hasPages); err != nil {
 		return nil, err
 	}
 	return m, nil
 }
 
-func verifyEntry(dir string, man *plugin.Manifest) error {
+func verifyEntry(dir string, man *plugin.Manifest, hasPages bool) error {
+	// v2 纯页面插件（只在 co.BEGG 声明 pages、不订阅 hooks）没有 JSON-RPC
+	// 子进程，因此不需要 entry；页面服务由 co.BEGG.command 拉起。
+	// 之前只认 plugin.json 的 pages，导致「页面只写在 co.BEGG 里」的插件
+	// 被误判为缺少 entry。
+	if man.Entry == "" && man.ProtocolVersion >= 2 && hasPages {
+		return nil
+	}
 	p, err := man.ExecPath(dir)
 	if err != nil {
 		return err

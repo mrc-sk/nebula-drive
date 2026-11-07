@@ -7,8 +7,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nebula-drive/nebula/internal/cryptox"
+	"github.com/nebula-drive/nebula/internal/hooks"
 	"github.com/nebula-drive/nebula/models"
 	"github.com/nebula-drive/nebula/pkg/db"
+	"github.com/nebula-drive/nebula/pkg/plugin"
 )
 
 // findAccessToken 按令牌查找 OAuth2 access token，查不到返回 nil。
@@ -66,6 +68,9 @@ func APIAuth() gin.HandlerFunc {
 			c.Set(CtxUserKey, &u)
 			c.Set("api_scope", at.Scope)
 			c.Set("api_token_type", "oauth")
+			if !apiAuthHook(c, &u, at.Scope, "oauth") {
+				return
+			}
 			c.Next()
 			return
 		}
@@ -85,6 +90,9 @@ func APIAuth() gin.HandlerFunc {
 			c.Set(CtxUserKey, &u)
 			c.Set("api_scope", pat.Scope)
 			c.Set("api_token_type", "pat")
+			if !apiAuthHook(c, &u, pat.Scope, "pat") {
+				return
+			}
 			c.Next()
 			return
 		}
@@ -100,4 +108,23 @@ func extractBearerToken(c *gin.Context) string {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
 	return ""
+}
+
+// apiAuthHook 触发 v2 的 onApiAuth（原 v1 占位钩子，现在真接线）。
+// PAT / OAuth token 校验通过后，插件还能做 scope 之外的细粒度授权。
+func apiAuthHook(c *gin.Context, u *models.User, scope, tokenType string) bool {
+	allowed, reason, ctx := hooks.DecideMutate(plugin.HookApiAuth, map[string]any{
+		"tokenType": tokenType, "userId": u.ID, "userName": u.UserName,
+		"scope": scope, "ip": c.ClientIP(), "claims": map[string]any{},
+	})
+	if !allowed {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"code": 403, "message": defaultMsg(reason, "API 访问被插件拒绝"),
+		})
+		return false
+	}
+	if claims, ok := ctx["claims"].(map[string]any); ok && len(claims) > 0 {
+		c.Set("api_claims", claims)
+	}
+	return true
 }

@@ -9,6 +9,8 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"github.com/nebula-drive/nebula/internal/hooks"
+	"github.com/nebula-drive/nebula/pkg/plugin"
 	"io"
 	"net/http"
 	"net/url"
@@ -47,7 +49,7 @@ func writeDAVQuotaOrServerError(c *gin.Context, err error) {
 // ---- WebDAV XML ----
 
 type multistatus struct {
-	XMLName   xml.Name `xml:"DAV: multistatus"`
+	XMLName   xml.Name   `xml:"DAV: multistatus"`
 	Responses []response `xml:"response"`
 }
 type response struct {
@@ -59,12 +61,12 @@ type propstat struct {
 	Prop   prop   `xml:"prop"`
 }
 type prop struct {
-	DisplayName  string `xml:"displayname,omitempty"`
-	ResourceType *resType `xml:"resourcetype,omitempty"`
-	GetContentLength int64 `xml:"getcontentlength,omitempty"`
-	GetContentType string `xml:"getcontenttype,omitempty"`
-	GetLastModified string `xml:"getlastmodified,omitempty"`
-	GetETag string `xml:"getetag,omitempty"`
+	DisplayName      string   `xml:"displayname,omitempty"`
+	ResourceType     *resType `xml:"resourcetype,omitempty"`
+	GetContentLength int64    `xml:"getcontentlength,omitempty"`
+	GetContentType   string   `xml:"getcontenttype,omitempty"`
+	GetLastModified  string   `xml:"getlastmodified,omitempty"`
+	GetETag          string   `xml:"getetag,omitempty"`
 }
 type resType struct {
 	Collection *struct{} `xml:"collection,omitempty"`
@@ -269,6 +271,11 @@ func Handler() gin.HandlerFunc {
 }
 
 func serveDAV(c *gin.Context, u *models.User, p string) {
+	// [plugin-hook] HookWebDAVRequest（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookWebDAVRequest, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	method := c.Request.Method
 	if !methodAllowed(method) {
 		c.String(405, "Method Not Allowed")
@@ -332,6 +339,11 @@ type davLockXML struct {
 }
 
 func davLock(c *gin.Context, u *models.User, p string) {
+	// [plugin-hook] HookWebDAVLock（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookWebDAVLock, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	timeout := 30 * time.Minute
 	token := "opaquelocktoken:" + uuid.NewString()
 	entry := &davLockEntry{Token: token, Path: p, OwnerID: u.ID, Expires: time.Now().Add(timeout)}
@@ -541,6 +553,11 @@ func xmlEscape(s string) string {
 // ---- 方法实现 ----
 
 func propfind(c *gin.Context, u *models.User, p string) {
+	// [plugin-hook] HookWebDAVPropfind（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookWebDAVPropfind, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	depth := c.GetHeader("Depth")
 	if depth == "" {
 		depth = "0"
@@ -559,8 +576,8 @@ func propfind(c *gin.Context, u *models.User, p string) {
 			Propstat: propstat{
 				Status: "HTTP/1.1 200 OK",
 				Prop: prop{
-					DisplayName:  "",
-					ResourceType: &resType{Collection: &struct{}{}},
+					DisplayName:     "",
+					ResourceType:    &resType{Collection: &struct{}{}},
 					GetLastModified: davTime(time.Now()),
 				},
 			},
@@ -591,7 +608,7 @@ func propfind(c *gin.Context, u *models.User, p string) {
 
 func respFromFile(f models.File) response {
 	r := response{
-		Href: hrefOf(f),
+		Href:     hrefOf(f),
 		Propstat: propstat{Status: "HTTP/1.1 200 OK"},
 	}
 	if f.IsDir {
@@ -704,6 +721,11 @@ func getOrHead(c *gin.Context, u *models.User, p string, head bool) {
 }
 
 func put(c *gin.Context, u *models.User, p string) {
+	// [plugin-hook] HookWebDAVPut（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookWebDAVPut, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	if !davCheckLock(c, u, p) {
 		return
 	}
@@ -873,6 +895,11 @@ func auditDAVWrite(c *gin.Context, u *models.User, action string, f models.File)
 }
 
 func delete_(c *gin.Context, u *models.User, p string) {
+	// [plugin-hook] HookWebDAVDelete（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookWebDAVDelete, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	if !davCheckLock(c, u, p) {
 		return
 	}

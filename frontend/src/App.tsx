@@ -4,6 +4,7 @@ import { X, Info } from 'lucide-react'
 import { api } from './api/client'
 import { useAuthStore } from './store/auth'
 import { useUserPrefsStore } from './store/user'
+import { PLUGIN_UI_CHANGED, usePluginUIStore } from './store/pluginUI'
 
 // 路由级代码分割：把各页面拆成独立 chunk，首屏（登录 / 文件浏览）不必加载
 // 后台管理与 echarts 等重依赖；首屏主 chunk 体积从单包 ~3.15MB 大幅下降。
@@ -26,6 +27,8 @@ const ShareList = lazy(() => import('./pages/ShareList'))
 // 且 i18n key 本来就叫 tasksOffline（离线下载）。
 const TasksOffline = lazy(() => import('./pages/TasksOffline'))
 const Trash = lazy(() => import('./pages/Trash'))
+// 插件页面容器：侧边栏点开插件页面后走这里，iframe 指向 /ext/<plugin>/*
+const PluginPage = lazy(() => import('./pages/PluginPage'))
 
 /**
  * 已安装 + 已登录 才能访问的页面的统一守卫。
@@ -140,6 +143,17 @@ export default function App() {
       fetchMe()
     }
   }, [installed, fetchMe])
+
+  // 插件 UI 扩展点：登录后拉一次声明；后台启停插件 / 切换总开关时重拉。
+  // 接口需要登录态，所以必须等 user 就绪；失败一律静默降级，不影响主界面。
+  const loggedIn = !!user
+  useEffect(() => {
+    if (!installed || !loggedIn) return
+    const reload = () => { void usePluginUIStore.getState().refresh() }
+    reload()
+    window.addEventListener(PLUGIN_UI_CHANGED, reload)
+    return () => window.removeEventListener(PLUGIN_UI_CHANGED, reload)
+  }, [installed, loggedIn])
 
   // 彩蛋全局监听：imfeelinglucky + Konami
   const bindEggListeners = useCallback(() => {
@@ -311,6 +325,9 @@ export default function App() {
         <Route path="/share-list" element={<GuardedPage installed={installed} authBusy={authBusy} user={user}><ShareList /></GuardedPage>} />
         <Route path="/tasks" element={<GuardedPage installed={installed} authBusy={authBusy} user={user}><TasksOffline /></GuardedPage>} />
         <Route path="/trash" element={<GuardedPage installed={installed} authBusy={authBusy} user={user}><Trash /></GuardedPage>} />
+        {/* 插件页面容器：URL 里只放插件名/页面名，真实地址从 /api/plugins/ui 查，
+            避免把可能含 127.0.0.1 的后端地址直接暴露在地址栏。 */}
+        <Route path="/ext-page/:plugin/:page" element={<GuardedPage installed={installed} authBusy={authBusy} user={user}><PluginPage /></GuardedPage>} />
         <Route
           path="/share/:id"
           element={

@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"github.com/nebula-drive/nebula/internal/hooks"
 	"net/http"
 	"sync"
 
@@ -66,6 +67,11 @@ func (h *wsHub) send(userID uint, msg any) {
 
 // WSHandler WebSocket 升级处理（需登录）
 func WSHandler(c *gin.Context) {
+	// [plugin-hook] HookNotificationSend（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookNotificationSend, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	u := middleware.CurrentUser(c)
 	if u == nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "unauthorized"})

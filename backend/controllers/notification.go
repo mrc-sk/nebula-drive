@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"github.com/nebula-drive/nebula/internal/hooks"
+	"github.com/nebula-drive/nebula/pkg/plugin"
 	"net/http"
 	"strconv"
 
@@ -39,6 +41,8 @@ func UnreadCount(c *gin.Context) {
 
 // MarkRead 标记单条已读
 func MarkRead(c *gin.Context) {
+	// [plugin-hook] HookNotificationRead（完成后）
+	defer hooks.Emit(plugin.HookNotificationRead, hooks.ReqCtx(c, nil))
 	u := middleware.CurrentUser(c)
 	id, _ := strconv.Atoi(c.Param("id"))
 	res := db.Get().Model(&models.Notification{}).

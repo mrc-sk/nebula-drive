@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
+	"github.com/nebula-drive/nebula/internal/hooks"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -27,6 +28,8 @@ import (
 //   - 触发 onCollabOpen 钩子，若钩子在 ctx 中写入 url 则 302 跳转（OnlyOffice 等）
 //   - 否则文件为 md/txt 时返回 {mode:"yjs", docId}
 func CollabOpen(c *gin.Context) {
+	// [plugin-hook] HookCollabConnect
+	hooks.Emit(plugin.HookCollabConnect, hooks.ReqCtx(c, nil))
 	u := middleware.CurrentUser(c)
 	id, _ := strconv.Atoi(c.Param("id"))
 	var f models.File
@@ -236,6 +239,8 @@ func (h *collabWSHub) broadcast(docID string, sender *websocket.Conn, msgType in
 // 加严校验：docId 是 fileId（见 collabDocID），当前用户必须是文件 owner / 管理员 / 或该文件存在有效公开分享（不限权限），
 // 否则返回 403，避免任意登录用户遍历文件 ID 窃听/篡改其他用户的私有文档。
 func CollabWS(c *gin.Context) {
+	// [plugin-hook] HookCollabDisconnect（完成后）
+	defer hooks.Emit(plugin.HookCollabDisconnect, hooks.ReqCtx(c, nil))
 	docID := c.Param("docId")
 	if docID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "docId required"})

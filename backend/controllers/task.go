@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nebula-drive/nebula/internal/hooks"
+	"github.com/nebula-drive/nebula/pkg/plugin"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -56,6 +58,13 @@ type createTaskReq struct {
 //
 // 分派细节见 startTask —— 与 RetryTask 共用同一套逻辑。
 func CreateTask(c *gin.Context) {
+	// [plugin-hook] HookTaskCreateAfter（完成后）
+	defer hooks.Emit(plugin.HookTaskCreateAfter, hooks.ReqCtx(c, nil))
+	// [plugin-hook] HookTaskCreateBefore（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookTaskCreateBefore, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	u := middleware.CurrentUser(c)
 	var req createTaskReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -372,6 +381,25 @@ func runHTTPTask(id uint, url string) {
 		dlMutex.Unlock()
 	}()
 
+	// v2 任务结果事件：函数退出时按最终状态派发完成/失败。
+	// 放在 defer 里是为了覆盖本函数所有 return 分支（失败点有十几处）。
+	defer func() {
+		var st models.Task
+		if err := db.Get().Select("owner_id, status").First(&st, id).Error; err != nil {
+			return
+		}
+		switch st.Status {
+		case 2:
+			hooks.Emit(plugin.HookTaskComplete, map[string]any{
+				"userId": st.OwnerID, "taskId": id,
+			})
+		case 3:
+			hooks.Emit(plugin.HookTaskFailed, map[string]any{
+				"userId": st.OwnerID, "taskId": id, "reason": "task failed",
+			})
+		}
+	}()
+
 	db.Get().Model(&models.Task{}).Where("id = ?", id).Updates(map[string]any{"status": 1, "progress": 0})
 
 	client := service.OutboundClient()
@@ -472,6 +500,8 @@ func runHTTPTask(id uint, url string) {
 // 旧实现在任务已结束但仍在 dlJobs 中时二次调用会 close 已关闭的 channel → panic。
 // 这里先用 LoadAndDelete 原子摘除，保证同一任务只有一个调用方能拿到 channel 并关闭。
 func CancelTask(c *gin.Context) {
+	// [plugin-hook] HookTaskCancel（完成后）
+	defer hooks.Emit(plugin.HookTaskCancel, hooks.ReqCtx(c, nil))
 	id, _ := strconv.Atoi(c.Param("id"))
 	u := middleware.CurrentUser(c)
 

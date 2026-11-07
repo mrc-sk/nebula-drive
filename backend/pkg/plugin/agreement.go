@@ -54,9 +54,9 @@ type AgreementAccepted struct {
 // 从外部文件读意味着可以被部署者改掉，管理员看到的就不再是宿主承诺的那份。
 func CurrentAgreement() Agreement {
 	return Agreement{
-		Version: AgreementVersion,
-		Title:   "NebulaDrive 插件协议",
-		Updated: "2026-10-04",
+		Version:  AgreementVersion,
+		Title:    "NebulaDrive 插件协议",
+		Updated:  "2026-10-04",
 		Required: "安装或启用任何第三方插件，即表示你已阅读并理解以下全部条款。",
 		Sections: agreementSections,
 	}
@@ -73,9 +73,9 @@ var agreementSections = []AgreementSection{
 		},
 	},
 	{
-		Heading:   "二、权限与风险（关键）",
-		Critical:  true,
-		Paras:     []string{"这是本协议最重要的一节，请在同意前完整阅读。"},
+		Heading:  "二、权限与风险（关键）",
+		Critical: true,
+		Paras:    []string{"这是本协议最重要的一节，请在同意前完整阅读。"},
 		Bullets: []string{
 			"插件以**与 NebulaDrive 主服务完全相同的系统权限**运行。" +
 				"它能读写该操作系统账号能触及的所有文件，包括数据库与密钥文件。",
@@ -116,7 +116,7 @@ var agreementSections = []AgreementSection{
 		},
 	},
 	{
-		Heading: "六、许可与合规",
+		Heading:  "六、许可与合规",
 		Critical: true,
 		Paras: []string{
 			"NebulaDrive 采用 GNU AGPL-3.0。安装插件不会改变本项目的许可，" +

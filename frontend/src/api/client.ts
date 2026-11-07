@@ -127,6 +127,95 @@ export interface AgreementState {
   version: number
 }
 
+// ---- 插件 UI 扩展点（/api/plugins/ui，与后端 pkg/plugin/registry.go 对应）----
+
+/** 插件注册的侧边栏项。 */
+export interface PluginSidebarItem {
+  plugin: string
+  name: string
+  title: string
+  icon?: string
+  area: 'main' | 'admin' | 'public' | string
+  role: 'admin' | 'user' | 'any' | string
+  order: number
+  /** iframe = 站内嵌入；newtab = 新标签页打开 */
+  embed: 'iframe' | 'newtab' | string
+  /** 后端给的是绝对 URL（可能含 127.0.0.1），前端会归一化成同源相对路径 */
+  url: string
+  public: boolean
+}
+
+/** 插件主题包。 */
+export interface PluginThemeDecl {
+  name: string
+  label?: string
+  /** 相对插件目录的 CSS 文件；前端按 /ext/<plugin>/<css> 取 */
+  css?: string
+  /** CSS 变量覆盖，直接注入 :root */
+  variables?: Record<string, string>
+  preview?: string
+}
+
+/** 插件设置面板字段。 */
+export interface PluginSettingField {
+  key: string
+  label: string
+  type: 'text' | 'password' | 'number' | 'bool' | 'select' | 'textarea' | string
+  default?: string
+  /** select 用，逗号分隔 */
+  options?: string
+  help?: string
+}
+
+/** 注册型能力条目（后台展示用）。 */
+export interface PluginProviderInfo {
+  kind: string
+  name: string
+  label?: string
+  hook?: string
+  plugin: string
+}
+
+/** /api/plugins/ui 返回体。 */
+export interface PluginUIData {
+  protocolVersion: number
+  globalEnabled: boolean
+  sidebar: { main?: PluginSidebarItem[]; admin?: PluginSidebarItem[] }
+  public?: PluginSidebarItem[]
+  themes: Record<string, PluginThemeDecl>
+  settings: Record<string, PluginSettingField[]>
+  providers: PluginProviderInfo[]
+  /** 插件通过 onUIThemeApply 动态注入的 CSS 变量 */
+  variables: Record<string, any>
+  /** 插件通过 onUIPageRegister 动态注入的原始内容 */
+  dynamic: Record<string, any>
+}
+
+/** 插件全局总开关状态。 */
+export interface PluginGlobalState {
+  enabled: boolean
+  protocolVersion: number
+  totalHooks: number
+  wiredHooks: number
+}
+
+/** 三文件契约诊断结果。 */
+export interface PluginContractDiag {
+  name: string
+  dir: string
+  missingFiles: string[]
+  required: string[]
+  ok: boolean
+  error?: string
+  protocolVersion?: number
+  v1?: boolean
+  hooks?: string[]
+  runtimeBins?: Record<string, string>
+  runtime?: string
+  /** co.BEGG 里的原始 PageDecl 列表（字段与 SidebarItem 略有差异） */
+  pages?: any[]
+}
+
 /** 插件日志条目。 */
 export interface PluginLogEntry {
   time: string
@@ -322,6 +411,14 @@ export function uploadWithProgress(
 }
 
 export const api = {
+  // ---- 插件 UI 扩展点：普通登录用户也能读（后台开关关闭时返回空数据）----
+  pluginsUI: () => request<ApiResult<PluginUIData>>('/api/plugins/ui'),
+  savePluginUISettings: (plugin: string, values: Record<string, any>) =>
+    request<ApiResult<Record<string, any>>>(
+      `/api/plugins/ui/settings/${encodeURIComponent(plugin)}`,
+      { method: 'POST', body: JSON.stringify(values) },
+    ),
+
   installStatus: () => request<{ installed: boolean }>('/api/install/status'),
   install: (body: any) => request('/api/install', { method: 'POST', body: JSON.stringify(body) }),
   testDB: (body: any) => request<{ code: number; message: string }>('/api/install/test-db', {
@@ -553,6 +650,19 @@ export const api = {
     pluginLogs: (name?: string, limit = 200) =>
       request<ApiResult<PluginLogEntry[]>>(
         `/api/admin/plugins/logs?limit=${limit}${name ? `&name=${encodeURIComponent(name)}` : ''}`,
+      ),
+    // ---- v2 插件平台：全局总开关与三文件契约诊断 ----
+    pluginsGlobal: () =>
+      request<ApiResult<PluginGlobalState>>('/api/admin/plugins/global'),
+    // 开启必须 acknowledge=true：后端会强制校验，前端必须先弹风险确认。
+    setPluginsGlobal: (enabled: boolean, acknowledge = false) =>
+      request<ApiResult<{ enabled: boolean }>>('/api/admin/plugins/global', {
+        method: 'POST',
+        body: JSON.stringify({ enabled, acknowledge }),
+      }),
+    pluginContract: (name: string) =>
+      request<ApiResult<PluginContractDiag>>(
+        `/api/admin/plugins/contract/${encodeURIComponent(name)}`,
       ),
 
     testPolicy: (id: number | string, body: any) =>

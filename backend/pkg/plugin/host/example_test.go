@@ -101,7 +101,6 @@ func buildInto(t *testing.T, dir, out string) {
 	}
 }
 
-
 func TestRefererGuard_EndToEnd(t *testing.T) {
 	ins, dir := buildRefGuard(t)
 

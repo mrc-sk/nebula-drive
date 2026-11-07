@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nebula-drive/nebula/internal/hooks"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -31,6 +32,29 @@ type loginReq struct {
 
 // Login 登录（含 2FA、单设备登录、记住登录、验证码、登录失败封禁）
 func Login(c *gin.Context) {
+	// [plugin-hook] HookAuthLoginFailed（失败时）
+	defer func() {
+		if c.Writer.Status() >= 400 {
+			hooks.Emit(plugin.HookAuthLoginFailed, hooks.ReqCtx(c, nil))
+		}
+	}()
+	// [plugin-hook] HookAuthLoginSuccess（完成后）
+	defer hooks.Emit(plugin.HookAuthLoginSuccess, hooks.ReqCtx(c, nil))
+	// [plugin-hook] HookAuthTokenIssue（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookAuthTokenIssue, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
+	// [plugin-hook] HookAuthProviderResolve（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookAuthProviderResolve, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
+	// [plugin-hook] HookAuthBeforeLogin（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookAuthBeforeLogin, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	var req loginReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
@@ -115,6 +139,8 @@ var _ = strconv.Itoa
 
 // Logout 登出
 func Logout(c *gin.Context) {
+	// [plugin-hook] HookAuthLogout
+	hooks.Emit(plugin.HookAuthLogout, hooks.ReqCtx(c, nil))
 	u := middleware.CurrentUser(c)
 	if u != nil {
 		db.Get().Where("user_id = ?", u.ID).Delete(&models.Session{})
@@ -145,6 +171,8 @@ type updateProfileReq struct {
 
 // UpdateProfile 更新用户资料
 func UpdateProfile(c *gin.Context) {
+	// [plugin-hook] HookUserUpdate（完成后）
+	defer hooks.Emit(plugin.HookUserUpdate, hooks.ReqCtx(c, nil))
 	u := middleware.CurrentUser(c)
 	var req updateProfileReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -185,6 +213,11 @@ type setup2FAReq struct {
 
 // Setup2FA 开启/关闭两步验证
 func Setup2FA(c *gin.Context) {
+	// [plugin-hook] HookAuth2FAVerify（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookAuth2FAVerify, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	u := middleware.CurrentUser(c)
 	var req setup2FAReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -239,6 +272,8 @@ type changePwdReq struct {
 }
 
 func ChangePassword(c *gin.Context) {
+	// [plugin-hook] HookAuthPasswordChange（完成后）
+	defer hooks.Emit(plugin.HookAuthPasswordChange, hooks.ReqCtx(c, nil))
 	u := middleware.CurrentUser(c)
 	var req changePwdReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -369,6 +404,13 @@ type registerReq struct {
 
 // Register 公开注册（需后台开启 security.allow_register）
 func Register(c *gin.Context) {
+	// [plugin-hook] HookAuthRegisterAfter（完成后）
+	defer hooks.Emit(plugin.HookAuthRegisterAfter, hooks.ReqCtx(c, nil))
+	// [plugin-hook] HookAuthRegisterBefore（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookAuthRegisterBefore, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	if !getSettingBool("security.allow_register", false) {
 		c.JSON(http.StatusForbidden, gin.H{"code": 1, "message": "未开放注册"})
 		return

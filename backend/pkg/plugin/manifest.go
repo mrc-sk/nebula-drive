@@ -19,7 +19,8 @@ const ManifestFileName = "plugin.json"
 const MaxManifestSize = 64 << 10
 
 // MaxHooksPerPlugin 单个插件可声明的钩子数上限。
-const MaxHooksPerPlugin = 32
+// v2 钩子表扩到 99 个，一个「平台型」插件订阅 40+ 钩子是合理场景。
+const MaxHooksPerPlugin = 64
 
 // Manifest 插件清单（plugin.json）。
 //
@@ -52,6 +53,11 @@ type Manifest struct {
 	// 真正的强制点在宿主代码里（插件本来就有宿主同等的文件与网络权限，
 	// 这份声明的价值是让管理员在安装前知道作者索取了什么）。
 	Permissions []string `json:"permissions"`
+	// Pages v2：插件注册的 HTTP 页面（与 co.BEGG 交叉校验）。
+	// 纯页面型插件可以不订阅任何钩子，只靠这里 + co.BEGG 生效。
+	Pages []PageDecl `json:"pages,omitempty"`
+	// Providers v2：注册型能力（与 register.go / co.BEGG 交叉校验）。
+	Providers []Registration `json:"providers,omitempty"`
 	// License SPDX 标识，默认 AGPL-3.0-only。
 	License string `json:"license"`
 	// Homepage 项目地址。
@@ -110,8 +116,13 @@ func (m *Manifest) Validate() error {
 	}
 
 	// entry
-	if m.Entry == "" {
-		return errors.New("plugin.json 缺少 entry（可执行文件名）")
+	// v2 纯页面插件例外：不订阅任何钩子、只声明 pages，页面服务由
+	// co.BEGG.command 拉起，宿主不会为它启动 JSON-RPC 子进程
+	//（见 pluginset.loadOne 的 len(Hooks)==0 分支），因此没有可执行文件。
+	// 若不加这个例外，纯 PHP/Python 页面插件会在 ParseManifest 阶段就被拒。
+	purePageV2 := m.ProtocolVersion >= 2 && len(m.Hooks) == 0 && len(m.Pages) > 0
+	if m.Entry == "" && !purePageV2 {
+		return errors.New("plugin.json 缺少 entry（可执行文件名）；v2 纯页面插件可省略，但必须声明 pages 且不订阅 hooks")
 	}
 	// entry 会拼成 <插件目录>/<entry> 再交给 exec。若允许分隔符，
 	// manifest 就能让宿主执行插件目录外的任意文件，等于任意代码执行。
@@ -129,15 +140,20 @@ func (m *Manifest) Validate() error {
 		}
 	}
 
-	// protocolVersion
-	if m.ProtocolVersion != ProtocolVersion {
-		return fmt.Errorf("protocolVersion 不匹配：插件声明 %d，宿主要求 %d。"+
-			"请升级插件或使用匹配版本的 NebulaDrive", m.ProtocolVersion, ProtocolVersion)
+	// protocolVersion：v2 宿主自动兼容 v1 插件。
+	// v1 钩子名与语义冻结，因此老插件无需改动即可加载；只是用不上 v2 新钩子、
+	// 也不要求 register.go / co.BEGG 三文件契约（见 contract.go）。
+	if m.ProtocolVersion < MinSupportedProtocolVersion || m.ProtocolVersion > ProtocolVersion {
+		return fmt.Errorf("protocolVersion %d 不受支持：宿主支持 %d~%d（当前 %d）。"+
+			"请升级插件或使用匹配版本的 NebulaDrive",
+			m.ProtocolVersion, MinSupportedProtocolVersion, ProtocolVersion, ProtocolVersion)
 	}
 
-	// hooks
-	if len(m.Hooks) == 0 {
-		return errors.New("plugin.json 的 hooks 不能为空（声明插件实现的钩子）")
+	// hooks：v2 允许「纯页面 / 纯注册型插件」不订阅任何钩子，
+	// 但此时必须在 pages 或 providers 里声明它到底提供什么，
+	// 否则就是一个什么都不做的空插件。
+	if len(m.Hooks) == 0 && len(m.Pages) == 0 && len(m.Providers) == 0 {
+		return errors.New("plugin.json 不能三者皆空：至少声明 hooks、pages 或 providers 之一")
 	}
 	if len(m.Hooks) > MaxHooksPerPlugin {
 		return fmt.Errorf("hooks 数量 %d 超过上限 %d", len(m.Hooks), MaxHooksPerPlugin)
@@ -177,6 +193,18 @@ func (m *Manifest) Validate() error {
 	for _, p := range m.Permissions {
 		if len(p) > 64 {
 			return fmt.Errorf("permissions 项过长: %q", p)
+		}
+	}
+
+	// v2 页面与注册型能力
+	for _, p := range m.Pages {
+		if err := p.Validate(); err != nil {
+			return fmt.Errorf("plugin.json pages: %w", err)
+		}
+	}
+	for _, r := range m.Providers {
+		if err := r.Validate(); err != nil {
+			return fmt.Errorf("plugin.json providers: %w", err)
 		}
 	}
 
@@ -415,6 +443,12 @@ type InitResult struct {
 	Error string `json:"error,omitempty"`
 	// Hooks 插件实际实现的钩子（应覆盖 manifest 声明的）。
 	Hooks []string `json:"hooks,omitempty"`
+	// Providers v2：插件在 init 时登记的注册型能力（storage/auth/notify/
+	// preview/payment/contentScan/backup/cli/page）。宿主写入 Registry。
+	// v1 插件忽略此字段，保持零改动兼容。
+	Providers []Registration `json:"providers,omitempty"`
+	// Pages v2：插件声明的 HTTP 页面（由 co.BEGG 校验后下发）。
+	Pages []PageDecl `json:"pages,omitempty"`
 }
 
 // FireParams 单次钩子调用参数。
@@ -427,17 +461,22 @@ type FireParams struct {
 
 // FireResult 插件处理结果。
 //
-// 注意：**没有 Blocked 字段**。拦截只能通过 Error 表达，且 Error 文本
-// 必须含 "blocked"（大小写敏感）—— 这与进程内插件的既有约定一致，
-// 两种插件形态的拦截语义因此完全相同。
+// v1 的拦截约定保留：Error 文本含 "blocked"（大小写敏感）即拦截，
+// 这与进程内插件完全一致。v2 额外支持结构化的 Decision 字段，
+// 宿主会把它归一成同样的 error，不需要插件作者记字符串约定。
 type FireResult struct {
-	// CtxPatch 要回写到宿主 ctx 的字段。
+	// CtxPatch 要回写到宿主 ctx 的字段（变换型钩子）。
 	//
 	// 只做浅层合并：顶层键覆盖。插件不能删除宿主已有的键 ——
 	// 若需要删除请显式置 nil（会被转成 JSON null）。
 	CtxPatch map[string]any `json:"ctxPatch,omitempty"`
 	// Error 错误消息。含 "blocked" 时宿主会把它转成可拦截请求的 error。
 	Error string `json:"error,omitempty"`
+	// Decision v2 结构化决策："allow" | "deny" | ""（未表态）。
+	// "deny" 等价于返回含 "blocked" 的 Error；宿主归一后交给 DecisionOf。
+	Decision string `json:"decision,omitempty"`
+	// Reason 拒绝原因，随 Decision=deny 一起返回，展示给用户/写审计。
+	Reason string `json:"reason,omitempty"`
 	// Log 插件返回的日志行（可选）。
 	Log []LogLine `json:"log,omitempty"`
 }

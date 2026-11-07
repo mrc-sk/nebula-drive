@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/nebula-drive/nebula/internal/hooks"
 	"io"
 	"mime"
 	"net/http"
@@ -67,22 +68,35 @@ func groupOf(userID uint) models.Group {
 	return models.Group{ID: 1, Name: "default", MaxStorage: -1, ShareEnabled: true, WebDAVEnabled: true, SpeedLimit: 0}
 }
 
-// effectiveMaxStorage 取用户有效存储上限：有活跃套餐优先用套餐额度，否则用用户组额度
+// effectiveMaxStorage 取用户有效存储上限：有活跃套餐优先用套餐额度，否则用用户组额度。
+//
+// v2：末尾触发 onUserQuotaChange 变换钩子，插件写 ctx.maxStorage 即可覆盖额度
+// （对接外部计费系统），写 ctx.source 可标注额度来源。这是「变换型钩子真正
+// 改变业务行为」的示例落点。
 func effectiveMaxStorage(userID uint) (int64, string) {
 	var u models.User
 	if err := db.Get().Select("storage, plan_id, plan_expire_at").First(&u, userID).Error; err != nil {
 		return -1, "group"
 	}
+	var max int64
+	var source string
 	// 检查是否有活跃套餐
 	if u.PlanID > 0 && u.PlanExpireAt != nil && u.PlanExpireAt.After(time.Now()) {
 		var plan models.Plan
 		if db.Get().Select("max_storage, display_name").First(&plan, u.PlanID).Error == nil {
-			return plan.MaxStorage, "plan:" + plan.DisplayName
+			max, source = plan.MaxStorage, "plan:"+plan.DisplayName
 		}
 	}
-	// 回退到用户组
-	g := groupOf(userID)
-	return g.MaxStorage, "group:" + g.Name
+	if source == "" {
+		// 回退到用户组
+		g := groupOf(userID)
+		max, source = g.MaxStorage, "group:"+g.Name
+	}
+	ctx := map[string]any{
+		"userId": userID, "maxStorage": max, "used": u.Storage, "source": source,
+	}
+	plugin.FireIf(plugin.HookUserQuotaChange, ctx)
+	return hooks.Int64(ctx, "maxStorage", max), hooks.Str(ctx, "source", source)
 }
 
 // ensureQuota 校验 user 再写入 additionalBytes 后是否仍在配额内。
@@ -161,6 +175,11 @@ type rapidReq struct {
 }
 
 func Rapid(c *gin.Context) {
+	// [plugin-hook] HookFileRapidBefore（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookFileRapidBefore, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	u := middleware.CurrentUser(c)
 	var req rapidReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -220,6 +239,37 @@ func writeQuotaOrServerError(c *gin.Context, err error) {
 
 // Upload 上传（含秒传：前端传 hash 命中则复用）
 func Upload(c *gin.Context) {
+	// [plugin-hook] HookFileUploadFailed（失败时）
+	defer func() {
+		if c.Writer.Status() >= 400 {
+			hooks.Emit(plugin.HookFileUploadFailed, hooks.ReqCtx(c, nil))
+		}
+	}()
+	// [plugin-hook] HookFileUploadAfter（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookFileUploadAfter, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
+	// [plugin-hook] HookContentScan（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookContentScan, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
+	// [plugin-hook] HookContentHashCheck（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookContentHashCheck, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
+	// [plugin-hook] HookFileUploadBefore（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookFileUploadBefore, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
+	// [plugin-hook] HookFileTypePolicy（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookFileTypePolicy, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	u := middleware.CurrentUser(c)
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -373,6 +423,13 @@ func Upload(c *gin.Context) {
 
 // Download 下载
 func Download(c *gin.Context) {
+	// [plugin-hook] HookFileDownloadAfter（完成后）
+	defer hooks.Emit(plugin.HookFileDownloadAfter, hooks.ReqCtx(c, nil))
+	// [plugin-hook] HookFileDownloadBefore（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookFileDownloadBefore, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var f models.File
 	if err := db.Get().First(&f, id).Error; err != nil {
@@ -604,6 +661,11 @@ type renameReq struct {
 
 // Rename 重命名
 func Rename(c *gin.Context) {
+	// [plugin-hook] HookFileRename（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookFileRename, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var f models.File
 	if err := db.Get().First(&f, id).Error; err != nil {
@@ -629,6 +691,11 @@ type moveReq struct {
 
 // Move 移动
 func Move(c *gin.Context) {
+	// [plugin-hook] HookFileMove（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookFileMove, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var f models.File
 	if err := db.Get().First(&f, id).Error; err != nil {
@@ -650,6 +717,11 @@ func Move(c *gin.Context) {
 
 // Delete 删除（软删除进回收站）
 func Delete(c *gin.Context) {
+	// [plugin-hook] HookFileDelete（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookFileDelete, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var f models.File
 	if err := db.Get().First(&f, id).Error; err != nil {
@@ -666,6 +738,8 @@ func Delete(c *gin.Context) {
 
 // Restore 从回收站恢复
 func Restore(c *gin.Context) {
+	// [plugin-hook] HookFileRestore（完成后）
+	defer hooks.Emit(plugin.HookFileRestore, hooks.ReqCtx(c, nil))
 	id, _ := strconv.Atoi(c.Param("id"))
 	u := middleware.CurrentUser(c)
 	var f models.File
@@ -698,6 +772,11 @@ func Restore(c *gin.Context) {
 
 // Purge 彻底删除（从回收站清空）
 func Purge(c *gin.Context) {
+	// [plugin-hook] HookFilePurge（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookFilePurge, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	u := middleware.CurrentUser(c)
 	var f models.File
@@ -839,6 +918,11 @@ type chunkInitReq struct {
 
 // ChunkInit 初始化分片上传
 func ChunkInit(c *gin.Context) {
+	// [plugin-hook] HookFileChunkInit（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookFileChunkInit, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	u := middleware.CurrentUser(c)
 	var req chunkInitReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -992,6 +1076,8 @@ type chunkMergeReq struct {
 
 // ChunkMerge 合并分片并创建文件记录
 func ChunkMerge(c *gin.Context) {
+	// [plugin-hook] HookFileChunkComplete（完成后）
+	defer hooks.Emit(plugin.HookFileChunkComplete, hooks.ReqCtx(c, nil))
 	u := middleware.CurrentUser(c)
 	var req chunkMergeReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1194,6 +1280,8 @@ func handlerForVersion(v *models.FileVersion) (filesystem.Handler, error) {
 
 // UploadVersion 上传新版本：归档当前版本到 FileVersion，更新 File，淘汰超出 max_versions 的最旧版本
 func UploadVersion(c *gin.Context) {
+	// [plugin-hook] HookFileVersionCreate（完成后）
+	defer hooks.Emit(plugin.HookFileVersionCreate, hooks.ReqCtx(c, nil))
 	u := middleware.CurrentUser(c)
 	id, _ := strconv.Atoi(c.Param("id"))
 	var f models.File
@@ -1386,6 +1474,11 @@ func DownloadVersion(c *gin.Context) {
 
 // RestoreVersion 恢复到指定版本：当前版本存为历史，指定版本设为当前
 func RestoreVersion(c *gin.Context) {
+	// [plugin-hook] HookFileVersionRestore（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookFileVersionRestore, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	vid, _ := strconv.Atoi(c.Param("vid"))
 	var f models.File
@@ -1487,6 +1580,8 @@ type tagReq struct {
 
 // AddTag 给文件打标签
 func AddTag(c *gin.Context) {
+	// [plugin-hook] HookFileTagChange（完成后）
+	defer hooks.Emit(plugin.HookFileTagChange, hooks.ReqCtx(c, nil))
 	u := middleware.CurrentUser(c)
 	id, _ := strconv.Atoi(c.Param("id"))
 	var f models.File
@@ -1590,6 +1685,11 @@ type batchCopyReq struct {
 
 // BatchCopy 批量复制（复制 File 记录 + 复制存储层文件）
 func BatchCopy(c *gin.Context) {
+	// [plugin-hook] HookFileCopy（决策/变换，可拦截）
+	if __ok, __why, _ := hooks.Gate(plugin.HookFileCopy, c, nil); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
 	u := middleware.CurrentUser(c)
 	var req batchCopyReq
 	if err := c.ShouldBindJSON(&req); err != nil {
