@@ -1,0 +1,1931 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NebulaDrive 插件制作指南</title>
+<style>
+:root{
+  --bg:#070b1a; --bg2:#0b1226; --panel:rgba(255,255,255,.045); --panel2:rgba(255,255,255,.075);
+  --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.18);
+  --tx:#e8edf9; --tx2:#a8b3cc; --tx3:#75819c;
+  --cyan:#43d9f5; --violet:#a78bfa; --green:#34d399; --amber:#fbbf24; --rose:#fb7185; --blue:#60a5fa;
+  --code-bg:rgba(0,0,0,.42); --radius:14px;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,"Cascadia Code",monospace;
+}
+html[data-theme="light"]{
+  --bg:#eef2fb; --bg2:#f7f9ff; --panel:rgba(255,255,255,.82); --panel2:rgba(255,255,255,.95);
+  --line:rgba(15,23,42,.10); --line2:rgba(15,23,42,.18);
+  --tx:#0f172a; --tx2:#41506b; --tx3:#6b7793;
+  --cyan:#0891b2; --violet:#7c3aed; --green:#059669; --amber:#b45309; --rose:#e11d48; --blue:#2563eb;
+  --code-bg:rgba(15,23,42,.055);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:24px}
+body{
+  margin:0;font-family:var(--sans);color:var(--tx);background:var(--bg);
+  font-size:15px;line-height:1.75;-webkit-font-smoothing:antialiased;
+}
+/* 极光背景：与产品 UI 的毛玻璃/亚克力语言一致 */
+body::before{
+  content:"";position:fixed;inset:0;z-index:-2;
+  background:
+    radial-gradient(1000px 620px at 12% -8%, rgba(67,217,245,.22), transparent 62%),
+    radial-gradient(880px 560px at 92% 4%, rgba(167,139,250,.20), transparent 60%),
+    radial-gradient(760px 520px at 60% 102%, rgba(52,211,153,.13), transparent 60%),
+    linear-gradient(180deg,var(--bg) 0%,var(--bg2) 100%);
+}
+body::after{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(circle at 50% 0%,#000 0%,transparent 78%);
+}
+
+/* ---------- 顶栏 ---------- */
+header{
+  position:sticky;top:0;z-index:40;
+  backdrop-filter:blur(18px) saturate(160%);-webkit-backdrop-filter:blur(18px) saturate(160%);
+  background:color-mix(in srgb,var(--bg) 72%,transparent);
+  border-bottom:1px solid var(--line);
+}
+.bar{max-width:1360px;margin:0 auto;padding:11px 22px;display:flex;align-items:center;gap:14px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.2px;white-space:nowrap}
+.spin{width:22px;height:22px;flex:0 0 22px;animation:spin 18s linear infinite}
+.brand:hover .spin{animation-play-state:paused}
+@keyframes spin{to{transform:rotate(360deg)}}
+.brand small{font-weight:500;color:var(--tx3);font-size:12px}
+.grow{flex:1}
+button.ico{
+  display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;cursor:pointer;
+  background:var(--panel);color:var(--tx2);border:1px solid var(--line);border-radius:10px;
+  font-size:13px;font-family:inherit;transition:.16s;
+}
+button.ico:hover{background:var(--panel2);color:var(--tx);border-color:var(--line2)}
+#burger{display:none}
+
+/* ---------- 布局 ---------- */
+.wrap{max-width:1360px;margin:0 auto;padding:26px 22px 90px;display:grid;grid-template-columns:250px minmax(0,1fr);gap:34px}
+nav.toc{position:sticky;top:78px;align-self:start;max-height:calc(100vh - 104px);overflow:auto;padding-right:6px}
+nav.toc h4{margin:0 0 10px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx3)}
+nav.toc a{
+  display:block;padding:5px 10px;color:var(--tx2);text-decoration:none;font-size:13px;
+  border-left:2px solid transparent;border-radius:0 8px 8px 0;transition:.14s;
+}
+nav.toc a:hover{color:var(--tx);background:var(--panel)}
+nav.toc a.on{color:var(--cyan);border-left-color:var(--cyan);background:var(--panel);font-weight:600}
+nav.toc a.sub{padding-left:22px;font-size:12.5px;color:var(--tx3)}
+main{min-width:0}
+
+/* ---------- 标题与区块 ---------- */
+h1{font-size:31px;line-height:1.25;margin:0 0 10px;letter-spacing:-.4px}
+h2{
+  font-size:22px;margin:52px 0 14px;padding-bottom:9px;border-bottom:1px solid var(--line);
+  scroll-margin-top:80px;letter-spacing:-.2px;
+}
+h2:first-of-type{margin-top:34px}
+h3{font-size:16.5px;margin:30px 0 10px;color:var(--tx);scroll-margin-top:80px}
+h4{font-size:14.5px;margin:20px 0 8px;color:var(--tx2)}
+p{margin:10px 0;color:var(--tx2)}
+a{color:var(--cyan)}
+strong{color:var(--tx)}
+code{font-family:var(--mono);font-size:.88em}
+p code,li code,td code,h4 code{background:var(--code-bg);padding:2px 6px;border-radius:6px;border:1px solid var(--line);color:var(--tx)}
+ul,ol{color:var(--tx2);padding-left:22px;margin:10px 0}
+li{margin:5px 0}
+li>strong{color:var(--tx)}
+hr{border:0;border-top:1px solid var(--line);margin:34px 0}
+
+.card{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:16px 18px;margin:16px 0;
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+}
+.note{border-left:3px solid var(--blue)}
+.warn{border-left:3px solid var(--amber)}
+.danger{border-left:3px solid var(--rose)}
+.ok{border-left:3px solid var(--green)}
+.card .t{font-weight:700;font-size:13.5px;margin-bottom:4px;display:flex;align-items:center;gap:7px}
+.card p:last-child,.card ul:last-child{margin-bottom:0}
+
+/* ---------- 表格 ---------- */
+.tw{overflow-x:auto;margin:16px 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{padding:9px 13px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:var(--panel2);color:var(--tx);font-weight:650;white-space:nowrap;font-size:12.5px}
+tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--panel2)}
+td code{white-space:nowrap}
+
+/* ---------- 代码块 ---------- */
+.code{position:relative;margin:14px 0}
+.code-top{
+  display:flex;align-items:center;gap:8px;padding:7px 11px;
+  background:var(--panel2);border:1px solid var(--line);border-bottom:0;border-radius:var(--radius) var(--radius) 0 0;
+}
+.code-top .fname{font-family:var(--mono);font-size:11.5px;color:var(--tx3)}
+.code-top .grow{flex:1}
+.code-top button{
+  background:transparent;border:1px solid var(--line);color:var(--tx3);cursor:pointer;
+  font-size:11.5px;padding:2px 9px;border-radius:7px;font-family:inherit;transition:.15s;
+}
+.code-top button:hover{color:var(--cyan);border-color:var(--cyan)}
+.code-top button.done{color:var(--green);border-color:var(--green)}
+pre{
+  margin:0;padding:14px 16px;overflow:auto;background:var(--code-bg);
+  border:1px solid var(--line);border-radius:0 0 var(--radius) var(--radius);
+  font-family:var(--mono);font-size:12.8px;line-height:1.65;color:var(--tx);
+  max-height:520px;
+}
+pre::-webkit-scrollbar,.tw::-webkit-scrollbar,nav.toc::-webkit-scrollbar{height:9px;width:9px}
+pre::-webkit-scrollbar-thumb,.tw::-webkit-scrollbar-thumb,nav.toc::-webkit-scrollbar-thumb{background:var(--line2);border-radius:9px}
+.k{color:var(--violet)} .s{color:var(--green)} .c{color:var(--tx3);font-style:italic}
+.n{color:var(--amber)} .fn{color:var(--cyan)} .ty{color:var(--blue)}
+
+/* 行内标签 */
+.tag{
+  display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:650;
+  border:1px solid;white-space:nowrap;line-height:1.6;
+}
+.t-sync{color:var(--cyan);border-color:color-mix(in srgb,var(--cyan) 40%,transparent);background:color-mix(in srgb,var(--cyan) 13%,transparent)}
+.t-async{color:var(--tx3);border-color:var(--line2);background:var(--panel2)}
+.t-block{color:var(--rose);border-color:color-mix(in srgb,var(--rose) 40%,transparent);background:color-mix(in srgb,var(--rose) 13%,transparent)}
+.t-ok{color:var(--green);border-color:color-mix(in srgb,var(--green) 40%,transparent);background:color-mix(in srgb,var(--green) 13%,transparent)}
+.t-no{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 40%,transparent);background:color-mix(in srgb,var(--amber) 13%,transparent)}
+.t-new{color:var(--violet);border-color:color-mix(in srgb,var(--violet) 40%,transparent);background:color-mix(in srgb,var(--violet) 13%,transparent)}
+
+/* 步骤 */
+.steps{counter-reset:s;margin:18px 0;padding:0;list-style:none}
+.steps>li{
+  counter-increment:s;position:relative;padding:0 0 18px 44px;margin:0;
+  border-left:1px solid var(--line);margin-left:15px;
+}
+.steps>li:last-child{border-left-color:transparent;padding-bottom:0}
+.steps>li::before{
+  content:counter(s);position:absolute;left:-15px;top:0;
+  width:30px;height:30px;border-radius:50%;display:grid;place-items:center;
+  background:var(--panel2);border:1px solid var(--line2);color:var(--cyan);
+  font-size:13px;font-weight:700;
+}
+.steps>li>.st{font-weight:700;color:var(--tx);display:block;margin-bottom:2px}
+
+/* 网格卡 */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:16px 0}
+.mini{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 15px}
+.mini .h{font-weight:700;font-size:13.5px;margin-bottom:3px;display:flex;align-items:center;gap:7px}
+.mini p{margin:0;font-size:12.8px;color:var(--tx3);line-height:1.6}
+
+/* 搜索 */
+#q{
+  width:230px;height:34px;padding:0 12px;border-radius:10px;font-family:inherit;font-size:13px;
+  background:var(--panel);border:1px solid var(--line);color:var(--tx);outline:none;transition:.15s;
+}
+#q:focus{border-color:var(--cyan);width:270px}
+#q::placeholder{color:var(--tx3)}
+mark{background:color-mix(in srgb,var(--amber) 35%,transparent);color:inherit;border-radius:3px;padding:0 2px}
+.hide{display:none !important}
+
+.backtop{
+  position:fixed;right:22px;bottom:22px;z-index:30;width:42px;height:42px;border-radius:12px;
+  display:grid;place-items:center;cursor:pointer;opacity:0;pointer-events:none;transition:.2s;
+  background:var(--panel2);border:1px solid var(--line2);color:var(--tx2);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+}
+.backtop.show{opacity:1;pointer-events:auto}
+.backtop:hover{color:var(--cyan);border-color:var(--cyan)}
+
+footer{border-top:1px solid var(--line);margin-top:60px;padding:22px;text-align:center;color:var(--tx3);font-size:12.5px}
+footer a{color:var(--tx3)}
+
+@media (max-width:920px){
+  .wrap{grid-template-columns:1fr;gap:18px;padding-top:16px}
+  nav.toc{position:static;max-height:none;border:1px solid var(--line);border-radius:var(--radius);padding:12px;background:var(--panel)}
+  nav.toc.collapsed{display:none}
+  #burger{display:inline-flex}
+  #q{width:150px}#q:focus{width:180px}
+  h1{font-size:24px}h2{font-size:19px}
+  .bar{padding:10px 14px;gap:10px}
+  .wrap{padding-left:14px;padding-right:14px}
+}
+@media print{
+  header,nav.toc,.backtop,.code-top button{display:none}
+  .wrap{grid-template-columns:1fr;max-width:none}
+  body::before,body::after{display:none}
+  pre{max-height:none;border:1px solid #ccc}
+  .card,.tw,.mini{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <div class="brand">
+      <svg class="spin" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#43d9f5"/><stop offset="1" stop-color="#a78bfa"/>
+          </linearGradient>
+        </defs>
+        <circle cx="24" cy="24" r="19" stroke="url(#g1)" stroke-width="3" stroke-dasharray="5 6" stroke-linecap="round"/>
+        <circle cx="24" cy="24" r="7.5" fill="url(#g1)" opacity=".9"/>
+        <circle cx="40" cy="14" r="3" fill="#34d399"/>
+      </svg>
+      <span>NebulaDrive<small> 插件制作指南</small></span>
+    </div>
+    <span class="grow"></span>
+    <input id="q" type="search" placeholder="搜索钩子、字段、报错…" autocomplete="off">
+    <button class="ico" id="burger" title="目录" aria-label="目录">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+    <button class="ico" id="theme" title="切换主题">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      <span id="themeTx">浅色</span>
+    </button>
+    <button class="ico" onclick="window.print()" title="打印 / 存为 PDF">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="toc" id="toc">
+  <h4>目录</h4>
+  <a href="#intro">0 · 先读这一页</a>
+  <a href="#quick">1 · 快速上手</a>
+  <a href="#manifest" class="sub">1.1 plugin.json</a>
+  <a href="#rpc" class="sub">1.2 RPC 协议</a>
+  <a href="#skeleton" class="sub">1.3 可编译骨架</a>
+  <a href="#hooks">2 · 钩子参考</a>
+  <a href="#ctx">3 · ctx 字段字典</a>
+  <a href="#recipes">4 · 常见配方</a>
+  <a href="#debug">5 · 调试与排错</a>
+  <a href="#rules">6 · 硬性规则</a>
+  <a href="#install">7 · 打包、分发、升级</a>
+  <a href="#limits">8 · 边界与不保证的事</a>
+  <a href="#api">9 · 管理端 API</a>
+  <a href="#pbclus">10 · PBClus 插件包格式</a>
+  <a href="#pbclus-tool" class="sub">10.1 打包工具</a>
+  <a href="#pbclus-platform" class="sub">10.2 多平台包</a>
+  <a href="#pbclus-sign" class="sub">10.3 签名与信任</a>
+  <a href="#pbclus-spec">11 · 格式规范</a>
+</nav>
+
+<main>
+
+<h1>NebulaDrive 插件制作指南</h1>
+<p>
+  教你从零写一个能在 NebulaDrive 里跑起来的插件。所有结论都从当前源码逐行核对得出 ——
+  <strong>凡与代码不符之处，以代码为准</strong>。
+</p>
+
+<div class="card ok">
+  <div class="t">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+    读完你会得到
+  </div>
+  <p>
+    一个可编译、可安装、可热插拔的插件可执行文件；知道每个钩子什么时候触发、能拿到什么字段、
+    怎么拦截请求；以及出问题时该看哪里。
+  </p>
+</div>
+
+<h2 id="intro">0 · 先读这一页</h2>
+
+<h3>插件长什么样</h3>
+<p>
+  插件就是一个<strong>独立的可执行文件</strong>，放在自己的目录里，旁边有一份
+  <code>plugin.json</code>。宿主把它当子进程拉起来，通过 stdin/stdout 上的
+  <strong>JSON-RPC 2.0</strong> 跟它对话。
+</p>
+
+<div class="grid">
+  <div class="mini"><div class="h">🔌 语言无关</div><p>任何能读写 stdin/stdout 的语言都行：Go、Python、Node、Rust、甚至 shell。</p></div>
+  <div class="mini"><div class="h">🔥 真热插拔</div><p>启用 = 拉起进程，禁用 = 杀进程。主服务不重启、不断连。</p></div>
+  <div class="mini"><div class="h">🧱 崩溃隔离</div><p>插件崩了只杀它自己。连续 5 次崩溃后停止自动重启，转人工。</p></div>
+  <div class="mini"><div class="h">⚠️ 没有沙箱</div><p>插件以宿主同等系统权限运行。隔离靠进程边界 + 你的自觉。</p></div>
+</div>
+
+<h3>三种「插件」形态，别搞混</h3>
+<div class="tw"><table>
+<thead><tr><th>形态</th><th>怎么加载</th><th>适合</th><th>要重编译主服务吗</th></tr></thead>
+<tbody>
+<tr><td><strong>进程外</strong>（本指南主题）</td><td>独立可执行文件，宿主拉起并 RPC 调用</td><td>第三方扩展</td><td><span class="tag t-ok">不需要</span></td></tr>
+<tr><td>进程内</td><td>主服务二进制里 <code>init()</code> 调 <code>plugin.Register</code></td><td>内置功能</td><td><span class="tag t-no">需要</span></td></tr>
+</tbody>
+</table></div>
+<p>业务代码对两种形态完全透明 —— 它只调 <code>plugin.Fire()</code>，不关心 handler 在哪。</p>
+
+<h3>60 秒流程</h3>
+<ol class="steps">
+  <li><span class="st">写代码</span>实现一个可执行文件：读 stdin 的 JSON-RPC，把响应写回 stdout，日志写 stderr。</li>
+  <li><span class="st">写 plugin.json</span>声明名字、入口、实现了哪些钩子。</li>
+  <li><span class="st">编译</span><code>go build -o 你的插件名 .</code>（Windows 会自动补 <code>.exe</code>）。</li>
+  <li><span class="st">安装</span>管理端 → 插件 → 用本地目录或 zip URL 安装。</li>
+  <li><span class="st">启用</span>点「启用」拉起子进程。<strong>安装不会自动启用</strong>。</li>
+</ol>
+
+<h2 id="quick">1 · 快速上手</h2>
+
+<h3 id="manifest">1.1 plugin.json</h3>
+<p>放在插件目录根下，与可执行文件同级。</p>
+
+<div class="code" data-name="plugin.json">
+<pre>{
+  <span class="s">"name"</span>: <span class="s">"myplugin"</span>,
+  <span class="s">"title"</span>: <span class="s">"我的插件"</span>,
+  <span class="s">"version"</span>: <span class="s">"1.0.0"</span>,
+  <span class="s">"author"</span>: <span class="s">"你的名字"</span>,
+  <span class="s">"description"</span>: <span class="s">"一句话说明这个插件做什么"</span>,
+  <span class="s">"entry"</span>: <span class="s">"myplugin"</span>,
+  <span class="s">"args"</span>: [],
+  <span class="s">"protocolVersion"</span>: <span class="n">1</span>,
+  <span class="s">"hooks"</span>: [<span class="s">"onAntiLeech"</span>],
+  <span class="s">"permissions"</span>: [<span class="s">"read-download-metadata"</span>, <span class="s">"write-own-datadir"</span>],
+  <span class="s">"license"</span>: <span class="s">"AGPL-3.0-only"</span>
+}</pre>
+</div>
+
+<div class="tw"><table>
+<thead><tr><th>字段</th><th>必需</th><th>规则</th></tr></thead>
+<tbody>
+<tr><td><code>name</code></td><td><span class="tag t-block">必需</span></td><td>唯一标识。只允许小写字母、数字、<code>-</code>、<code>_</code>，2–64 字符，不能以 <code>-</code>/<code>_</code> 开头。它会成为数据目录名。</td></tr>
+<tr><td><code>entry</code></td><td><span class="tag t-block">必需</span></td><td>可执行文件名。不带 <code>.exe</code> 即可跨平台通用（Windows 会自动补）。</td></tr>
+<tr><td><code>protocolVersion</code></td><td><span class="tag t-block">必需</span></td><td>必须等于 <code>1</code>，不匹配直接拒载。</td></tr>
+<tr><td><code>hooks</code></td><td><span class="tag t-block">必需</span></td><td>声明实现哪些钩子，至少 1 个，不能重复。<strong>没声明的钩子不会被派发。</strong></td></tr>
+<tr><td><code>version</code></td><td>可选</td><td>语义化三段式 <code>x.y.z</code>，纯数字。</td></tr>
+<tr><td><code>title</code>/<code>author</code>/<code>description</code></td><td>可选</td><td>管理端展示用。建议都填。</td></tr>
+<tr><td><code>permissions</code></td><td>可选</td><td><span class="tag t-no">仅供展示</span>宿主<strong>不校验</strong>。它的价值是让管理员安装前知道你要什么。</td></tr>
+<tr><td><code>args</code> / <code>env</code></td><td>可选</td><td>传给子进程的参数与环境变量。<code>env</code> 会覆盖宿主同名变量，别用它传密钥。</td></tr>
+<tr><td><code>minHostVersion</code></td><td>可选</td><td>最低宿主版本，如 <code>26.10.0</code>。留空不限。</td></tr>
+<tr><td><code>license</code></td><td>可选</td><td>SPDX 标识，默认 <code>AGPL-3.0-only</code>。</td></tr>
+</tbody>
+</table></div>
+
+<div class="card danger">
+  <div class="t">🚫 两个会让你装不上的错误</div>
+  <ul>
+    <li><strong>未知字段直接报错。</strong>清单解析开了「拒绝未知字段」，拼错一个键名（<code>"hook"</code> 少个 s）整份清单就废了。</li>
+    <li><strong><code>entry</code> 不能含路径分隔符或 <code>..</code>。</strong>这不是形式主义：宿主会把 <code>&lt;插件目录&gt;/&lt;entry&gt;</code> 交给 <code>exec</code>，允许分隔符等于让清单指定插件目录外的任意可执行文件。</li>
+  </ul>
+</div>
+
+<h3 id="rpc">1.2 RPC 协议</h3>
+<p>
+  每行一个 JSON 对象，UTF-8，不跨行分帧。宿主 → 插件有 4 个方法：
+</p>
+
+<div class="tw"><table>
+<thead><tr><th>方法</th><th>方向</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>init</code></td><td>宿主 → 插件</td><td>启动后第一件事。返回 <code>{"ok":true}</code> 才算就绪；<code>ok:false</code> 会被卸载并记录原因。</td></tr>
+<tr><td><code>fire</code></td><td>宿主 → 插件</td><td>触发钩子。<code>params = {hook, ctx, seq}</code>。</td></tr>
+<tr><td><code>ping</code></td><td>宿主 → 插件</td><td>健康检查，立刻回 <code>{"pong":true}</code>。</td></tr>
+<tr><td><code>shutdown</code></td><td>宿主 → 插件</td><td>清理资源后<strong>退出进程</strong>。</td></tr>
+</tbody>
+</table></div>
+
+<h4>init 下发的参数</h4>
+<div class="tw"><table>
+<thead><tr><th>字段</th><th>类型</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>hostVersion</code></td><td>string</td><td>宿主版本串，如 <code>V26-10.0-d</code>。</td></tr>
+<tr><td><code>hostProtocol</code></td><td>int</td><td>协议版本。<strong>必须校验</strong>，不匹配要明确失败而不是勉强跑。</td></tr>
+<tr><td><code>pluginName</code></td><td>string</td><td>宿主侧的插件标识。</td></tr>
+<tr><td><code>dataDir</code></td><td>string</td><td>插件专属可写目录，已创建。持久化都放这里，不要写宿主数据目录。</td></tr>
+<tr><td><code>config</code></td><td>object</td><td>你在管理端填的配置。没配过时可能缺省。</td></tr>
+<tr><td><code>siteURL</code></td><td>string</td><td>站点根 URL，回调宿主时用。</td></tr>
+<tr><td><code>startTimeoutMillis</code></td><td>int</td><td>你的启动预算（默认 10000ms）。</td></tr>
+</tbody>
+</table></div>
+
+<h4>fire 的结果</h4>
+<div class="code" data-name="响应的 result 字段">
+<pre>{
+  <span class="s">"ctxPatch"</span>: { <span class="s">"myFlag"</span>: <span class="k">true</span> },   <span class="c">// 唯一输出通道，浅层合并（顶层键覆盖）</span>
+  <span class="s">"error"</span>: <span class="s">"blocked by myplugin: 原因"</span>        <span class="c">// 含 "blocked" 才会被宿主当作拦截</span>
+}</pre>
+</div>
+
+<div class="card warn">
+  <div class="t">⚠️ <code>result</code> 里没有「设置 ctx 字段」这种语义</div>
+  <p>
+    想回传数据<strong>只能</strong>写 <code>ctxPatch</code>。
+    写 <code>{"userId": 1}</code> 是无效的，宿主不会读。
+  </p>
+</div>
+
+<h3 id="skeleton">1.3 可编译骨架（Go）</h3>
+<p>
+  插件<strong>不 import 宿主包</strong> —— 宿主与插件是两个 module，
+  共享依赖会造成版本耦合，也会把整个后端拖进插件的依赖图。
+  代价是协议结构要自己抄一遍，下面这份拿去就能用。
+</p>
+
+<div class="code" data-name="main.go">
+<pre><span class="k">package</span> main
+
+<span class="k">import</span> (
+	<span class="s">"bufio"</span>
+	<span class="s">"encoding/json"</span>
+	<span class="s">"fmt"</span>
+	<span class="s">"os"</span>
+)
+
+<span class="c">// ---- 协议结构：与宿主 pkg/plugin 保持一致 ----</span>
+<span class="k">type</span> <span class="ty">rpcError</span> <span class="k">struct</span> {
+	Code    <span class="ty">int</span>    <span class="s">`json:"code"`</span>
+	Message <span class="ty">string</span> <span class="s">`json:"message"`</span>
+}
+
+<span class="k">type</span> <span class="ty">request</span> <span class="k">struct</span> {
+	JSONRPC <span class="ty">string</span>          <span class="s">`json:"jsonrpc"`</span>
+	ID      <span class="ty">int64</span>           <span class="s">`json:"id"`</span>
+	Method  <span class="ty">string</span>          <span class="s">`json:"method"`</span>
+	Params  json.<span class="ty">RawMessage</span> <span class="s">`json:"params"`</span>
+}
+
+<span class="k">type</span> <span class="ty">response</span> <span class="k">struct</span> {
+	JSONRPC <span class="ty">string</span>          <span class="s">`json:"jsonrpc"`</span>
+	ID      <span class="ty">int64</span>           <span class="s">`json:"id"`</span>
+	Result  <span class="ty">any</span>             <span class="s">`json:"result,omitempty"`</span>
+	Error   *<span class="ty">rpcError</span>       <span class="s">`json:"error,omitempty"`</span>
+}
+
+<span class="k">type</span> <span class="ty">initParams</span> <span class="k">struct</span> {
+	HostVersion  <span class="ty">string</span>          <span class="s">`json:"hostVersion"`</span>
+	HostProtocol <span class="ty">int</span>             <span class="s">`json:"hostProtocol"`</span>
+	PluginName   <span class="ty">string</span>          <span class="s">`json:"pluginName"`</span>
+	DataDir      <span class="ty">string</span>          <span class="s">`json:"dataDir"`</span>
+	Config       json.<span class="ty">RawMessage</span> <span class="s">`json:"config"`</span>
+	SiteURL      <span class="ty">string</span>          <span class="s">`json:"siteUrl"`</span>
+}
+
+<span class="k">type</span> <span class="ty">fireParams</span> <span class="k">struct</span> {
+	Hook <span class="ty">string</span>         <span class="s">`json:"hook"`</span>
+	Ctx  <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">any</span> <span class="s">`json:"ctx"`</span>
+	Seq  <span class="ty">int64</span>          <span class="s">`json:"seq"`</span>
+}
+
+<span class="k">type</span> <span class="ty">fireResult</span> <span class="k">struct</span> {
+	CtxPatch <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">any</span> <span class="s">`json:"ctxPatch,omitempty"`</span>
+	Error    <span class="ty">string</span>         <span class="s">`json:"error,omitempty"`</span>
+}
+
+<span class="k">const</span> hookAntiLeech = <span class="s">"onAntiLeech"</span>
+
+<span class="k">func</span> <span class="fn">main</span>() {
+	sc := bufio.<span class="fn">NewScanner</span>(os.Stdin)
+	sc.<span class="fn">Buffer</span>(<span class="fn">make</span>([]<span class="ty">byte</span>, <span class="n">0</span>, <span class="n">64</span>*<span class="n">1024</span>), <span class="n">8</span>&lt;&lt;<span class="n">20</span>)
+
+	<span class="k">for</span> sc.<span class="fn">Scan</span>() {
+		line := sc.<span class="fn">Bytes</span>()
+		<span class="k">if</span> <span class="fn">len</span>(line) == <span class="n">0</span> {
+			<span class="k">continue</span>
+		}
+		<span class="k">var</span> req request
+		<span class="k">if</span> err := json.<span class="fn">Unmarshal</span>(line, &amp;req); err != <span class="k">nil</span> {
+			<span class="c">// 宿主写出的行必须是合法 JSON；解析不了说明协议层有问题，</span>
+			<span class="c">// 但插件不能因此退出（否则宿主看不到原因）。</span>
+			<span class="fn">logf</span>(<span class="s">"无法解析请求: %v"</span>, err)
+			<span class="k">continue</span>
+		}
+		<span class="k">switch</span> req.Method {
+		<span class="k">case</span> <span class="s">"init"</span>:
+			<span class="fn">handleInit</span>(req)
+		<span class="k">case</span> <span class="s">"fire"</span>:
+			<span class="fn">handleFire</span>(req)
+		<span class="k">case</span> <span class="s">"ping"</span>:
+			<span class="fn">reply</span>(req, <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">any</span>{<span class="s">"pong"</span>: <span class="k">true</span>}, <span class="k">nil</span>)
+		<span class="k">case</span> <span class="s">"shutdown"</span>:
+			<span class="fn">reply</span>(req, <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">any</span>{<span class="s">"bye"</span>: <span class="k">true</span>}, <span class="k">nil</span>)
+			<span class="k">return</span>
+		<span class="k">default</span>:
+			<span class="fn">reply</span>(req, <span class="k">nil</span>, &amp;<span class="ty">rpcError</span>{Code: <span class="n">-32601</span>, Message: <span class="s">"不支持的方法: "</span> + req.Method})
+		}
+	}
+}
+
+<span class="k">func</span> <span class="fn">handleInit</span>(req request) {
+	<span class="k">var</span> p initParams
+	<span class="k">if</span> err := json.<span class="fn">Unmarshal</span>(req.Params, &amp;p); err != <span class="k">nil</span> {
+		<span class="fn">reply</span>(req, <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">any</span>{<span class="s">"ok"</span>: <span class="k">false</span>, <span class="s">"error"</span>: err.<span class="fn">Error</span>()}, <span class="k">nil</span>)
+		<span class="k">return</span>
+	}
+	<span class="k">if</span> p.HostProtocol != <span class="n">1</span> {
+		<span class="c">// 明确失败比「勉强跑起来」好：协议不匹配时静默降级会出难查的问题</span>
+		<span class="fn">reply</span>(req, <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">any</span>{
+			<span class="s">"ok"</span>:    <span class="k">false</span>,
+			<span class="s">"error"</span>: fmt.<span class="fn">Sprintf</span>(<span class="s">"协议版本不匹配：宿主 %d，插件只支持 1"</span>, p.HostProtocol),
+		}, <span class="k">nil</span>)
+		<span class="k">return</span>
+	}
+	<span class="fn">logf</span>(<span class="s">"就绪：宿主 %s，数据目录 %s"</span>, p.HostVersion, p.DataDir)
+	<span class="fn">reply</span>(req, <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">any</span>{
+		<span class="s">"ok"</span>: <span class="k">true</span>, <span class="s">"name"</span>: <span class="s">"myplugin"</span>, <span class="s">"version"</span>: <span class="s">"1.0.0"</span>,
+		<span class="s">"hooks"</span>: []<span class="ty">string</span>{hookAntiLeech},
+	}, <span class="k">nil</span>)
+}
+
+<span class="k">func</span> <span class="fn">handleFire</span>(req request) {
+	<span class="k">var</span> p fireParams
+	<span class="k">if</span> err := json.<span class="fn">Unmarshal</span>(req.Params, &amp;p); err != <span class="k">nil</span> {
+		<span class="fn">reply</span>(req, <span class="k">nil</span>, &amp;<span class="ty">rpcError</span>{Code: <span class="n">-32602</span>, Message: err.<span class="fn">Error</span>()})
+		<span class="k">return</span>
+	}
+	<span class="k">if</span> p.Hook != hookAntiLeech {
+		<span class="fn">reply</span>(req, fireResult{}, <span class="k">nil</span>)
+		<span class="k">return</span>
+	}
+
+	<span class="c">// ctx 经 JSON 往返后数字一律是 float64 —— 断言 int 会永远失败，</span>
+	<span class="c">// 而且不报错。这是插件里最常见的一类「静默不生效」。</span>
+	ref, _ := p.Ctx[<span class="s">"referer"</span>].(<span class="ty">string</span>)
+	name, _ := p.Ctx[<span class="s">"fileName"</span>].(<span class="ty">string</span>)
+	<span class="k">if</span> ref == <span class="s">""</span> {
+		<span class="fn">reply</span>(req, fireResult{CtxPatch: <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">any</span>{<span class="s">"myFlag"</span>: <span class="s">"allow"</span>}}, <span class="k">nil</span>)
+		<span class="k">return</span>
+	}
+	<span class="fn">reply</span>(req, fireResult{
+		<span class="c">// 必须含 "blocked"，宿主据此返回 403</span>
+		Error:    fmt.<span class="fn">Sprintf</span>(<span class="s">"blocked by myplugin: %s 的 Referer 是 %s"</span>, name, ref),
+		CtxPatch: <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">any</span>{<span class="s">"myFlag"</span>: <span class="s">"block"</span>},
+	}, <span class="k">nil</span>)
+}
+
+<span class="k">func</span> <span class="fn">reply</span>(req request, result <span class="ty">any</span>, rerr *<span class="ty">rpcError</span>) {
+	out := response{JSONRPC: <span class="s">"2.0"</span>, ID: req.ID, Result: result, Error: rerr}
+	b, err := json.<span class="fn">Marshal</span>(out)
+	<span class="k">if</span> err != <span class="k">nil</span> {
+		<span class="fn">logf</span>(<span class="s">"序列化响应失败: %v"</span>, err)
+		<span class="k">return</span>
+	}
+	os.Stdout.<span class="fn">Write</span>(<span class="fn">append</span>(b, <span class="s">'\n'</span>))
+}
+
+<span class="c">// logf 日志必须走 stderr：stdout 是 RPC 专用通道。</span>
+<span class="c">// 宿主会把 stderr 收进插件日志缓冲，在管理端「查看日志」里能看到。</span>
+<span class="k">func</span> <span class="fn">logf</span>(format <span class="ty">string</span>, args ...<span class="ty">any</span>) {
+	fmt.<span class="fn">Fprintf</span>(os.Stderr, <span class="s">"[myplugin] "</span>+format+<span class="s">"\n"</span>, args...)
+}</pre>
+</div>
+
+<p>配一份最小清单就能跑：</p>
+<div class="code" data-name="plugin.json">
+<pre>{
+  <span class="s">"name"</span>: <span class="s">"myplugin"</span>,
+  <span class="s">"title"</span>: <span class="s">"我的插件"</span>,
+  <span class="s">"version"</span>: <span class="s">"1.0.0"</span>,
+  <span class="s">"entry"</span>: <span class="s">"myplugin"</span>,
+  <span class="s">"protocolVersion"</span>: <span class="n">1</span>,
+  <span class="s">"hooks"</span>: [<span class="s">"onAntiLeech"</span>]
+}</pre>
+</div>
+
+<div class="code" data-name="构建 & 安装">
+<pre><span class="c"># 构建（Windows 上产物会自动带 .exe，清单里的 entry 仍然写不带后缀的名字）</span>
+go mod init myplugin
+go build -o myplugin .
+
+<span class="c"># 安装：管理端 → 插件 → 商店 → 填本地目录路径，或直接调接口</span>
+curl -X POST http://localhost:5212/api/admin/plugins/install \
+  -H <span class="s">"Authorization: Bearer $TOKEN"</span> \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{"source":"local","path":"/abs/path/to/myplugin"}'</span>
+
+<span class="c"># 然后必须显式启用（安装不会自动启用）</span>
+curl -X POST http://localhost:5212/api/admin/plugins/myplugin/enable \
+  -H <span class="s">"Authorization: Bearer $TOKEN"</span></pre>
+</div>
+
+<div class="card note">
+  <div class="t">💡 为什么安装不自动启用</div>
+  <p>
+    自动启用会让「阅读并同意插件协议」这一步形同虚设。
+    首次安装/启用前必须先读过协议 —— <strong>后端强制</strong>，未同意时接口直接 403，
+    不是只靠前端弹窗。
+  </p>
+</div>
+
+<h2 id="hooks">2 · 钩子参考</h2>
+<p>
+  这是当前的完整钩子表。<strong>没有 <code>Wired:false</code> 的钩子了</strong> ——
+  下面每一个都真的有触发点。
+</p>
+
+<div class="tw"><table>
+<thead><tr><th>钩子</th><th>模式</th><th>可拦截</th><th>触发时机</th></tr></thead>
+<tbody>
+<tr><td><code>onAntiLeech</code></td><td><span class="tag t-sync">sync</span></td><td><span class="tag t-block">可拦截</span></td><td>登录下载、<strong>分享下载与分享预览</strong>之前</td></tr>
+<tr><td><code>onCollabOpen</code></td><td><span class="tag t-sync">sync</span></td><td>—</td><td>打开协作编辑时（写 <code>url</code> 可 302 跳转）</td></tr>
+<tr><td><code>onApiAuth</code></td><td><span class="tag t-sync">sync</span></td><td><span class="tag t-block">可拦截</span></td><td>开放 API 内置鉴权<strong>失败之后</strong></td></tr>
+<tr><td><code>onCLI</code></td><td><span class="tag t-sync">sync</span></td><td><span class="tag t-block">可拦截</span></td><td>执行 <code>nebula plugin &lt;cmd&gt;</code> 时</td></tr>
+<tr><td><code>onEmail</code></td><td><span class="tag t-async">async</span></td><td>—</td><td>创建站内通知时</td></tr>
+<tr><td><code>onRateLimit</code></td><td><span class="tag t-async">async</span></td><td><span class="tag t-no">见下</span></td><td>高频操作前（7 个调用点）</td></tr>
+<tr><td><code>onDBMigrate</code></td><td><span class="tag t-async">async</span></td><td>—</td><td><strong>每次启动</strong>迁移完成后</td></tr>
+<tr><td><code>onBackup</code></td><td><span class="tag t-async">async</span></td><td>—</td><td>管理端创建备份之后</td></tr>
+<tr><td><code>onRestore</code></td><td><span class="tag t-async">async</span></td><td>—</td><td>管理端提交恢复之前</td></tr>
+<tr><td><code>onCollabSave</code></td><td><span class="tag t-async">async</span></td><td>—</td><td>保存协作内容时（含完整文件明文）</td></tr>
+</tbody>
+</table></div>
+
+<h3>模式意味着什么</h3>
+<div class="tw"><table>
+<thead><tr><th>模式</th><th>宿主行为</th><th>你能做什么</th></tr></thead>
+<tbody>
+<tr><td><span class="tag t-sync">sync</span></td><td>阻塞等你返回，超时 2 秒</td><td>能回传数据（<code>ctxPatch</code>），能拦截（<code>error</code>）。<strong>别在这里做慢操作。</strong></td></tr>
+<tr><td><span class="tag t-async">async</span></td><td>每个插件一个 goroutine，<strong>结果直接丢弃</strong></td><td>只能当事件通知用。写 <code>ctxPatch</code> 不会有人读，返回 <code>error</code> 也不会拦截。</td></tr>
+</tbody>
+</table></div>
+
+<div class="card warn">
+  <div class="t">⚠️ 异步钩子拿不到返回值 —— 这是设计，不是 bug</div>
+  <p>
+    业务在派发异步钩子后已经继续往下走了，回写 ctx 只会造成竞态。
+    所以「在 <code>onEmail</code> 里返回 error 来阻止通知创建」是<strong>做不到的</strong>。
+    需要否决能力请用同步钩子。
+  </p>
+</div>
+
+<h3>各钩子的 ctx 契约</h3>
+
+<h4><code>onAntiLeech</code> — 防盗链 <span class="tag t-block">可拦截</span></h4>
+<p>两条路径的字段不同，插件必须都处理：</p>
+<div class="tw"><table>
+<thead><tr><th>来源</th><th>ctx</th></tr></thead>
+<tbody>
+<tr><td>登录下载</td><td><code>{userId, userName, ip, ua, fileId, fileName, referer}</code></td></tr>
+<tr><td>公开分享</td><td><code>{userId(恒为0), userName(恒为空), ip, ua, fileId, fileName, referer, shareId, shareKind, shareOwnerId}</code></td></tr>
+</tbody>
+</table></div>
+<ul>
+  <li><code>shareKind</code> 是 <code>"download"</code> 或 <code>"preview"</code>。</li>
+  <li><strong>预览也是完整文件内容的出口</strong>，宿主对两者一视同仁地过闸。只想保护下载、放行本站分享页内联预览的插件，请自行按 <code>shareKind</code> 放行。</li>
+  <li>分享访问者是<strong>匿名</strong>的：<code>userId</code> 恒为 <code>0</code> 且键一定存在。不要用它做豁免判断。</li>
+  <li>想放行豁免用户，请判断 <code>userId &gt; 0 &amp;&amp; userId 在豁免列表</code>。</li>
+</ul>
+
+<h4><code>onApiAuth</code> — 扩展鉴权 <span class="tag t-block">可拦截</span></h4>
+<p>内置鉴权（PAT / OAuth2）<strong>都失败之后</strong>才触发，包括「根本没带 Authorization」的请求。</p>
+<div class="tw"><table>
+<thead><tr><th>ctx 字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>method</code> / <code>path</code> / <code>query</code></td><td>请求行三要素。<code>query</code> 是原始串，未规范化。</td></tr>
+<tr><td><code>headers</code></td><td>全部请求头，<strong>不含 <code>Authorization</code></strong>（内置凭据留在宿主）。用你自己的头传签名。</td></tr>
+<tr><td><code>hasAuthorization</code></td><td>是否带了 Authorization，布尔。</td></tr>
+<tr><td><code>contentType</code> / <code>contentLength</code></td><td>请求体信息。</td></tr>
+<tr><td><code>bodyHash</code></td><td><code>"sha256:&lt;hex&gt;"</code>。请求体超过 64KB 时为空串。</td></tr>
+<tr><td><code>bodyTruncated</code></td><td><code>true</code> 表示宿主没读完 body，<strong>此时不要放行</strong> —— 你无法校验完整性。</td></tr>
+<tr><td><code>ip</code> / <code>ua</code></td><td>来源信息，用于审计。</td></tr>
+</tbody>
+</table></div>
+<p>两种表达方式，二选一：</p>
+<div class="code" data-name="放行 / 拒绝">
+<pre><span class="c">// 放行：在 ctxPatch 里写 principalUserId（必须 &gt; 0 且是真实存在的用户 ID）</span>
+{<span class="s">"ctxPatch"</span>: {<span class="s">"principalUserId"</span>: <span class="n">42</span>}}
+
+<span class="c">// 拒绝：返回含 "blocked" 的 error，宿主回 403</span>
+{<span class="s">"error"</span>: <span class="s">"blocked by myauth: 签名不匹配"</span>}
+
+<span class="c">// 两者都没有 → 宿主按未通过处理（保持 401）</span></pre>
+</div>
+<div class="card danger">
+  <div class="t">🚫 别在 <code>onApiAuth</code> 里「没意见」地退回</div>
+  <p>
+    如果你装了插件但配错了（比如没填密钥），正确行为是<strong>拒绝一切</strong>。
+    退回「没意见」看起来无害，但那样任何人都能靠不带签名头绕过你的保护。
+    要放行的公开端点，请显式列进配置的免签列表。
+  </p>
+</div>
+
+<h4><code>onCLI</code> — 自定义命令行 <span class="tag t-block">可拦截</span></h4>
+<p>执行 <code>nebula plugin &lt;cmd&gt; [args...]</code> 时触发。</p>
+<div class="tw"><table>
+<thead><tr><th>ctx 字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>command</code></td><td>子命令名，如 <code>"hello"</code>。</td></tr>
+<tr><td><code>args</code></td><td>参数数组。</td></tr>
+<tr><td><code>argsRaw</code></td><td>参数拼成的原始串。</td></tr>
+</tbody>
+</table></div>
+<p>回传方式（经 <code>ctxPatch</code>）：</p>
+<div class="code" data-name="打印输出与退出码">
+<pre>{
+  <span class="s">"ctxPatch"</span>: {
+    <span class="s">"cliOutput"</span>: <span class="s">"我的插件收到了 hello\n"</span>,   <span class="c">// 会打印到 stdout</span>
+    <span class="s">"cliExitCode"</span>: <span class="n">0</span>                          <span class="c">// 非 0 会让命令行以该码退出</span>
+  }
+}</pre>
+</div>
+<p>退出码约定：<code>0</code> 成功 · <code>1</code> 用法错误或被插件拒绝 · <code>2</code> 系统未安装。</p>
+<div class="card warn">
+  <div class="t">⚠️ 多个插件响应同一命令时 <code>cliOutput</code> 是后写覆盖</div>
+  <p>请自行加前缀区分（例如 <code>[myplugin] ...</code>），否则输出会互相覆盖。</p>
+</div>
+
+<h4><code>onEmail</code> — 邮件外发</h4>
+<p><code>{to, subject, body}</code>。用户邮箱为空时<strong>不会触发</strong>。</p>
+<div class="card note">
+  <div class="t">💡 这是邮件外发的唯一入口</div>
+  <p>宿主本身不含任何发信实现（全仓没有 <code>net/smtp</code> 调用）。没有邮件插件，站内通知永远到不了邮箱。官方示例见 <code>examples/plugins/smtp-email/</code>。</p>
+</div>
+
+<h4><code>onBackup</code> / <code>onRestore</code> — 备份恢复</h4>
+<div class="tw"><table>
+<thead><tr><th>钩子</th><th>ctx</th><th>时机</th></tr></thead>
+<tbody>
+<tr><td><code>onBackup</code></td><td><code>{kind, filename, path, size, sha256, dbPath, dbIncluded, fileCount, createdAt, operator}</code></td><td>备份包<strong>生成之后</strong>。可据此复制到 S3 / 异地或落审计。</td></tr>
+<tr><td><code>onRestore</code></td><td><code>{filename, size, stagedPath, currentDb, operator}</code></td><td>恢复<strong>提交时</strong>。仅通知。</td></tr>
+</tbody>
+</table></div>
+<div class="card danger">
+  <div class="t">🚫 恢复是「暂存制」，这两个钩子都拦不住它</div>
+  <p>
+    真正的数据库替换发生在<strong>下次启动</strong>（热替换正在被使用的 SQLite 库会损坏数据）。
+    两个钩子都是异步的，拿不到否决权。需要拦住恢复请在权限层解决。
+  </p>
+</div>
+
+<h4><code>onDBMigrate</code> — 建表</h4>
+<p><code>{fromVersion, toVersion}</code>。<strong>每次启动都会触发</strong>，不只升级时。两者相等表示本次没有迁移。</p>
+<div class="card warn">
+  <div class="t">⚠️ 你的建表语句必须幂等</div>
+  <p>用 <code>CREATE TABLE IF NOT EXISTS</code> 之类。否则第二次启动就会报错 —— 而这个钩子每次启动都跑。</p>
+</div>
+
+<h4><code>onRateLimit</code> — 限流的特殊情况</h4>
+<p>
+  它在 <strong>7 个地方</strong>被调用，但只有限流中间件那一处会读返回值。
+  为了不让另外 6 处（登录/上传/下载/分享增删）每次白等一次 IPC 往返，
+  这个钩子整体是异步的，中间件那一处改走一个强制同步的入口。
+</p>
+<p><strong>结论：想拦请求请用 <code>onAntiLeech</code>，别指望 <code>onRateLimit</code>。</strong></p>
+
+<h2 id="ctx">3 · ctx 字段字典</h2>
+
+<div class="card danger">
+  <div class="t">🚫 最重要的一条：数字都是 float64</div>
+  <p>
+    ctx 经 JSON 往返之后，<strong>所有数字都是 <code>float64</code></strong>。
+    <code>ctx["userId"].(int)</code> 或 <code>.(uint)</code> 会<strong>静默失败</strong> ——
+    不 panic（用带 ok 的断言时），功能就是不生效，而且没有任何报错。
+  </p>
+</div>
+
+<div class="code" data-name="类型安全的取值">
+<pre><span class="c">// ❌ 错：永远拿不到值，且不报错</span>
+<span class="k">if</span> id, ok := ctx[<span class="s">"userId"</span>].(<span class="ty">uint</span>); ok { ... }
+
+<span class="c">// ✅ 对：写一个兼容多种来源的取值函数</span>
+<span class="k">func</span> <span class="fn">numOf</span>(v <span class="ty">any</span>) (<span class="ty">uint64</span>, <span class="ty">bool</span>) {
+	<span class="k">switch</span> n := v.(<span class="k">type</span>) {
+	<span class="k">case</span> <span class="ty">float64</span>:   <span class="c">// JSON 往返后的常态</span>
+		<span class="k">if</span> n &gt;= <span class="n">0</span> { <span class="k">return</span> <span class="ty">uint64</span>(n), <span class="k">true</span> }
+	<span class="k">case</span> <span class="ty">int</span>:
+		<span class="k">if</span> n &gt;= <span class="n">0</span> { <span class="k">return</span> <span class="ty">uint64</span>(n), <span class="k">true</span> }
+	<span class="k">case</span> <span class="ty">int64</span>:
+		<span class="k">if</span> n &gt;= <span class="n">0</span> { <span class="k">return</span> <span class="ty">uint64</span>(n), <span class="k">true</span> }
+	<span class="k">case</span> <span class="ty">uint64</span>:
+		<span class="k">return</span> n, <span class="k">true</span>
+	<span class="k">case</span> <span class="ty">uint</span>:
+		<span class="k">return</span> <span class="ty">uint64</span>(n), <span class="k">true</span>
+	}
+	<span class="k">return</span> <span class="n">0</span>, <span class="k">false</span>
+}
+
+<span class="c">// 字符串直接断言即可（JSON 里字符串就是字符串）</span>
+name, _ := ctx[<span class="s">"fileName"</span>].(<span class="ty">string</span>)
+
+<span class="c">// headers 是个 map —— 但要注意它的值类型取决于来源</span>
+<span class="k">func</span> <span class="fn">headerValue</span>(ctx <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">any</span>, name <span class="ty">string</span>) (<span class="ty">string</span>, <span class="ty">bool</span>) {
+	<span class="k">switch</span> hs := ctx[<span class="s">"headers"</span>].(<span class="k">type</span>) {
+	<span class="k">case</span> <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">string</span>:  <span class="c">// 进程内 handler 传的形态</span>
+		<span class="k">for</span> k, v := <span class="k">range</span> hs {
+			<span class="k">if</span> strings.<span class="fn">EqualFold</span>(k, name) { <span class="k">return</span> v, <span class="k">true</span> }
+		}
+	<span class="k">case</span> <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">any</span>:  <span class="c">// JSON 往返后的形态</span>
+		<span class="k">for</span> k, v := <span class="k">range</span> hs {
+			<span class="k">if</span> strings.<span class="fn">EqualFold</span>(k, name) { <span class="k">return</span> fmt.<span class="fn">Sprint</span>(v), <span class="k">true</span> }
+		}
+	}
+	<span class="k">return</span> <span class="s">""</span>, <span class="k">false</span>
+}</pre>
+</div>
+
+<h3>通用字段一览</h3>
+<div class="tw"><table>
+<thead><tr><th>字段</th><th>类型</th><th>出现在</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>userId</code></td><td>float64</td><td>多数钩子</td><td>用户 ID。<strong>分享场景恒为 0</strong>。</td></tr>
+<tr><td><code>userName</code></td><td>string</td><td>多数钩子</td><td>用户名。分享场景为空串。</td></tr>
+<tr><td><code>ip</code></td><td>string</td><td>多数钩子</td><td>客户端 IP。</td></tr>
+<tr><td><code>ua</code></td><td>string</td><td>多数钩子</td><td>User-Agent。</td></tr>
+<tr><td><code>fileId</code> / <code>fileName</code></td><td>float64 / string</td><td>文件相关钩子</td><td>文件 ID 与名字。<strong>fileName 是不可信输入</strong>，用过它拼路径就完蛋了。</td></tr>
+<tr><td><code>referer</code></td><td>string</td><td>onAntiLeech</td><td>Referer 头原值，可能为空。</td></tr>
+<tr><td><code>shareId</code> / <code>shareKind</code> / <code>shareOwnerId</code></td><td>float64 / string / float64</td><td>onAntiLeech（分享路径）</td><td>分享标识、场景、<strong>分享所有者</strong>（与访问者不是一回事）。</td></tr>
+</tbody>
+</table></div>
+
+<div class="card note">
+  <div class="t">💡 环境变量</div>
+  <p>宿主会给插件子进程设 <code>NEBULA_PLUGIN_DATA</code> 指向数据目录，与 <code>init</code> 里的 <code>dataDir</code> 一致。</p>
+</div>
+
+<h2 id="recipes">4 · 常见配方</h2>
+
+<h3>配方一：防盗链（Referer 白名单）</h3>
+<p>完整可运行版本见 <code>examples/plugins/referer-guard/</code>。要点：</p>
+<ul>
+  <li>支持三种规则写法：前缀、<code>*.example.com</code> 通配、<code>re:</code> 开头的正则。</li>
+  <li><strong>正则要预编译</strong>。每次请求现编译是一个 DoS 面。</li>
+  <li>默认放行无 Referer 的请求 —— 很多下载工具（curl/wget）不带 Referer，一律拦会打断自己人用命令行取文件。</li>
+  <li>豁免用户判断要先确认 <code>userId &gt; 0</code>，否则分享链接会被当成「用户 0」而误判。</li>
+</ul>
+
+<h3>配方二：HMAC 签名鉴权</h3>
+<p>完整版本见 <code>examples/plugins/hmac-auth/</code>。待签名规范串：</p>
+<div class="code" data-name="规范串">
+<pre>METHOD\nPATH\nQUERY\nTIMESTAMP\nBODY_SHA256_HEX</pre>
+</div>
+<ul>
+  <li><strong>五行缺一不可。</strong>少任何一行，攻击者就能在不改签名的前提下替换那部分内容。</li>
+  <li><code>METHOD</code> 统一大写（同时接受大小写会让签名含义模糊）。</li>
+  <li>空 body 也要算摘要，值是 <code>e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</code>。</li>
+  <li><strong>用常量时间比较</strong>（<code>hmac.Equal</code> / 等价实现）。用 <code>==</code> 会在第一个不同字节处返回，可以被逐字节猜出签名。</li>
+  <li>时间窗是<strong>防重放的唯一手段</strong> —— 签名是静态的，没有时间窗就能被无限重放。</li>
+</ul>
+
+<h3>配方三：只读某个钩子的事件（审计）</h3>
+<div class="code" data-name="append-only 审计">
+<pre><span class="k">func</span> <span class="fn">handleFire</span>(req request) {
+	<span class="k">var</span> p fireParams
+	<span class="k">if</span> err := json.<span class="fn">Unmarshal</span>(req.Params, &amp;p); err != <span class="k">nil</span> {
+		<span class="fn">reply</span>(req, <span class="k">nil</span>, &amp;<span class="ty">rpcError</span>{Code: <span class="n">-32602</span>, Message: err.<span class="fn">Error</span>()})
+		<span class="k">return</span>
+	}
+	<span class="c">// 审计场景：只记录，不拦截，不做慢操作（异步钩子也不该拖慢宿主）</span>
+	<span class="fn">appendJSONL</span>(auditFile, <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">any</span>{
+		<span class="s">"time"</span>:  time.<span class="fn">Now</span>().<span class="fn">Format</span>(time.RFC3339),
+		<span class="s">"hook"</span>:  p.Hook,
+		<span class="s">"user"</span>:  p.Ctx[<span class="s">"userName"</span>],
+		<span class="s">"file"</span>:  p.Ctx[<span class="s">"fileName"</span>],
+		<span class="s">"ip"</span>:    p.Ctx[<span class="s">"ip"</span>],
+	})
+	<span class="c">// 关键：**不要返回 Error**。审计失败不该影响业务。</span>
+	<span class="fn">reply</span>(req, fireResult{CtxPatch: <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">any</span>{<span class="s">"audited"</span>: <span class="k">true</span>}}, <span class="k">nil</span>)
+}</pre>
+</div>
+
+<h3>配方四：带配置的插件</h3>
+<div class="code" data-name="配置解析与默认值">
+<pre><span class="k">type</span> <span class="ty">Config</span> <span class="k">struct</span> {
+	AllowedReferers []<span class="ty">string</span> <span class="s">`json:"allowedReferers"`</span>
+	TimeoutSeconds  <span class="ty">int</span>    <span class="s">`json:"timeoutSeconds"`</span>
+	Secret          <span class="ty">string</span> <span class="s">`json:"secret"`</span>
+}
+
+<span class="k">func</span> <span class="fn">parseConfig</span>(raw json.<span class="ty">RawMessage</span>) <span class="ty">Config</span> {
+	cfg := <span class="ty">Config</span>{TimeoutSeconds: <span class="n">10</span>}   <span class="c">// 先给默认值</span>
+	<span class="k">if</span> <span class="fn">len</span>(raw) &gt; <span class="n">0</span> {
+		<span class="c">// 解析失败退回默认而不是拒绝启动：插件不该因为配置笔误就完全不可用。</span>
+		<span class="c">// 但一定要记日志说清楚。</span>
+		<span class="k">if</span> err := json.<span class="fn">Unmarshal</span>(raw, &amp;cfg); err != <span class="k">nil</span> {
+			<span class="fn">logf</span>(<span class="s">"配置解析失败，使用默认配置: %v"</span>, err)
+			cfg = <span class="ty">Config</span>{TimeoutSeconds: <span class="n">10</span>}
+		}
+	}
+	<span class="k">if</span> cfg.TimeoutSeconds &lt;= <span class="n">0</span> {
+		cfg.TimeoutSeconds = <span class="n">10</span>   <span class="c">// 零值兜底：context.WithTimeout(0) 会立即过期</span>
+	}
+	<span class="k">return</span> cfg
+}
+
+<span class="c">// 日志里绝不能出现密钥原文 —— 插件日志会展示在管理端</span>
+<span class="k">func</span> <span class="fn">masked</span>(s <span class="ty">string</span>) <span class="ty">string</span> {
+	<span class="k">if</span> s == <span class="s">""</span> { <span class="k">return</span> <span class="s">"&lt;empty&gt;"</span> }
+	<span class="k">return</span> fmt.<span class="fn">Sprintf</span>(<span class="s">"&lt;set:%d chars&gt;"</span>, <span class="fn">len</span>(s))
+}</pre>
+</div>
+<div class="card ok">
+  <div class="t">✅ 配置是加密存储的</div>
+  <p>
+    管理端填的配置在数据库里以密文保存，只有管理接口以明文下发。
+    所以你不用也不该在前端做任何加密处理 —— 密钥不能发给浏览器。
+  </p>
+</div>
+
+<h2 id="debug">5 · 调试与排错</h2>
+
+<h3>去哪看日志</h3>
+<p>
+  插件写 <strong>stderr</strong> 的内容会被宿主收进环形缓冲（每插件 500 条），
+  在管理端插件卡片点「查看日志」就能看到，也可以直接调接口：
+</p>
+<div class="code" data-name="读插件日志">
+<pre>curl -H <span class="s">"Authorization: Bearer $TOKEN"</span> \
+  <span class="s">"http://localhost:5212/api/admin/plugins/logs?name=myplugin&amp;limit=200"</span></pre>
+</div>
+
+<h3>把日志写成 JSON（推荐）</h3>
+<p>宿主能识别这个格式并结构化展示，比裸文本好读得多：</p>
+<div class="code" data-name="结构化日志">
+<pre><span class="k">func</span> <span class="fn">logf</span>(level, format <span class="ty">string</span>, args ...<span class="ty">any</span>) {
+	rec := <span class="ty">map</span>[<span class="ty">string</span>]<span class="ty">any</span>{
+		<span class="s">"level"</span>:   level,                                  <span class="c">// debug/info/warn/error</span>
+		<span class="s">"message"</span>: fmt.<span class="fn">Sprintf</span>(format, args...),
+		<span class="s">"time"</span>:    time.<span class="fn">Now</span>().<span class="fn">UnixMilli</span>(),
+	}
+	b, err := json.<span class="fn">Marshal</span>(rec)
+	<span class="k">if</span> err != <span class="k">nil</span> {
+		fmt.<span class="fn">Fprintf</span>(os.Stderr, <span class="s">"[%s] %s\n"</span>, level, fmt.<span class="fn">Sprintf</span>(format, args...))
+		<span class="k">return</span>
+	}
+	<span class="c">// 必须写 stderr：stdout 是 RPC 专用通道</span>
+	os.Stderr.<span class="fn">Write</span>(<span class="fn">append</span>(b, <span class="s">'\n'</span>))
+}</pre>
+</div>
+
+<h3>常见症状 → 原因</h3>
+<div class="tw"><table>
+<thead><tr><th>症状</th><th>最可能的原因</th></tr></thead>
+<tbody>
+<tr><td>管理端显示「已启用」但什么都没发生</td><td>进程没跑起来。列表里会显式提示这个矛盾 —— 看 <code>status</code> 与 <code>pid</code>，以及列表页的运行错误字段。</td></tr>
+<tr><td>插件装不上，报未知字段</td><td><code>plugin.json</code> 里有拼错的键名。清单解析拒绝未知字段。</td></tr>
+<tr><td>插件装上了但「启用」失败</td><td><code>init</code> 返回了 <code>ok:false</code>，或者可执行文件不存在 / 名字对不上 <code>entry</code>。</td></tr>
+<tr><td>配置改了没生效</td><td>配置在<strong>启用时</strong>下发。改完要重启插件（管理端点「重启」）。</td></tr>
+<tr><td>钩子明明注册了却收不到事件</td><td>1) 忘了在 <code>hooks</code> 里声明；2) 该钩子的触发条件不满足（例如 <code>onEmail</code> 在用户没邮箱时不触发）。</td></tr>
+<tr><td>插件日志里刷 <code>file already closed</code></td><td>宿主在异步写还没完成时就停了插件。通常是测试/关机时序，不是插件 bug。</td></tr>
+<tr><td>数字字段读出来总是 0 / 判断从不成立</td><td>用了 <code>.(int)</code> 或 <code>.(uint)</code>。JSON 往返后是 <code>float64</code>，见 §3。</td></tr>
+<tr><td>拦截不生效</td><td>error 文本里没有小写 <code>blocked</code>（区分大小写），或者写进了 <code>ctxPatch</code> 而不是 <code>error</code>。也可能钩子本身不可拦截（异步）。</td></tr>
+<tr><td>插件反复重启</td><td>崩溃了。连续 5 次后宿主放弃自动重启并转人工。看日志缓冲里的原始错误。</td></tr>
+<tr><td>重启后插件全变 503 /「插件宿主未就绪」</td><td>首次安装后<strong>没重启服务</strong>。安装向导完成后需要重启一次，插件宿主才会初始化。</td></tr>
+</tbody>
+</table></div>
+
+<h3>本地手动测协议</h3>
+<p>不用装进 NebulaDrive 也能验证你的插件守不守协议：</p>
+<div class="code" data-name="手工发一行 init">
+<pre><span class="c"># 直接把 JSON-RPC 行喂给插件，看它回什么</span>
+echo <span class="s">'{"jsonrpc":"2.0","id":1,"method":"init","params":{"hostVersion":"test","hostProtocol":1,"pluginName":"myplugin","dataDir":"/tmp/x"}}'</span> \
+  | ./myplugin
+
+<span class="c"># 期望输出一行：{"jsonrpc":"2.0","id":1,"result":{"ok":true,...}}</span></pre>
+</div>
+<p>
+  用 <code>examples/plugins/</code> 下的官方示例对照着看最快 ——
+  它们就是按本文档的规则写的，且都有测试。
+</p>
+
+<h2 id="rules">6 · 硬性规则</h2>
+<p>这几条违反任何一条都会出问题，而且症状通常很难查。</p>
+
+<div class="grid">
+  <div class="mini"><div class="h">1. stdout 只放 RPC</div><p>一行一个 JSON。日志一律 stderr。混用会破坏分帧 —— 插件直接失联，宿主只看到「进程没响应」。</p></div>
+  <div class="mini"><div class="h">2. 拦截只认 error + "blocked"</div><p>必须从小写 <code>blocked</code> 子串。写 <code>ctxPatch:{"blocked":true}</code> 无效，大写不匹配。</p></div>
+  <div class="mini"><div class="h">3. 数字当 float64 读</div><p>ctx 经 JSON 往返。断言成 <code>int</code>/<code>uint</code> 会静默失效。</p></div>
+  <div class="mini"><div class="h">4. 只写自己的 dataDir</div><p>init 给的 <code>dataDir</code> 是你的可写目录。别去写宿主数据目录。</p></div>
+  <div class="mini"><div class="h">5. <code>init</code> 必须校验协议版本</div><p>不匹配要明确失败。静默降级会出难查的语义错误。</p></div>
+  <div class="mini"><div class="h">6. 密钥不进日志</div><p>插件日志展示在管理端。打日志前脱敏。</p></div>
+  <div class="mini"><div class="h">7. 同步钩子要快</div><p>同步钩子超时 2 秒。超时会拖慢真实用户请求。</p></div>
+  <div class="mini"><div class="h">8. 幂等建表</div><p><code>onDBMigrate</code> 每次启动都触发，不是只升级时。</p></div>
+</div>
+
+<h2 id="install">7 · 打包、分发、升级</h2>
+
+<h3>包结构</h3>
+<div class="code" data-name="目录">
+<pre>myplugin/
+├── plugin.json      <span class="c">← 必需，清单在根下</span>
+├── myplugin         <span class="c">← Linux/macOS 可执行文件</span>
+└── myplugin.exe     <span class="c">← Windows 版（同一个包里放两个平台也行）</span></pre>
+</div>
+<p>打成一个 zip 就是可分发单元，管理端支持从 URL 安装。</p>
+
+<h3>安装安全（宿主侧替你做的）</h3>
+<div class="tw"><table>
+<thead><tr><th>风险</th><th>宿主防护</th></tr></thead>
+<tbody>
+<tr><td>zip slip（<code>../../etc/passwd</code>）</td><td>每条目规范化后校验前缀，越界<strong>直接报错</strong>（不静默跳过）</td></tr>
+<tr><td>zip bomb</td><td>解压总量 256MB / 单文件 64MB / 条目数 2000 三重限额</td></tr>
+<tr><td>符号链接指向宿主文件</td><td>直接拒绝</td></tr>
+<tr><td>Windows 保留名</td><td>拦截 <code>CON</code>/<code>NUL</code>/<code>COM1</code> 等</td></tr>
+<tr><td><code>entry</code> 越界执行</td><td>禁止路径分隔符 + 二次前缀校验</td></tr>
+<tr><td>下载 <code>file://</code></td><td>只允许 http/https</td></tr>
+<tr><td>卸载误操作</td><td>需要二次确认密码</td></tr>
+</tbody>
+</table></div>
+
+<h3>升级一个已安装的插件</h3>
+<ol class="steps">
+  <li><span class="st">改版本号</span>把 <code>plugin.json</code> 里的 <code>version</code> 提上去。</li>
+  <li><span class="st">重新安装</span>用同一个 <code>name</code> 装 —— 会替换目录。安装接口的响应里有 <code>replaced</code> 字段告诉你是不是覆盖。</li>
+  <li><span class="st">重启插件</span>让新二进制生效。管理端点「重启」，或先禁用再启用。</li>
+</ol>
+<div class="card warn">
+  <div class="t">⚠️ 协议版本是硬门槛</div>
+  <p>
+    如果你改了插件与宿主之间的通信约定，需要同步 <code>protocolVersion</code> ——
+    但当前宿主只接受 <code>1</code>。真正要演进协议时，得先改宿主常量。
+  </p>
+</div>
+
+<h2 id="limits">8 · 边界与不保证的事</h2>
+
+<div class="card danger">
+  <div class="t">🚫 没有沙箱</div>
+  <p>
+    插件以宿主进程<strong>同等的系统权限</strong>运行：能读写宿主的文件、能发起任意网络请求。
+    隔离只靠进程边界和你自己的自觉。<code>permissions</code> 声明<strong>不被强制校验</strong>，
+    它的价值是让管理员安装前知道你要什么 —— 所以请如实写。
+  </p>
+</div>
+
+<div class="tw"><table>
+<thead><tr><th>事项</th><th>实际情况</th></tr></thead>
+<tbody>
+<tr><td><code>permissions</code> 是否强制</td><td><span class="tag t-no">不强制</span>仅展示给管理员看</td></tr>
+<tr><td>商店条目的版本/作者</td><td><span class="tag t-no">不可信</span>以安装后磁盘上的 <code>plugin.json</code> 为准</td></tr>
+<tr><td>异步钩子的返回值</td><td><span class="tag t-no">被丢弃</span>回写 ctx 与返回 error 都不会被使用</td></tr>
+<tr><td>有没有 WASM / <code>.so</code></td><td><span class="tag t-no">有意义地不做</span>WASM 需 CGO，<code>plugin.Open</code> 在 Windows 上根本编译不了</td></tr>
+<tr><td>插件能否阻止恢复备份</td><td><span class="tag t-no">不能</span>恢复是暂存制，钩子是异步通知</td></tr>
+<tr><td>多副本部署下的一致性</td><td>插件进程随副本各自启停，各副本独立运行插件</td></tr>
+<tr><td>插件崩溃会不会影响主服务</td><td><span class="tag t-ok">不会</span>崩溃只杀子进程，宿主不受影响</td></tr>
+</tbody>
+</table></div>
+
+<div class="card note">
+  <div class="t">💡 一条产品行为，值得提前知道</div>
+  <p>
+    <strong>首次安装后不重启服务，插件宿主是未初始化状态</strong>，所有插件接口会返回 503。
+    安装向导走完后需要重启一次服务，插件功能才可用。
+  </p>
+</div>
+
+<h2 id="api">9 · 管理端 API</h2>
+<p>全部在 <code>/api/admin/plugins</code>，需要管理员登录。</p>
+<div class="tw"><table>
+<thead><tr><th>方法</th><th>路径</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td>GET</td><td><code>/api/admin/plugins</code></td><td>列表（含实时 status / pid / 运行错误 / 清单是否仍可解析）</td></tr>
+<tr><td>GET</td><td><code>/api/admin/plugins/hooks</code></td><td>钩子清单 + <strong>真实的 handler 计数</strong>（进程内 / 进程外分开）</td></tr>
+<tr><td>GET</td><td><code>/api/admin/plugins/store</code></td><td>远端商店清单</td></tr>
+<tr><td>GET</td><td><code>/api/admin/plugins/agreement</code></td><td>协议全文 + 同意状态</td></tr>
+<tr><td>POST</td><td><code>/api/admin/plugins/agreement</code></td><td>记录同意（版本不匹配返回 409）</td></tr>
+<tr><td>GET</td><td><code>/api/admin/plugins/logs?name=&amp;limit=</code></td><td>插件日志（环形缓冲，最新在前）</td></tr>
+<tr><td>POST</td><td><code>/api/admin/plugins/install</code></td><td>安装（<code>source</code>: <code>local</code> / <code>url</code>）</td></tr>
+<tr><td>POST</td><td><code>/api/admin/plugins/:name/enable</code></td><td>启用（拉起子进程）</td></tr>
+<tr><td>POST</td><td><code>/api/admin/plugins/:name/disable</code></td><td>禁用（杀子进程）</td></tr>
+<tr><td>POST</td><td><code>/api/admin/plugins/:name/restart</code></td><td>重启（重读清单与配置）</td></tr>
+<tr><td>POST</td><td><code>/api/admin/plugins/:name/uninstall</code></td><td>卸载（<strong>需二次确认密码</strong>）</td></tr>
+<tr><td>PUT</td><td><code>/api/admin/plugins/:name/config</code></td><td>改配置（<strong>加密落库</strong>，重启插件后生效）</td></tr>
+</tbody>
+</table></div>
+
+<h3>宿主侧参数速查</h3>
+<div class="tw"><table>
+<thead><tr><th>项</th><th>值</th></tr></thead>
+<tbody>
+<tr><td>启动超时（含 init 握手）</td><td>10 秒</td></tr>
+<tr><td>单次同步 fire 超时</td><td>2 秒</td></tr>
+<tr><td>崩溃自动重启</td><td>2 秒起指数退避，上限 5 分钟</td></tr>
+<tr><td>连续崩溃上限</td><td>5 次后停止自动重启，转人工</td></tr>
+<tr><td>日志缓冲</td><td>每插件 500 条环形</td></tr>
+<tr><td>插件可写目录</td><td><code>&lt;数据目录&gt;/plugin-data/&lt;插件名&gt;/</code></td></tr>
+</tbody>
+</table></div>
+
+<h3>参考实现</h3>
+<div class="grid">
+  <div class="mini"><div class="h">referer-guard</div><p>防盗链。演示规则编译、豁免用户、审计日志、分享路径字段。<br><code>examples/plugins/referer-guard/</code></p></div>
+  <div class="mini"><div class="h">smtp-email</div><p>邮件外发。演示三种 TLS、RFC 2047 编码、头注入防护、带单测的协议实现。<br><code>examples/plugins/smtp-email/</code></p></div>
+  <div class="mini"><div class="h">hmac-auth</div><p>HMAC 签名鉴权。演示规范串、常量时间比较、防重放、fail closed。<br><code>examples/plugins/hmac-auth/</code></p></div>
+</div>
+
+<div class="card ok">
+  <div class="t">✅ 照抄示例是最快的上手方式</div>
+  <p>
+    三个官方示例都是独立 module、都有测试、都按本文档的规则写。
+    挑最接近你需求的那个改，比从零开始快得多。
+  </p>
+</div>
+
+<h2 id="pbclus">10 · PBClus 插件包格式</h2>
+<p>
+  除 zip 之外，宿主还认一种自己的插件包容器：<strong>PBClus</strong>，扩展名
+  <code>.pbclus</code>。当前格式是 <strong>v2</strong>：写出时用 v2，<strong>读取支持 v1~v2</strong>。
+  权威实现是 <code>backend/pkg/plugin/pbclus/</code>（<code>pbclus.go</code>、
+  <code>pbclus_platform.go</code>、<code>pbclus_sign.go</code>）。
+  这一节讲「是什么、为什么这么设计、怎么用」；字段偏移、校验顺序这类实现细节见
+  <a href="PBClus-格式规范.md">PBClus-格式规范.md</a>。
+</p>
+<p>
+  v2 相对 v1 增加了两大能力：<strong>多平台包</strong>（一个包带多个平台的二进制）与
+  <strong>可选签名</strong>。
+</p>
+
+<div class="card note">
+  <div class="t">💡 为什么必须升版本，而不是「加个可选字段」</div>
+  <p>
+    v1 的解析方不认识平台字段。把多平台包硬塞给 v1 解析方，它会<strong>把所有平台的二进制
+    解到同一个路径上，最后写进去的那个胜出</strong> —— 于是<strong>静默装上一个架构不对的二进制</strong>，
+    表现为「插件启用后立刻崩」。升版本让老解析方<strong>直接拒绝</strong>，而不是做错事。
+    这正是版本字段存在的意义。
+  </p>
+  <p>
+    v1 包继续支持：它的条目天然都是通用文件（无平台标签、无签名），v2 的读法能完整覆盖 v1 的语义，
+    所以不需要保留两套解析逻辑。
+  </p>
+</div>
+
+<h3>为什么不是「zip 改后缀」</h3>
+<p>
+  改后缀只是换个名字，内容仍然是 zip：解析规则、攻击面、允许的结构全都照旧。
+  文件名叫 <code>.pbclus</code> 而内容是 zip，等于既没得到新格式，
+  又让「看到 <code>.pbclus</code> 就知道该怎么处理」这件事变得不可靠。
+  所以这里定义的是一个真正的容器，把一整类问题在<strong>格式层面</strong>消灭掉：
+</p>
+
+<div class="tw"><table>
+<thead><tr><th>问题</th><th>zip 的做法</th><th>PBClus 的做法</th></tr></thead>
+<tbody>
+<tr>
+  <td>畸形路径</td>
+  <td>格式不管，留给每个解压方各防一遍</td>
+  <td>路径必须规范化、相对、纯正斜杠 —— <strong>打包时</strong>就拒绝，解包时再校验一次（两侧调同一个校验函数）</td>
+</tr>
+<tr>
+  <td>符号链接 / 设备文件</td>
+  <td>是合法条目；一个 symlink 条目就能让解压结果指向宿主任意文件</td>
+  <td>格式里<strong>不存在</strong>这些条目类型：只有普通文件与目录</td>
+</tr>
+<tr>
+  <td>重复路径</td>
+  <td>允许同名条目，解压出什么取决于实现顺序</td>
+  <td>重复条目直接拒绝 —— 唯一性按 <strong>(路径, 平台)</strong> 判定（v2 起，同一条路径可以有多个平台的版本）</td>
+</tr>
+<tr>
+  <td>「文件与目录同名」</td>
+  <td>允许 <code>lib</code> 与 <code>lib/x.so</code> 共存，结果同样取决于顺序</td>
+  <td>前缀冲突直接拒绝</td>
+</tr>
+<tr>
+  <td>损坏定位</td>
+  <td>整体解一遍才知道坏没坏</td>
+  <td>头部带清单/载荷摘要，尾部带整文件摘要与总长，每个条目还有自己的 SHA-256 —— 能说出<strong>是哪个文件坏了</strong></td>
+</tr>
+<tr>
+  <td>「这到底是什么」</td>
+  <td>靠扩展名猜，改名就骗过去了</td>
+  <td>靠魔术字识别：把 zip 改名成 <code>.pbclus</code> 会被识别为 zip 并明确报错</td>
+</tr>
+</tbody>
+</table></div>
+
+<h3>文件布局</h3>
+<div class="code" data-name="容器结构">
+<pre>┌──────────────┬─────────────────┬───────────┬───────────────┬─────────────┐
+│ Header 128 B │ Manifest (JSON) │ Payload   │ Signature ?   │ Footer 48 B │
+└──────────────┴─────────────────┴───────────┴───────────────┴─────────────┘
+Signature 只有头部 flags 的 FlagSigned 位置位时才存在，恒为 108 B
+全部整数小端（little-endian）</pre>
+</div>
+<p>
+  清单紧随头部，载荷紧随清单，<strong>签名块（若有）紧随载荷</strong>，尾部固定在文件末尾。
+  载荷是各条目<strong>压缩后字节的顺序拼接</strong>，每个条目在清单里记录自己的
+  <code>offset</code> 与 <code>packedSize</code>；条目必须紧密排列，不允许空洞或重叠。
+</p>
+<div class="code" data-name="长度不变量">
+<pre>manifestOff == 128
+payloadOff  == manifestOff + manifestLen
+contentEnd  == payloadOff + payloadLen
+contentEnd + 签名块(0 或 108) + 48 == 文件实际长度</pre>
+</div>
+<p>
+  <code>contentEnd</code> 是「头部 + 清单 + 载荷」的结束偏移。它同时是<strong>整文件摘要与签名
+  覆盖范围的右边界</strong> —— 签名块自己不在被签内容里（含签名本身，算进去就自指了）。
+</p>
+
+<h4>Header（128 字节）</h4>
+<div class="tw"><table>
+<thead><tr><th>偏移</th><th>长度</th><th>字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>8</td><td>magic</td><td><code>PBClus</code> + <code>0x1A</code> + <code>0x0A</code>。后两个字节是学 PNG 的老办法：有些工具用文本模式处理文件会在 EOF 处截断或改写换行，带上它们能让「文件被文本模式糟蹋过」立刻暴露，而不是解出一堆乱码</td></tr>
+<tr><td>8</td><td>2</td><td>version</td><td>写出时是 <code>2</code>。读取方接受 <code>1</code>~<code>2</code>；<strong>更高版本必须直接拒绝</strong>（它可能带了本程序不认识的平台标签或签名，硬读会装错二进制），也不做「向后兼容猜测」</td></tr>
+<tr><td>10</td><td>2</td><td>headerSize</td><td>固定 <code>128</code></td></tr>
+<tr><td>12</td><td>4</td><td>flags</td><td>bit0 = <code>FlagDeflate</code>：容器内至少有一个 DEFLATE 条目；bit1 = <code>FlagSigned</code>：文件带 108 字节签名块；其余位与保留区仍是保留</td></tr>
+<tr><td>16</td><td>4</td><td>entryCount</td><td>条目数，必须与清单里 <code>entries</code> 的长度一致</td></tr>
+<tr><td>20</td><td>8</td><td>manifestOff</td><td>清单偏移，固定等于 <code>128</code></td></tr>
+<tr><td>28</td><td>8</td><td>manifestLen</td><td>清单字节数</td></tr>
+<tr><td>36</td><td>8</td><td>payloadOff</td><td>必须等于 <code>manifestOff + manifestLen</code></td></tr>
+<tr><td>44</td><td>8</td><td>payloadLen</td><td>载荷字节数</td></tr>
+<tr><td>52</td><td>32</td><td>manifestSHA</td><td>清单字节的 SHA-256</td></tr>
+<tr><td>84</td><td>32</td><td>payloadSHA</td><td>载荷字节的 SHA-256</td></tr>
+<tr><td>116</td><td>4</td><td>headerCRC</td><td>CRC-32/IEEE，覆盖前 <strong>116</strong> 字节</td></tr>
+<tr><td>120</td><td>8</td><td>reserved</td><td>当前全 0。<strong>不参与 CRC</strong> —— 这样将来在其中追加字段不会破坏老解析方</td></tr>
+</tbody>
+</table></div>
+
+<h4>Footer（48 字节）</h4>
+<div class="tw"><table>
+<thead><tr><th>偏移</th><th>长度</th><th>字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>32</td><td>fileSHA</td><td>SHA-256，覆盖 <strong>头部 + 清单 + 载荷</strong>，即 <code>[0, contentEnd)</code>。带签名时签名块夹在载荷与尾部之间，但<strong>不在覆盖范围内</strong>（它含签名本身，算进去就自指了）。所以右边界是 <code>contentEnd</code>，不是「文件末尾 − 48」</td></tr>
+<tr><td>32</td><td>8</td><td>magic</td><td>与头部相同的魔术字，在文件另一端再确认一次</td></tr>
+<tr><td>40</td><td>8</td><td>totalLen</td><td>整个文件长度。文件被截断、或尾部被追加过内容时，这个数就对不上</td></tr>
+</tbody>
+</table></div>
+
+<h4>Signature（108 字节，可选）</h4>
+<p>
+  位置在载荷之后、尾部之前。<strong>定长是刻意的</strong>：Ed25519 的签名恒为 64 字节、
+  公钥恒为 32 字节，所以「有没有签名」只需要 <code>flags</code> 的一个位就能判断，
+  不必在头部再开一个长度字段（那会让头部布局为签名而改动）。
+</p>
+<div class="tw"><table>
+<thead><tr><th>偏移</th><th>长度</th><th>字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>1</td><td>alg</td><td>签名算法。当前只定义 <code>1</code> = Ed25519，其它值直接拒绝</td></tr>
+<tr><td>1</td><td>3</td><td>reserved</td><td>保留，写 <code>0</code></td></tr>
+<tr><td>4</td><td>8</td><td>keyId</td><td>公钥 SHA-256 的前 8 字节，展示为 16 个小写十六进制字符</td></tr>
+<tr><td>12</td><td>64</td><td>signature</td><td>Ed25519 签名</td></tr>
+<tr><td>76</td><td>32</td><td>publicKey</td><td>Ed25519 公钥，<strong>内嵌在包里</strong>（这一点决定了整个安全模型，见 <a href="#pbclus-sign">10.3</a>）</td></tr>
+</tbody>
+</table></div>
+
+<h4>清单条目字段</h4>
+<div class="tw"><table>
+<thead><tr><th>字段</th><th>含义</th></tr></thead>
+<tbody>
+<tr><td><code>path</code></td><td>容器内相对路径，纯正斜杠，必须通过路径规则校验</td></tr>
+<tr><td><code>platform</code></td><td>可省略。空 = <strong>通用</strong>（任何平台都解出来）；否则是 <code>&lt;goos&gt;/&lt;goarch&gt;</code>，只给该平台。标了平台的条目，其平台必须出现在清单顶层 <code>platforms</code> 里，否则包是坏的</td></tr>
+<tr><td><code>size</code></td><td>解压后字节数</td></tr>
+<tr><td><code>offset</code></td><td>相对载荷起点的偏移。必须等于前一个条目的 <code>offset + packedSize</code></td></tr>
+<tr><td><code>packedSize</code></td><td>在载荷里实际占用的字节数。codec 为 <code>raw</code> 时必须等于 <code>size</code></td></tr>
+<tr><td><code>codec</code></td><td><code>raw</code> 或 <code>deflate</code>（原始 DEFLATE 流，<strong>没有 zlib/gzip 外层头</strong>）。未知值直接拒绝</td></tr>
+<tr><td><code>sha256</code></td><td>解压后内容的十六进制摘要，64 个十六进制字符</td></tr>
+</tbody>
+</table></div>
+
+<h4>清单顶层与平台相关的字段</h4>
+<div class="tw"><table>
+<thead><tr><th>字段</th><th>含义</th></tr></thead>
+<tbody>
+<tr><td><code>platforms</code></td><td>这个包支持哪些平台。<code>["any"]</code> 表示通用包；否则是具体平台列表，如 <code>["linux/amd64","windows/amd64"]</code>。<strong>不能同时出现 <code>"any"</code> 与具体平台</strong>；声明了某平台却没有任何该平台的条目也算坏包</td></tr>
+<tr><td><code>signed</code></td><td>与头部 <code>FlagSigned</code> 位必须一致。两处说法不一致说明文件被拼过，直接拒绝</td></tr>
+</tbody>
+</table></div>
+
+<div class="card note">
+  <div class="t">💡 条目按 (path, platform) 排序后写入</div>
+  <p>
+    同样的输入产生同样的字节布局，便于比对与复现。平台参与排序键，所以多平台包里同一路径的
+    多个版本会<strong>相邻</strong>，出问题时一眼能看出「这个文件有哪几个平台」。
+    另外「用了 deflate」不是必然：压缩后反而更大的条目会<strong>回退成原样存</strong>
+    （打一个已经压过的 <code>.exe</code> 时 DEFLATE 经常略微变大，硬压只会让包更大更慢）。
+  </p>
+</div>
+
+<h3>校验边界：完整性、签名有效、受信任是三件不同的事</h3>
+<div class="card danger">
+  <div class="t">🚫 这三件事必须分开说，混起来就等于没做校验</div>
+  <div class="tw"><table>
+  <thead><tr><th>状态</th><th>它证明了什么</th><th>它<strong>不</strong>证明什么</th></tr></thead>
+  <tbody>
+  <tr><td><strong>完整性</strong>（校验通过）</td><td>内容没被意外损坏、没被截断</td><td>内容没被人动过 —— 攻击者改完内容可以把所有摘要同步改一遍</td></tr>
+  <tr><td><strong>签名有效</strong>（Valid）</td><td>内容与签名自洽</td><td>签名者是谁、你要不要信任它</td></tr>
+  <tr><td><strong>已受信任</strong>（Trusted）</td><td>签名者的 keyId 在宿主信任库里</td><td>签名者以后不会做坏事（信任是信任，不是保证）</td></tr>
+  </tbody>
+  </table></div>
+  <p>
+    容器里的 CRC-32 与 SHA-256 只保证<strong>完整性</strong>：它们是<strong>公开可算</strong>的校验和，
+    <strong>不提供任何防伪能力</strong>。攻击者改完一个包的内容，可以把头部 CRC、清单摘要、
+    载荷摘要、逐条目摘要、尾部 fileSHA <strong>全部同步重算一遍</strong> —— 此时
+    <code>Verify()</code> 会通过，只有签名会失败（<code>TestSignatureCatchesWhatIntegrityCannot</code>
+    构造的就是这个场景）。所以「完整性检查通过」在任何时候都不能被当成「内容没被人动过」。
+  </p>
+  <p>
+    签名<strong>能</strong>抓住上面那件事，但「签名有效」也不等于可信：公钥内嵌在包里，
+    <strong>任何人都能签一个验证通过的包</strong>。安全语义完全来自宿主的信任库，只有「已受信任」才算数 ——
+    详见 <a href="#pbclus-sign">10.3</a>。
+  </p>
+  <p>
+    所以装插件时要把包当成<strong>不可信输入</strong>：校验告诉你「这个包完整不完整」，
+    签名告诉你「内容与签名是否自洽」，<strong>只有信任库才能告诉你「这是不是你想装的那个人发的」</strong>。
+    文档里不制造「校验通过 = 安全」的错觉。
+  </p>
+</div>
+
+<h3>路径规则</h3>
+<p>
+  打包与解包两侧<strong>共用同一个校验函数</strong>，避免两套规则漂移。逐条如下：
+</p>
+<ul>
+  <li>非空，且长度 ≤ <strong>512 字节</strong>（按字节算，不是字符数）；</li>
+  <li>只允许正斜杠。反斜杠一律拒绝 —— 否则在 Windows 上它会被解释成分隔符，让「路径合法」变成一件平台相关的事；</li>
+  <li>必须是相对路径：不以 <code>/</code> 开头，不含冒号（挡盘符与 NTFS 数据流）；</li>
+  <li>不含 NUL 与控制字符（<code>&lt; 0x20</code> 或 <code>0x7F</code>）；</li>
+  <li>逐个路径段检查：<code>.</code> 与 <code>..</code> 段<strong>直接点出来</strong>拒绝，空路径段（<code>a//b</code>、结尾 <code>/</code>）同样拒绝；</li>
+  <li>每个路径段都不得是 Windows 保留设备名（<code>CON</code> / <code>PRN</code> / <code>AUX</code> / <code>NUL</code> / <code>COM1</code>…<code>COM9</code> / <code>LPT1</code>…<code>LPT9</code>，大小写不敏感）。比较的是<strong>第一个点之前</strong>的部分，所以 <code>con.txt</code> 一样被拒；</li>
+  <li>最后用「规范化后必须等于原串」兜底。</li>
+</ul>
+<p>
+  检查顺序是刻意的：把 <code>a/../x</code> 报成「含 <code>..</code> 路径段」比报成
+  「应写成 <code>x</code>」有用得多 —— 后者等于把一次目录穿越轻描淡写成格式问题。
+</p>
+
+<div class="code" data-name="会被拒绝的路径">
+<pre>../escape.txt        <span class="c"># 父目录穿越</span>
+a/b/../../../x.txt   <span class="c"># 深层穿越</span>
+/etc/passwd          <span class="c"># 绝对路径</span>
+C:/x                 <span class="c"># 盘符冒号</span>
+..\..\x.txt          <span class="c"># 反斜杠</span>
+a//b.txt             <span class="c"># 空路径段</span>
+./a.txt              <span class="c"># . 路径段</span>
+dir/COM1.txt         <span class="c"># Windows 保留设备名</span></pre>
+</div>
+
+<h3>解包安全：两道独立防线</h3>
+<p>
+  只靠路径规则不够 —— 规则是「对字符串的白名单检查」，真正决定文件落在哪的是
+  <strong>把路径拼成绝对路径之后</strong>的结果。所以宿主做两道：
+</p>
+<div class="grid">
+  <div class="mini"><div class="h">1. 格式路径规则</div><p>每个条目路径先过校验函数。挡的是畸形写法：目录穿越、绝对路径、反斜杠、保留设备名。</p></div>
+  <div class="mini"><div class="h">2. 解析后的前缀校验</div><p>拼出绝对目标路径后，再检查它确实落在目标目录<strong>之内</strong>。挡的是「规则想漏了」的情况。</p></div>
+</div>
+<div class="card ok">
+  <div class="t">✅ 这两层都是承重的，不是装饰</div>
+  <p>
+    作者用「结构完全合法、摘要全部正确、但清单恶意」的容器反向验证过：
+    把两层<strong>同时</strong>停用，目录穿越就会成功。也就是说单独拿掉任何一层都会留下缺口 ——
+    这不是「多写一层保险」，而是两件必须同时成立的事。
+  </p>
+</div>
+<p>
+  另外，解包时每个条目写出都会校验声明长度与内容摘要，任一不符<strong>立即失败并删掉写了一半的文件</strong>
+  —— 半损坏的插件目录比直接失败更难排查。读取侧还有每个条目 <code>64MB + 1</code> 字节的硬上限，
+  即使清单里的 <code>size</code> 撒谎也撑不破，这是防解压炸弹的关键一环。
+</p>
+
+<h3>限额</h3>
+<div class="tw"><table>
+<thead><tr><th>项</th><th>上限</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>单文件（解压后）</td><td>64 MB</td><td><code>67108864</code> 字节</td></tr>
+<tr><td>解压总量</td><td>256 MB</td><td><code>268435456</code> 字节</td></tr>
+<tr><td>条目数</td><td>2000</td><td>打包与解包两侧都查</td></tr>
+<tr><td>容器文件</td><td>64 MB</td><td><code>67108864</code> 字节。与安装器的 <code>MaxZipBytes</code>/<code>MaxPackageBytes</code> 取同一个值 —— 格式层与安装层上限不同会让人反复确认「到底哪个说了算」。对插件包来说 64 MB 很宽裕：Go 编译出的插件二进制通常只有几 MB</td></tr>
+<tr><td>平台数</td><td>8</td><td><code>MaxTargets</code>。清单声明与打包声明的平台数都查</td></tr>
+<tr><td>单条路径</td><td>512 字节</td><td>按字节数算</td></tr>
+<tr><td>签名块</td><td>108 字节</td><td>定长，0 字节（无签名）或 108 字节，没有中间状态</td></tr>
+</tbody>
+</table></div>
+<p>前四项与 zip 安装路径保持一致 —— 换个容器不该顺手放宽预算。</p>
+
+<h3>上传 / 安装时怎么识别</h3>
+<p>按<strong>魔术字</strong>判断，不看扩展名：</p>
+<div class="tw"><table>
+<thead><tr><th>文件开头</th><th>识别为</th><th>宿主行为</th></tr></thead>
+<tbody>
+<tr><td><code>PBClus</code> + <code>0x1A 0x0A</code></td><td>PBClus</td><td>走 PBClus 安装路径：结构解析 → 整体校验 → <strong>平台检查</strong> → <strong>签名策略检查</strong> → 解包到临时目录 → 复用既有安装流程（清单解析、插件名检查、<code>entry</code> 存在性校验都由那条路负责）</td></tr>
+<tr><td><code>PK</code> + <code>0x03 0x04</code> / <code>0x05 0x06</code> / <code>0x07 0x08</code></td><td>zip</td><td>继续兼容（历史格式）。<strong>但若扩展名是 <code>.pbclus</code>，直接报「改后缀不会改变格式」</strong></td></tr>
+<tr><td>其它</td><td>未知</td><td>报「既不是 PBClus 也不是 zip」，并把前 8 字节打出来</td></tr>
+</tbody>
+</table></div>
+<div class="card warn">
+  <div class="t">⚠️ 把 zip 改名成 .pbclus 会发生什么</div>
+  <p>
+    不会「碰巧装上」，也不会含糊地说「文件损坏」：宿主先验魔术字，认出这是 zip，
+    然后明确告诉你「扩展名是 <code>.pbclus</code>，但内容是 zip —— 改后缀不会改变格式，
+    请用 <code>pbclus-pack</code> 重新打包成真正的 PBClus 容器」。
+    含糊的报错会让人以为校验没生效，然后去反复重新下载。
+  </p>
+</div>
+
+<h3>安装顺序（顺序本身是设计的一部分）</h3>
+<ol class="steps">
+  <li><span class="st">解析结构</span>魔术字、版本、头部 CRC、清单摘要、尾部魔术字与总长、长度不变量。老版本或更高版本在这一步就被拒。</li>
+  <li><span class="st">整体校验</span>载荷摘要、整文件摘要、逐条目摘要。损坏的包在这里说清「坏在哪」，而不是解到一半失败留下半成品目录。</li>
+  <li><span class="st">平台检查</span>用清单里的 <code>platforms</code> 判断 <code>supports(当前平台)</code>。<strong>必须在解包之前</strong> —— 顺序错了，错误信息会变成「入口文件不存在」，与本平台的插件目录问题混在一起，排查方向完全跑偏。</li>
+  <li><span class="st">签名策略</span>按 <code>plugin.signatureMode</code> 判定，只认「已受信任」（见 <a href="#pbclus-sign">10.3</a>）。</li>
+  <li><span class="st">解包</span>只解<strong>通用条目 + 当前平台条目</strong>，其它平台跳过并计入 <code>skipped</code>。</li>
+  <li><span class="st">走既有安装流程</span>清单解析、插件名检查、<code>entry</code> 存在性校验、复制、落库 —— 与 zip 那条路完全一致，不会出现两套安装语义。</li>
+</ol>
+<div class="card note">
+  <div class="t">💡 平台检查在解包之前，而不是解到一半才发现</div>
+  <p>
+    不支持当前平台时，安装器给的是能照着做的错误：
+    「这个插件包不支持当前平台：包内含 <code>linux/amd64</code>，当前是 <code>windows/amd64</code>。
+    用 <code>pbclus-pack pack --targets windows/amd64,linux/amd64</code> 重新打包即可做成跨平台包」。
+    <strong>说清「包支持什么、当前是什么、怎么办」三件事</strong>，而不是只说「不支持」。
+  </p>
+</div>
+
+<h3 id="pbclus-tool">打包工具：pbclus-pack</h3>
+<div class="code" data-name="构建与用法">
+<pre><span class="c"># 构建（Windows 上的产物是 tools/pbclus-pack.exe）</span>
+cd backend &amp;&amp; go build -o ../tools/pbclus-pack.exe ./cmd/pbclus-pack
+
+<span class="c"># 打包：默认输出 &lt;插件名&gt;-&lt;版本&gt;.pbclus（从 plugin.json 读，读不到就用目录名）</span>
+pbclus-pack pack ./myplugin
+
+<span class="c"># 多平台包：各平台文件放 dist/&lt;goos&gt;-&lt;goarch&gt;/</span>
+pbclus-pack pack ./myplugin --targets linux/amd64,windows/amd64,darwin/arm64
+
+<span class="c"># 多平台包 + 交叉编译（编译到临时目录再打包，需要源目录有 go.mod）</span>
+pbclus-pack pack ./myplugin --targets linux/amd64,windows/amd64 --build
+
+<span class="c"># 单平台包：显式标注</span>
+pbclus-pack pack ./myplugin --platform windows/amd64
+
+<span class="c"># 签名：先生成密钥，再在打包时签名</span>
+pbclus-pack keygen -o pbclus-signing-key.json --name <span class="s">"某发布者"</span>
+pbclus-pack pack ./myplugin --sign pbclus-signing-key.json -o myplugin.pbclus
+
+<span class="c"># 不压缩 / 指定压缩级别 / 指定输出 / 关闭默认排除 / 覆盖已存在的输出</span>
+pbclus-pack pack ./myplugin --store
+pbclus-pack pack ./myplugin --level 9 -o myplugin.pbclus
+pbclus-pack pack ./myplugin --include-all --force
+
+<span class="c"># 只看头部与清单（--json 给脚本读）</span>
+pbclus-pack inspect myplugin.pbclus --json
+
+<span class="c"># 完整校验：头部、清单、载荷、整文件、逐条目摘要（+ 签名状态）</span>
+pbclus-pack verify myplugin.pbclus
+<span class="c"># 给了信任库才会回答「是否受信任」；不给就只能说「签名自洽」</span>
+pbclus-pack verify myplugin.pbclus --trusted-keys ./plugin-trust.json
+
+<span class="c"># 信任库管理（宿主的信任库是数据目录下的 plugin-trust.json）</span>
+pbclus-pack trust list   -f ./plugin-trust.json
+pbclus-pack trust add    --key ./pbclus-signing-key.json --name <span class="s">"某发布者"</span> -f ./plugin-trust.json
+pbclus-pack trust remove 3f2a9c1d4b6e7081 -f ./plugin-trust.json
+
+<span class="c"># 解包到目录（只解当前平台所需的文件）</span>
+pbclus-pack unpack myplugin.pbclus -o ./out
+
+<span class="c"># 工具自述：格式版本与限额</span>
+pbclus-pack info</pre>
+</div>
+
+<div class="tw"><table>
+<thead><tr><th>子命令</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td><code>pack &lt;目录&gt;</code></td><td>打包目录。<br>平台：<code>--targets a,b</code> 多平台包 · <code>--targets a,b --build</code> 交叉编译后打包 · <code>--platform X</code> 单平台包（<code>--targets</code> 与 <code>--platform</code> 不能同时用，两者都不接受 <code>any</code>）<br>签名：<code>--sign 密钥文件</code><br>其它：<code>-o</code> 输出路径 · <code>--store</code> 全部不压缩 · <code>--level N</code> DEFLATE 级别 · <code>--include-all</code> 关闭默认排除 · <code>--force</code> 覆盖已存在的输出 · <code>--quiet</code> 只输出结果路径</td></tr>
+<tr><td><code>inspect &lt;包&gt;</code></td><td>打印头部信息与清单。条目表里平台列显示 <code>any</code>（通用）或 <code>&lt;goos&gt;/&lt;goarch&gt;</code>；签名只报「是否自洽」，因为这里没有信任库。<code>--json</code> 输出机器可读格式</td></tr>
+<tr><td><code>verify &lt;包&gt;</code></td><td>完整校验，等价于宿主的 <code>Verify</code>。要确认「包坏在哪」就用它。<code>--trusted-keys &lt;信任库&gt;</code> 才会报告「是否受信任」；<code>--quiet</code> 只返回退出码（签名无效时退出码是 1，脚本能直接判）</td></tr>
+<tr><td><code>unpack &lt;包&gt; -o &lt;目录&gt;</code></td><td>解包<strong>当前平台</strong>所需的文件（通用 + 本平台）。走与宿主相同的路径规则与逐条目摘要校验。<code>--force</code> 允许写入非空目录</td></tr>
+<tr><td><code>keygen</code></td><td>生成 Ed25519 签名密钥。<code>-o</code> 输出文件（默认 <code>pbclus-signing-key.json</code>） · <code>--name</code> 发布者名字 · <code>--force</code> 覆盖。文件按 <code>0600</code> 写，<strong>不要提交进版本库</strong>：泄漏 = 别人可以冒充你发布插件</td></tr>
+<tr><td><code>trust list|add|remove</code></td><td>管理信任库。<code>-f</code> 指定文件（默认当前目录下的 <code>plugin-trust.json</code>）。<code>add --key &lt;密钥文件|公钥|keyId&gt; --name &lt;名字&gt;</code>：强烈建议给密钥文件或公钥，只凭 keyId 无法防止「同一个 keyId 配了别人的公钥」</td></tr>
+<tr><td><code>info</code></td><td>打印格式版本与限额，方便写脚本时对齐</td></tr>
+</tbody>
+</table></div>
+
+<h4>平台判定的三种模式</h4>
+<div class="tw"><table>
+<thead><tr><th>怎么给参数</th><th>结果</th></tr></thead>
+<tbody>
+<tr><td><code>--targets a,b</code></td><td><strong>多平台包</strong>：各平台文件取自 <code>dist/&lt;goos&gt;-&lt;goarch&gt;/</code>，根部其它文件为通用。不加 <code>--build</code> 时会先检查每个平台目录里确实有入口（按目标平台的语义找，Linux 上打 Windows 包就找 <code>foo.exe</code>），缺一个就报错</td></tr>
+<tr><td><code>--targets a,b --build</code></td><td>用 <code>go build</code> 把各平台入口交叉编译到<strong>临时目录</strong>再打包，<strong>不写入作者的源码目录</strong>（需要源目录有 <code>go.mod</code>；非 Go 插件请自己把产物放进 <code>dist/</code>）</td></tr>
+<tr><td><code>--platform X</code></td><td><strong>单平台包</strong>：清单声明这一个平台，条目也都标上它</td></tr>
+<tr><td>都不给</td><td>自动判定，见下</td></tr>
+</tbody>
+</table></div>
+<p>自动判定的规则刻意保守，三条：</p>
+<ol>
+  <li>入口<strong>不是原生可执行文件</strong>（脚本、字节码、数据文件）→ <strong>通用包</strong>，清单写 <code>platforms = ["any"]</code>；</li>
+  <li>入口是原生可执行文件、且类型与当前主机<strong>一致</strong> → 标注<strong>当前平台</strong>；</li>
+  <li>类型与主机<strong>不一致</strong> → <strong>报错</strong>，要求显式指定（<code>--platform</code> 或 <code>--targets</code>）。</li>
+</ol>
+<div class="card note">
+  <div class="t">💡 第 3 条为什么不猜</div>
+  <p>
+    在 Linux 上打一个 Windows 的 <code>.exe</code>，自动标成 <code>linux/amd64</code> 会让一个带着错误
+    平台信息的包流通出去，装到哪儿都不对。报错的代价只是多打一行参数，
+    <strong>猜错的代价是装上一个跑不起来的二进制</strong> —— 这个交易很划算。
+  </p>
+</div>
+<div class="card warn">
+  <div class="t">⚠️ 把平台相关的包标成「通用」是最常见的坑</div>
+  <p>
+    一个只带 Windows 二进制的包如果标成通用，装到 Linux 上会以「入口文件不存在」失败 ——
+    一个与真实原因（平台不匹配）相距很远的错误信息。<code>pack</code> 在单平台包里发现
+    「只有 <code>foo.exe</code>、没有 <code>foo</code>」时会额外提示：清单里的 <code>entry</code> 不带后缀是对的
+    （宿主在 Windows 上会自动补 <code>.exe</code>），但<strong>在 Linux/macOS 上宿主会找 <code>foo</code> 并失败</strong>；
+    要跨平台分发，请用 <code>--targets</code> 打一个多平台包。
+  </p>
+</div>
+
+<p><code>pack</code> 默认排除这些（<code>--include-all</code> 关掉整份表）：</p>
+<div class="code" data-name="pack 默认排除">
+<pre>.git  .svn  .hg  node_modules  __pycache__
+.DS_Store  Thumbs.db  desktop.ini
+*.pbclus  *.zip  *.log  *.tmp  *.swp  *.bak  *~</pre>
+</div>
+<p>
+  另外 <code>pack</code> 会先按<strong>与宿主同一套规则</strong>检查 <code>plugin.json</code>，
+  清单有问题当场报错，不用等装的时候才发现。源目录里的符号链接与设备文件会被跳过而不是打进去
+  —— 格式里根本不存在这类条目。
+</p>
+
+<div class="tw"><table>
+<thead><tr><th>退出码</th><th>含义</th></tr></thead>
+<tbody>
+<tr><td><code>0</code></td><td>成功</td></tr>
+<tr><td><code>1</code></td><td>失败（打包 / 校验 / 解包出错，原因写在 stderr）</td></tr>
+<tr><td><code>2</code></td><td>用法错误（参数不对）</td></tr>
+</tbody>
+</table></div>
+
+<h3 id="pbclus-platform">10.2 多平台包</h3>
+<p>
+  带原生二进制的插件本来就是<strong>平台相关</strong>的，而作者通常只想发一个文件。
+  v2 的答案是一个包里同时装多个平台的二进制，安装器按<strong>当前平台</strong>只解出需要的那一份。
+</p>
+
+<h4>平台标签</h4>
+<p>
+  格式是 <code>&lt;goos&gt;/&lt;goarch&gt;</code>，与 Go 的 <code>GOOS</code>/<code>GOARCH</code>
+  一一对应，也与 Docker 的写法一致，不需要额外解释：<code>linux/amd64</code>、
+  <code>windows/amd64</code>、<code>darwin/arm64</code>……
+</p>
+<p>
+  校验只检查<strong>形状</strong>（两段、小写字母数字下划线点、长度有限），
+  <strong>不做「合法 GOOS 白名单」</strong>：白名单会让格式随 Go 版本更新而失效 ——
+  Go 每新增一个 <code>GOOS</code>，老解析方就会拒绝新包。形状校验挡住的是注入与拼写错误，
+  那才是这里的职责。
+</p>
+<div class="card note">
+  <div class="t">💡 磁盘上用短横线，清单里用斜杠</div>
+  <p>
+    目录名里不能有斜杠，所以源码目录的约定是 <code>dist/linux-amd64/</code>；
+    清单与条目里的 <code>platform</code> / <code>platforms</code> 一律写 <code>linux/amd64</code>。
+  </p>
+</div>
+
+<h4>清单怎么表达</h4>
+<div class="tw"><table>
+<thead><tr><th>位置</th><th>字段</th><th>语义</th></tr></thead>
+<tbody>
+<tr><td>清单顶层</td><td><code>platforms</code></td><td><code>["any"]</code> = 通用包（v1 包与纯脚本插件都属于此类）；否则是具体平台列表，如 <code>["linux/amd64","windows/amd64"]</code>。<strong>两种不能混用</strong>，也不能声明了某平台却一条该平台的条目都没有</td></tr>
+<tr><td>每个条目</td><td><code>platform</code></td><td>可省略。<strong>空 = 通用</strong>（任何平台都解出来：<code>plugin.json</code>、脚本、素材）；否则只给该平台，且该平台必须在顶层 <code>platforms</code> 里</td></tr>
+</tbody>
+</table></div>
+<p>
+  于是<strong>同一条路径可以有多份不同平台的条目</strong>（<code>myplugin</code> 在三个平台目录里各有一份）。
+  唯一性因此按 <strong>(路径, 平台)</strong> 判定，而不是按路径 —— 同一平台下同名条目出现两次仍然拒绝，
+  那会让解包结果取决于顺序。条目排序也带上平台，同一路径的多个版本在清单里相邻。
+</p>
+<p>
+  声明式清单有一个直接好处：<strong>不下载、不解包也能判断兼容性</strong>。
+  安装器据此在解包之前就拒绝不匹配的包，给出的是「包内含 X、当前是 Y、用 <code>--targets</code>
+  重新打包」这种能照着做的错误 —— 而不是解到一半说「入口文件不存在」，让人以为打包漏了文件。
+  这个顺序是有意的：把「平台不匹配」报成「入口文件不存在」，
+  等于把管理员引向一个跟真实原因无关的方向。
+</p>
+
+<h4>源码目录约定</h4>
+<div class="code" data-name="多平台插件目录">
+<pre>myplugin/
+├── plugin.json                <span class="c"># 通用条目（根部其它文件也都是通用）</span>
+├── lib/helper.py              <span class="c"># 通用条目</span>
+└── dist/                      <span class="c"># 各平台专属文件的约定位置，自己不打进包</span>
+    ├── linux-amd64/myplugin
+    ├── windows-amd64/myplugin.exe
+    └── darwin-arm64/myplugin</pre>
+</div>
+<p>
+  多平台模式下 <code>dist/</code> 之下的文件按子目录名归属平台，其余文件是通用条目。
+  <code>dist/</code> 本身不作为通用目录打进去。
+  源目录里存在 <code>dist/&lt;goos&gt;-&lt;goarch&gt;/</code> 布局而你没声明平台时，
+  打包器会<strong>直接报错</strong>而不是静默忽略 —— 静默忽略会打出一个「只含 plugin.json 的包」，
+  装上去必然失败。
+</p>
+
+<h4>解包时发生什么</h4>
+<p>
+  只解「<strong>通用条目 + 当前平台条目</strong>」，其它平台的条目<strong>跳过</strong>而不是报错：
+  一个包装了三个平台、在其中一个平台上只用得上其一，这是正常情况而不是异常。
+  跳过的数量会在解包结果与安装结果的 <code>skipped</code> 里如实报出来 ——
+  管理员看到「包里还有 6 个别的平台的文件被跳过」才不会困惑。
+</p>
+
+<h3 id="pbclus-sign">10.3 签名与信任</h3>
+<p>
+  v2 增加了<strong>可选</strong>签名块：定长 <strong>108 字节</strong>，位置在载荷之后、尾部之前。
+  有没有签名由头部 flags 的 <code>FlagSigned</code> 位决定。定长是刻意的：Ed25519 的签名恒为
+  64 字节、公钥恒为 32 字节，所以「有没有签名」只需要一个位，
+  不必在头部再开一个长度字段（那会让头部布局为签名而改动）。布局见上面的
+  <a href="#pbclus">Signature（108 字节）</a>表。
+</p>
+<p>
+  keyId 必须与内嵌公钥<strong>自洽</strong>（<code>keyId == hex(SHA-256(公钥)[0:8])</code>），否则拒绝：
+  不一致意味着「这个包是谁签的」有两处互相矛盾的说法，攻击者可以把一个可信 keyId
+  贴到自己的公钥前面来冒充。
+</p>
+
+<h4>签名覆盖什么</h4>
+<div class="code" data-name="签名消息">
+<pre>签名消息 = "PBClus/v2 signed-package\n" ‖ fileSHA
+fileSHA  = SHA-256(Header ‖ Manifest ‖ Payload)     <span class="c"># 就是尾部里那个值</span></pre>
+</div>
+<ul>
+  <li>前缀是<strong>域分隔</strong>：保证这个签名不会被挪用到别的协议里去。</li>
+  <li><strong>签名块自己不在被签内容里</strong>（它含签名本身，算进去就自指了）。所以
+    <code>fileSHA</code> 的右边界是 <code>contentEnd</code>（头部 + 清单 + 载荷的结束偏移），
+    不是「文件末尾 − 48」。</li>
+  <li>长度不变量：<code>contentEnd + 签名块(0 或 108) + 48 == 文件大小</code>。</li>
+</ul>
+
+<div class="card danger">
+  <div class="t">🚫 最重要的一段：内嵌公钥意味着「任何人都能签一个验证通过的包」</div>
+  <p>
+    公钥是<strong>内嵌在包里</strong>的。任何人都可以用自己的密钥签一个包，再把对应公钥一起放进去 ——
+    这个包会「签名有效」。所以必须把三件事分清楚：
+  </p>
+  <ul>
+    <li><strong>「签名有效」（Valid）只证明内容与签名自洽</strong>，不证明签名者是谁，也不证明你要信任它。</li>
+    <li>安全语义<strong>完全来自宿主的信任库</strong>（keyId 白名单）。只有「<strong>已受信任</strong>」才算数，
+      安装决策只能用「已受信任」。</li>
+    <li>宿主<strong>没有信任库时不会信任任何签名</strong> —— 不会退化成「信任所有签名」。空信任库 ≠ 信任所有签名。</li>
+    <li>内嵌公钥不是多余的：它让信任<strong>能够被建立</strong>（管理员第一次信任某发布者时可以比对 keyId），
+      也让「这个包是谁签的」可被审计。</li>
+  </ul>
+</div>
+
+<h4>签名能抓住完整性检查抓不住的东西</h4>
+<p>
+  格式里所有摘要与 CRC 都是<strong>公开可算</strong>的。攻击者改完内容，可以把头部 CRC、
+  清单 SHA-256、载荷 SHA-256、逐条目 SHA-256、尾部 fileSHA <strong>全部同步重算一遍</strong> ——
+  此时 <code>Verify()</code> <strong>会通过</strong>，只有签名会失败。
+  （实现里的 <code>TestSignatureCatchesWhatIntegrityCannot</code> 构造的就是这个场景。）
+</p>
+<div class="card note">
+  <div class="t">💡 这就是「为什么需要签名」的最有力说明</div>
+  <p>
+    摘要防的是「意外损坏与截断」，防不住「有人照着算法重新算一遍」。
+    所以「完整性检查通过」这句话，在任何时候都不能被当成「内容没被人动过」。
+    签名是唯一能区分这两件事的东西 —— 前提是签名者的 keyId 在你的信任库里。
+  </p>
+</div>
+
+<h4>签名策略</h4>
+<div class="tw"><table>
+<thead><tr><th>策略</th><th>行为</th></tr></thead>
+<tbody>
+<tr><td><code>off</code></td><td>完全不看签名</td></tr>
+<tr><td><code>warn</code> <span class="tag t-ok">默认</span></td><td>照装，但把签名状态写进安装结果的 <code>warnings</code>，界面必须如实展示风险</td></tr>
+<tr><td><code>require</code></td><td>只接受<strong>受信任</strong>签名。无签名、签名无效、签名有效但未受信任，三种情况都拒绝安装</td></tr>
+</tbody>
+</table></div>
+<p>
+  配置项在 conf 的 <code>plugin.signatureMode</code>。
+  默认是 <code>warn</code> 而不是 <code>require</code>：<code>require</code> 会让所有存量无签名插件在升级后
+  <strong>立刻装不上</strong>，而建立信任库需要管理员先操作一步。需要严格的环境把它设成
+  <code>require</code> 即可，那时不存在降级空间。
+</p>
+<div class="card warn">
+  <div class="t">⚠️ 策略值写错时按 require 处理</div>
+  <p>
+    写错的值（比如 <code>strict</code>）<strong>不会</strong>被当成 <code>warn</code> 或 <code>off</code>，
+    而是按最严格的 <code>require</code> 处理（fail closed）。配置笔误不该悄悄降低安全门槛。
+  </p>
+</div>
+
+<h4>信任库</h4>
+<p>宿主数据目录下的 <code>plugin-trust.json</code>：</p>
+<div class="code" data-name="plugin-trust.json">
+<pre>{
+  <span class="s">"keys"</span>: [
+    {
+      <span class="s">"keyId"</span>: <span class="s">"3f2a9c1d4b6e7081"</span>,
+      <span class="s">"name"</span>: <span class="s">"某发布者"</span>,
+      <span class="s">"publicKey"</span>: <span class="s">"&lt;base64 的 32 字节 Ed25519 公钥&gt;"</span>,
+      <span class="s">"addedAt"</span>: <span class="s">"2026-10-07T05:51:00Z"</span>
+    }
+  ]
+}</pre>
+</div>
+<ul>
+  <li>填了 <code>publicKey</code> 就<strong>必须与 keyId 自洽</strong>：否则会出现「信任库里写着可信的 keyId、
+    公钥却是别人的」，等于信任了一个假发布者。所以推荐填公钥 —— 只写 keyId 无法防止这种替换。</li>
+  <li>文件<strong>不存在 = 空信任库</strong>（空库 ≠ 信任所有签名），这不是错误，省掉了「必须先建一个文件」的步骤。</li>
+  <li>文件<strong>存在但非法 = 报错</strong>，不会被静默当成空库：静默降级会让「我明明配了信任库」
+    变成一个查不出原因的问题。</li>
+  <li>用 <code>pbclus-pack trust add</code> 维护它，然后把文件放到宿主的<strong>数据目录</strong>下即可生效。</li>
+</ul>
+
+<h2 id="pbclus-spec">11 · 格式规范（给实现者）</h2>
+<p>
+  §10 讲的是「为什么」和「怎么用」。如果你要<strong>自己实现</strong>一个读写器
+  —— 换语言写打包器、写第三方校验工具、在 CI 里检查包 —— 请对着完整规范写，
+  不要从这一节的摘要里反推字节布局。
+</p>
+<div class="tw"><table>
+<thead><tr><th>规范章节</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>布局与字段</td><td>头部 / 清单 / 载荷 / <strong>签名块</strong> / 尾部逐字段的偏移、长度、字节序与 CRC 覆盖范围，四条长度不变量</td></tr>
+<tr><td>校验流程</td><td>结构校验、清单语义与布局校验、完整校验各自管什么，按什么顺序执行</td></tr>
+<tr><td>多平台</td><td>平台标签的语法与「不做白名单」的理由，<code>platforms</code> 与条目 <code>platform</code> 的语义，(路径, 平台) 唯一性，解包选择规则</td></tr>
+<tr><td>签名与信任</td><td>签名块布局、签名消息的构造、信任库格式与自洽性要求、签名策略与失败关闭</td></tr>
+<tr><td>路径规则</td><td>逐条规则与检查顺序、Windows 保留设备名表</td></tr>
+<tr><td>限额与编解码</td><td>全部上限数值，<code>raw</code> / <code>deflate</code> 的精确定义</td></tr>
+<tr><td>安全模型</td><td>两道防线、完整性 / 签名有效 / 受信任三者的边界、v2 明确不提供的能力</td></tr>
+<tr><td>版本策略</td><td>写出 v2、读取 v1~v2、更高版本必须拒绝，以及「为什么必须升版本」</td></tr>
+</tbody>
+</table></div>
+<div class="card note">
+  <div class="t">📄 完整规范与权威实现</div>
+  <p>
+    完整规范：<a href="PBClus-格式规范.md"><code>docs/PBClus-格式规范.md</code></a><br>
+    权威实现：<code>backend/pkg/plugin/pbclus/pbclus.go</code>（布局与校验）、
+    <code>pbclus_platform.go</code>（平台标签与解包选择）、
+    <code>pbclus_sign.go</code>（签名与信任库），
+    恶意清单用例见 <code>pbclus_test.go</code><br>
+    两者不一致时<strong>以代码为准</strong> —— 与本文档其余部分同一个规矩。
+  </p>
+</div>
+
+</main>
+</div>
+
+<div class="backtop" id="backtop" title="回到顶部">
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+</div>
+
+<footer>
+  NebulaDrive 插件制作指南 ·
+  与代码不符之处以代码为准 ·
+  协议版本 <code>1</code>
+</footer>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ---------- 主题 ---------- */
+  var root = document.documentElement;
+  var themeTx = document.getElementById('themeTx');
+  function apply(t){
+    root.setAttribute('data-theme', t);
+    themeTx.textContent = t === 'light' ? '深色' : '浅色';
+    try { localStorage.setItem('pluginDocTheme', t); } catch(e){}
+  }
+  var saved = null;
+  try { saved = localStorage.getItem('pluginDocTheme'); } catch(e){}
+  apply(saved === 'light' ? 'light' : 'dark');
+  document.getElementById('theme').addEventListener('click', function(){
+    apply(root.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+  });
+
+  /* ---------- 代码块工具条 ---------- */
+  document.querySelectorAll('.code').forEach(function(box){
+    var pre = box.querySelector('pre');
+    if (!pre) return;
+    var name = box.getAttribute('data-name') || '';
+    var top = document.createElement('div');
+    top.className = 'code-top';
+
+    var label = document.createElement('span');
+    label.className = 'fname';
+    label.textContent = name;
+    top.appendChild(label);
+
+    var grow = document.createElement('span');
+    grow.className = 'grow';
+    top.appendChild(grow);
+
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = '复制';
+    btn.addEventListener('click', function(){
+      var text = pre.innerText;
+      var done = function(){
+        btn.textContent = '已复制';
+        btn.classList.add('done');
+        setTimeout(function(){ btn.textContent = '复制'; btn.classList.remove('done'); }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(done, function(){ fallback(text, done); });
+      } else {
+        fallback(text, done);
+      }
+    });
+    top.appendChild(btn);
+    box.insertBefore(top, pre);
+  });
+
+  // 剪贴板 API 在 file:// 下常被拒，兜底用 execCommand
+  function fallback(text, done){
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); done(); } catch(e){}
+    document.body.removeChild(ta);
+  }
+
+  /* ---------- 目录高亮 ---------- */
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+  var targets = links.map(function(a){
+    return document.getElementById(a.getAttribute('href').slice(1));
+  });
+
+  function syncToc(){
+    var best = 0;
+    for (var i = 0; i < targets.length; i++){
+      var el = targets[i];
+      if (el && el.getBoundingClientRect().top <= 130) best = i;
+    }
+    links.forEach(function(a, i){ a.classList.toggle('on', i === best); });
+  }
+
+  var ticking = false;
+  window.addEventListener('scroll', function(){
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(function(){ syncToc(); backtop(); ticking = false; });
+  }, {passive:true});
+  syncToc();
+
+  /* ---------- 回到顶部 ---------- */
+  var bt = document.getElementById('backtop');
+  function backtop(){ bt.classList.toggle('show', window.scrollY > 500); }
+  bt.addEventListener('click', function(){ window.scrollTo({top:0, behavior:'smooth'}); });
+  backtop();
+
+  /* ---------- 移动端目录 ---------- */
+  document.getElementById('burger').addEventListener('click', function(){
+    document.getElementById('toc').classList.toggle('collapsed');
+  });
+  if (window.innerWidth <= 920) document.getElementById('toc').classList.add('collapsed');
+  document.querySelectorAll('nav.toc a').forEach(function(a){
+    a.addEventListener('click', function(){
+      if (window.innerWidth <= 920) document.getElementById('toc').classList.add('collapsed');
+    });
+  });
+
+  /* ---------- 搜索过滤 ---------- */
+  var q = document.getElementById('q');
+  var blocks = Array.prototype.slice.call(document.querySelectorAll('main > h2, main > h3, main > h4, main > p, main > ul, main > ol, main > .card, main > .tw, main > .code, main > .grid, main > .steps'));
+  var originals = blocks.map(function(b){ return b.innerHTML; });
+
+  function clearMarks(){
+    blocks.forEach(function(b, i){
+      if (b.dataset.marked === '1'){ b.innerHTML = originals[i]; b.dataset.marked = '0'; }
+    });
+  }
+
+  function runFilter(){
+    var term = q.value.trim().toLowerCase();
+    if (!term){
+      clearMarks();
+      blocks.forEach(function(b){ b.classList.remove('hide'); });
+      links.forEach(function(a){ a.parentElement && a.classList.remove('hide'); });
+      return;
+    }
+    clearMarks();
+    blocks.forEach(function(b, i){
+      var hit = b.textContent.toLowerCase().indexOf(term) !== -1;
+      b.classList.toggle('hide', !hit);
+      if (hit){
+        // 高亮匹配：只处理文本节点，避免破坏结构
+        var walker = document.createTreeWalker(b, NodeFilter.SHOW_TEXT, null);
+        var nodes = [];
+        while (walker.nextNode()) nodes.push(walker.currentNode);
+        nodes.forEach(function(n){
+          var idx = n.nodeValue.toLowerCase().indexOf(term);
+          if (idx === -1) return;
+          var after = n.splitText(idx);
+          after.splitText(term.length);
+          var mark = document.createElement('mark');
+          mark.textContent = after.nodeValue;
+          after.parentNode.replaceChild(mark, after);
+        });
+        b.dataset.marked = '1';
+      }
+    });
+  }
+
+  var timer = null;
+  q.addEventListener('input', function(){
+    clearTimeout(timer);
+    timer = setTimeout(runFilter, 130);
+  });
+  q.addEventListener('keydown', function(e){
+    if (e.key === 'Escape'){ q.value = ''; runFilter(); q.blur(); }
+  });
+
+  // 快捷键：/ 聚焦搜索
+  document.addEventListener('keydown', function(e){
+    if (e.key === '/' && document.activeElement !== q){
+      e.preventDefault();
+      q.focus();
+    }
+  });
+})();
+</script>
+</body>
+</html>

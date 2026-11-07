@@ -1308,3 +1308,1454 @@ echo "  [信息] PID=$PID ，停止服务请执行 ./stop.sh"
 - Bash sandbox 隔离了本机回环连接，`curl http://127.0.0.1:<port>` 会报
   `Failed to connect`（此时服务明明在 `netstat` 里 LISTENING），
   需要 `dangerouslyDisableSandbox`。
+
+---
+
+## 17. 改存储策略会把 SFTP 密码/云厂商密钥**以明文写回库**
+
+做插件配置加密的占位调研时，顺手核对「`Policy.Config` 的加密路径是否可照抄」，
+结果发现照抄不了 —— 因为它自己就漏了一条写入路径。
+
+### 问题
+
+`controllers/admin_ex.go` 的 `UpdatePolicy` 这样写：
+
+```go
+db.Get().Model(&models.Policy{}).Where("id = ?", id).Updates(map[string]any{
+    "name": req.Name, "type": req.Type, "config": req.Config, "is_default": req.IsDefault,
+})
+```
+
+`Policy.Config` 是 `models.Encrypted`，加密靠 `driver.Valuer`（`Value()`）。
+但 **`database/sql` 只对实现了 `Valuer` 的「值」调用它** ——
+`req.Config` 是裸 `string`，`Valuer` 完全不参与，明文直接落库。
+
+`CreatePolicy`/`UpdatePolicy` 之外的路径没问题：`CreatePolicy` 用了
+`models.From(req.Config)`，`User.TwoFactor` 的两处写入
+（`controllers/auth.go:214,231`）也都包了 `models.From`，旁边甚至有注释点了这个坑。
+**只有这一处漏了。**
+
+### 影响
+
+`policies.config` 里存的是 SFTP 密码、OSS / COS / S3 密钥。管理员在后台
+**编辑一次存储策略**，该策略的凭据就在数据库里变成明文 ——
+而接口返回 200，GORM 不报任何错，日志也没有异常。
+
+有兜底但不够：`MigrateSensitiveFields() → migratePolicyConfig()` 每次启动都会把
+不带 `enc:v1:` 前缀的行转回密文。所以窗口是「编辑之后、下次重启之前」——
+不是永久泄露，但在两次重启之间密钥就是裸的，且期间任何一次库文件泄露都直接兑现。
+
+### 为什么既有的测试没拦住
+
+`models/encrypted_test.go` 的 `TestEncryptedUpdateMapPath` 注释写得很准
+（「传裸 string，hook 完全拦不住，会静默写入明文」），**但它传的是
+`models.From("NEWSECRET")`** —— 是个已带类型的值，所以它验证的是
+「正确写法能加密」，而不是「错误写法会被拦」。测试名和注释比它实际覆盖的范围更大，
+这种错位最危险：看名字以为这条路径已经有人守着了。
+
+### 修复
+
+```go
+"config": models.From(req.Config),
+```
+
+一行。另补两个测试锁住：
+
+| 测试 | 作用 |
+|---|---|
+| `models/encrypted_bare_string_test.go` | 固化「裸 string 不被加密」这条 `database/sql` 约束，防止后来者把 `models.From(...)` 当冗余包装删掉 |
+| `controllers/admin_policy_config_test.go` | 直接打 `PUT /policies/:id`，读**原始列**断言 `enc:v1:` 前缀 |
+
+### 验证
+
+两个测试都做过双向验证：把修复改回裸 string 后
+`TestUpdatePolicyConfigStaysEncrypted` 报
+`policies.config 必须加密落库，实际 = "{\"password\":\"edited-by-admin\"}"（明文泄露）`，
+改回 `models.From` 后通过。**测试必须在修复前失败才有价值**。
+
+### 对插件配置加密的直接影响
+
+`controllers/plugins.go` 有**两处**同样的写法：
+
+```go
+db.Get().Model(&p).Update("config", raw)          // 第 471 行，InstallPlugin
+db.Get().Model(&p).Update("config", body.Config)  // 第 582 行，UpdatePluginConfig
+```
+
+今天 `models.Plugin.Config` 还是普通 `string`（字段本身就是明文），所以**现在不是 bug**。
+但一旦按计划把它改成 `models.Encrypted`，这两处**必须同时**包成
+`models.Encrypted(...)`，否则插件配置（SMTP 密码、HMAC sharedSecret）
+会重演本节这个 bug。已写进
+`docs/新功能占位清单-明天接续.md` §2.5。
+
+---
+
+## 18. 插件冒烟测试从来没跑到过插件部分
+
+上一节修完需要端到端验证（包级测试读不到"真实 HTTP 接口 + 真实 SQLite 原始列"），
+于是先跑现有的 `backend/smoke_plugin.sh`，结果它在**第 2 步**就死了：
+
+```
+.././.smoke-nebula: No such file or directory
+```
+
+也就是说：仓库里唯一的插件端到端测试**从未真正验证过任何插件行为**，
+但它在文档里被当作已有覆盖。
+
+### 18.1 `smoke_plugin.sh` 的四类缺陷
+
+| # | 缺陷 | 后果 |
+|---|---|---|
+| 1 | `BIN="./.smoke-nebula"` + `go build -o "../$BIN"` → 产物建到**仓库根**，运行时又去数据目录上一级找 | 第 2 步即挂 |
+| 2 | 产物不带 `.exe` | Windows/Git Bash 起不来 |
+| 3 | `-data .` + 库路径 `data/nebula.db` → `conf` 只 MkdirAll(".")，`./data` 不存在 | sqlite 报误导性的 `out of memory (14)` |
+| 4 | 安装插件时把 MSYS 路径 `/e/...` 塞进 JSON | 服务端按原生路径解析找不到目录 → 400 |
+| 5 | 钩子计数匹配 `"name":"onAntiLeech","inProcess":0,...` 连续子串 | `gin.H` 是 map，`encoding/json` **按字母序**输出键（…mode/name/outProcess…），该子串永远不可能命中 |
+| 6 | `kill -0 "$PLUGPID"` 判断插件子进程 | Windows 下插件 pid 是**原生 PID**，bash 的 `kill -0` 只认 MSYS pid → 明明在跑却报"不存在" |
+| 7 | 无 `.exe` 意识、只 kill 子 shell | 残留真实进程占着端口与数据目录（`Device or resource busy`） |
+
+修法：路径全部基于 `$(dirname "$0")` 解析；按 `uname -s` 补 `.exe`；
+不传 `-data`（用默认数据目录，与真实安装一致）；加 `jsonpath()`（`cygpath -w`
++ 反斜杠转义）；钩子断言改成先拆分对象再匹配；加 `proc_alive()` 平台分流；
+清理时 `taskkill //F //IM` 兜底。
+
+修好后 **20/20 通过**，插件热加载链路（安装 → 启用拉起子进程 → 403 拦截 → 禁用回收子进程）
+第一次被真实验证。
+
+### 18.2 顺带发现：装完不重启，插件功能全部 503
+
+修好脚本后卡在「启用 → 503」。查明原因：
+
+`main.go` 的 `bootstrap()`（`db.Init`、版本化迁移、`pluginset.InitPlugins`、`jwt.Init`）
+只在**启动时** `conf.IsInstalled()` 为 true 才执行。而首次安装是在服务运行中
+通过 `POST /api/install` 完成的 —— 此时 `bootstrap` 早已跳过。
+
+**所以"装完向导不重启"= 插件宿主始终为 nil，所有插件接口 503（前端显示"插件宿主未就绪"）。**
+
+脚本里的处理是**按真实部署方式重启一次**（新增 `[3b/7]` 步骤），并断言重启后
+`/api/admin/plugins/hooks` 能返回 `protocolVersion`。
+
+这属于产品既有行为，不是脚本缺陷，因此本轮**只记录不改**：是否要让安装流程
+自己补一次宿主初始化（或提示管理员重启），需要产品决策。
+
+### 18.3 新增 `smoke_policy_config.sh`
+
+第 17 节那个明文泄露 bug 的端到端守卫。它从**真实 HTTP 接口**打进去，
+再直接读**数据库原始列**断言 `enc:v1:` 前缀：
+
+| 检查 | 说明 |
+|---|---|
+| Create 后原始列为密文 | 覆盖 `models.From` 正确路径 |
+| **Update 后原始列仍为密文** | 覆盖出过事的那条路径 |
+| 数据库文件（含 wal/shm）无明文密钥 | 第二道防线，逐个文件判断而非 glob（glob 不匹配会把"没匹配上"误判成"没泄露"） |
+| 上传 + 下载内容一致 | 证明**解密链路**仍可用 |
+
+最后一项不能靠"读接口拿配置"：`models.Policy.Config` 的 tag 是 `json:"-"`，
+接口**刻意不返回**配置（不把密钥发给客户端是对的）。改用
+`filesystem.New(p.Type, p.Config.String())` 需要明文 JSON 这一点来间接验证 ——
+若 `Config.String()` 返回密文，JSON 解析失败 → 上传 500。
+
+**双向验证**：把 `admin_ex.go` 改回裸 string，脚本准确报红 3 项、退出码 1；
+改回 `models.From` 后 14/14 通过。
+
+### 18.4 教训
+
+**"脚本存在"不等于"脚本在跑"。** 这两处覆盖（插件端到端、密钥静态加密）
+在修复前都属于"看上去有、实际零"的状态。冒烟脚本本身也会腐坏，
+而它腐坏时**不会发出任何信号** —— CI 不跑它们，没人执行它们，
+于是坏了好几个月也没人知道。
+
+### 18.5 把冒烟接进 CI（新增 `.github/workflows/smoke.yml`）
+
+光修好不够 —— 没人定期执行，它们迟早再次腐坏。新增独立 workflow：
+
+| 步骤 | 内容 |
+|---|---|
+| `Plugin hot-reload smoke` | `bash backend/smoke_plugin.sh` |
+| `Policy config encryption smoke` | `SMOKE_REQUIRE_SQLITE3=1 bash backend/smoke_policy_config.sh` |
+
+几个刻意的选择：
+
+- **单独一个 workflow，不塞进 `go-ci.yml`**：go-ci 是 vet + `test -race`（秒到分钟级），
+  冒烟要起真实进程、建真实 SQLite、走真实 HTTP。混在一起会让
+  "单元测试挂了"和"端到端挂了"难以区分。
+- **触发路径含 `examples/plugins/**`**：示例插件是独立 module，`go-ci` 覆盖不到它，
+  而冒烟会现场编译并加载它 —— 这里顺带补上了那块空白。
+- **`SMOKE_REQUIRE_SQLITE3=1`**：`smoke_policy_config.sh` 的核心断言依赖 `sqlite3`，
+  本地缺依赖时默认跳过（不阻塞开发机）；但 CI 里**必须失败**。
+  否则门禁会变成"永远绿色"的假门禁 —— 正是本节的病根。已本地验证两个分支：
+  严格模式退出码 1、宽松模式退出码 0。
+- **EXIT trap 里的 `rm` 补 `|| true`**：`set -e` 下 trap 中任何一条非零命令都会
+  **覆盖脚本真实退出码**，把"断言失败"伪装成"清理失败"。
+- **开头打印环境行**（`uname` / bash 版本 / go 版本）：CI 失败时先看这行，
+  能立刻区分"环境不对"和"断言失败"。
+- **读库失败与"确实是明文"分开判**：`sqlite3` 读不到时返回空串，
+  若不区分就会打印"原始列为明文: "，把环境问题误报成安全事件。
+
+> ⚠ **未验证项（如实记录）**：本机无 Linux 环境（WSL 无可用发行版），
+> 因此 `ubuntu-latest` 上的实际执行**没有跑过**。已做的验证是：
+> workflow YAML 可被解析、两个脚本 `bash -n` 语法通过、两者在 Windows/Git Bash
+> 下全绿（14/14、20/20），且所有平台相关分支（`.exe`、`taskkill`、`cygpath`、
+> `kill -0` vs `tasklist`）都按 `uname` 显式分流。首次在 CI 上跑通前，
+> 仍应把它当作"待确认"而非"已验证"。
+
+---
+
+## 19. 占位骨架插件：README 里的承诺终于被验证了
+
+两个占位骨架插件（`smtp-email` / `hmac-auth`）的 README 都写着
+"可安装、可启用、能收到事件"，但**从没验证过**。占位最容易骗到自己：
+init 握手、hooks 声明、回写任一环节写错，插件就是装不上或静默收不到事件，
+而 `go build` 与 `go vet` 都不会有任何反应。
+
+新增 `pkg/plugin/host/example_skeletons_test.go`，走**真实链路**：
+编译 → `install.InstallFromDir` → `host.Manager.Load`（真实 init 握手）→ 派发事件。
+
+### 19.1 断言的是协议不变量，不是占位状态
+
+| # | 不变量 | 为什么重要 |
+|---|---|---|
+| 1 | **空配置也能启用**（`ConfigFor` 为 nil） | 管理员刚装好、还没填配置时不能启不来。占位的首要目标是"能启用" |
+| 2 | 声明的钩子在宿主侧 `Count == 1` | init 握手与 manifest 声明真的对上了 |
+| 3 | 异步派发立即返回且不报错 | 这是 `onEmail`/`onApiAuth` 留在 `ModeAsync` 的全部理由 |
+| 4 | 插件真的处理了事件（能观测到回写） | 防"装上了但事件被静默丢弃" |
+| 5 | 绝不返回含 `"blocked"` 的错误 | `onApiAuth` 一旦误报拦截，接上同步门就会把真实请求全部 403 |
+
+刻意**不**断言"返回 `not-implemented`"这类具体值 —— 那是占位状态，
+明天填进真实现后就会作废，写进测试只会变成明天要删的噪音。
+
+### 19.2 第一版测试自己写错了：异步钩子不回传结果
+
+第一版在 `m.Dispatch(hook, ctx)` 之后断言 `ctx[patchKey]`，结果两个插件都"没回写"。
+查 `host/manager.go` 后确认**是测试错了**：
+
+```go
+func (m *Manager) Dispatch(h plugin.HookName, ctx map[string]any) []error {
+	if plugin.HookModeOf(h) == plugin.ModeAsync {
+		m.dispatchAsync(h, ctx)   // 结果直接丢弃
+		return nil
+	}
+	return m.dispatchSync(h, ctx)
+}
+```
+
+`onEmail` 与 `onApiAuth` 今天都是 `ModeAsync`，宿主**刻意丢弃**其结果
+（见 `hooks.go` 的 Mode 说明与 `Dispatcher` 接口注释）。
+要确定性观测必须用 **`DispatchSync`** —— 它无视钩子既定模式、强制等待回传，
+正是 `onRateLimit` 的 `RateLimitGate` 用的那个入口。
+
+> 这条坑值得记：**在 `Dispatch` 之后断言异步钩子的 ctx 变更，是一个永远不可能成立的测试**。
+> 它不是偶发失败，而是设计使然 —— 写这类测试时必须先看钩子的 Mode。
+
+### 19.3 反向验证（两次）
+
+一个只会绿的测试等于没有测试，所以对新增断言做了两次破坏性验证：
+
+| 破坏方式 | 结果 |
+|---|---|
+| `plugin.json` 的 `protocolVersion` 改成 2 | ✅ FAIL —— 在清单校验阶段就被拦下 |
+| `handleInit` 返回 `OK: false`（装得上但启不了） | ✅ FAIL 且报文精确：`加载 smtp-email 失败（init 握手未通过）: 插件报告初始化失败但未给出原因` |
+
+第二次专门针对第 1 条不变量 —— 它才是"可启用"这个承诺的真正守卫。
+验证完已全部还原，`go test ./...` 15 个包全绿。
+
+---
+
+## 20. 公开分享的防盗链缺口已补（onAntiLeech 覆盖分享下载与预览）
+
+第 17 节的调研顺带发现的缺口，本轮实现。
+
+### 问题
+
+`onAntiLeech` 原先全项目只有一个调用点（`controllers/file.go` 的 `Download`），
+而公开分享走 `controllers/share.go` 的 `serveShareFile` —— **完全不触发该钩子**。
+
+后果：装了防盗链插件的站点，分享链接依然可以被任意第三方站点盗刷。
+而分享恰恰是最需要防盗链的场景：站内下载要登录，分享链接是公开的。
+
+### 修法
+
+在 `serveShareFile` 里、`target` 解析并通过祖先链校验**之后**、
+`handlerForFile(&target)` **之前**新增调用点。位置理由是硬的：
+
+- 更早：`target` 与分享还没解析出来，拿不到 `fileId` / `fileName` / `shareId`；
+- 更晚：文件已进入 `streamFile` 开始流式输出，再想 403 已经来不及。
+
+### 为什么 preview 也必须过闸（本轮最关键的一个决定）
+
+`preview` 用的是 `Content-Disposition: inline`，看起来"只是预览"，
+但它返回的是**完整文件内容**。只拦 `download` 等于留了一条完整的
+绕过防盗链的通道 —— 攻击者拿 `?fileId=` 打 preview 就能把文件拖走。
+
+这个判断不靠推理，靠实测：把闸门改成"只拦 download、放行 preview"后，
+测试直接报出了证据 ——
+
+```
+--- FAIL: TestShareAntiLeechBlocksDownloadAndPreview
+    share_antileech_test.go:126: 分享**预览**未被防盗链拦截: status=200 body=hello share
+```
+
+于是宿主对两者**一视同仁**地过闸，并把场景通过 `shareKind`
+（`download` / `preview`）交给插件自己决定要不要区别对待。
+宿主不替插件做这个取舍，但绝不默认放行其中一个出口。
+
+### ctx 契约（分享路径）
+
+```
+{userId: 0, userName: "", ip, ua, fileId, fileName, referer,
+ shareId, shareKind, shareOwnerId}
+```
+
+两个刻意的点：
+
+- **`userId` 恒为 0 且键必须存在**。分享访问者是匿名的，插件不能假设它有值。
+  键存在与键缺失是两种语义：键缺失时插件的 `numOf(ctx["userId"])` 拿到 nil，
+  与"存在且为 0"不同。测试专门断言了"键存在且为 0"。
+- **分享所有者放 `shareOwnerId`**，不与访问者混淆 —— 登录下载那条路径里
+  `userId` 就是所有者，两个路径的语义不同，共用同一个字段名会造成误判。
+
+拦截判定走 `plugin.IsBlockedError`（`hooks.go` 声明它是全项目唯一实现）。
+
+### 验证
+
+| 层 | 内容 | 结果 |
+|---|---|---|
+| 包级（controllers） | 下载与预览都过闸且 403；无插件时照常 200 且内容正确；非 `blocked` 错误不拦截 | 3 个测试全过 |
+| 反向验证 ×2 | ①闸门整个关掉 → 下载断言报红；②只拦 download → **预览**断言报红（见上） | 各自 FAIL |
+| 端到端（真机） | `smoke_plugin.sh`：真实进程 + 真实子进程插件，创建分享后 download 与 preview 均外站 403 / 本地 200，禁用后恢复 200 | **26/26 通过**（原 20 项 + 新增 6 项） |
+
+示例插件 `referer-guard` 同步更新：审计日志新增 `shareId` / `shareKind`
+（才能区分"谁在盗刷分享链接"与"谁在盗刷站内下载"），头部注释写明了
+分享路径的 ctx 差异。
+
+### 行为变更提示
+
+装了防盗链插件的站点，**分享链接现在也会被判定**（此前完全不判定）。
+本站自身的分享页会带自身 Referer，正常配置下会命中白名单而被放行；
+若某站点只想保护下载、放行内联预览，请让插件按 `shareKind` 自行放行 ——
+这条已写进 `hooks.go` 的钩子文档与插件 README。
+
+---
+
+## 21. smtp-email 从占位骨架变成真的能发信
+
+第 19 节验证过的骨架，本轮填上真实实现。
+背景：宿主**不含任何发信实现**（全仓 `grep -r smtp` 零命中），
+`onEmail` 是邮件外发的唯一入口 —— 没有它，站内通知永远到不了邮箱。
+
+### 实现要点
+
+| 点 | 做法 |
+|---|---|
+| 三种 TLS | `starttls`(587) / `implicit`(465) / `none`(25)，每一步都设 deadline |
+| AUTH | 配了 `username` 才认证；服务器没声明 `AUTH` 时**明确报错**，不静默匿名发送 |
+| 中文主题 | RFC 2047 编码（`mime.QEncoding`） |
+| 中文正文 | `charset=UTF-8` + base64；ASCII 正文走 7bit |
+| 头注入 | `Subject`/`To` 的 CR/LF 一律剥离 |
+| 密码 | 日志里只出现 `<set:N chars>` |
+
+**没有"跳过证书校验"的开关。** `tlsConfigForHost` 是可注入变量，
+但只在测试里被替换；生产默认固定 `MinVersion: TLS1.2` 并按系统根证书校验。
+—— 一个"为了测试方便"的跳过选项，最终一定会被用到生产上。
+
+### 单测抓出了实现里的一个真 bug：base64 路径漏了 CRLF 归一化
+
+`buildMessage` 一开始只在 7bit 路径做换行归一化，base64 路径直接编码原文。
+后果是收件人解码后拿到 LF 行尾，而 RFC 5321 要求 CRLF ——
+base64 是对字节编码，正文里的裸 LF 会被原样编进去。
+
+断言 `正文解码后应等于 toCRLF(原文)` 把它当场抓了出来：
+
+```
+--- FAIL: TestSendChineseSubjectAndBody
+    main_test.go:263: 正文解码后不一致
+```
+
+修法是把归一化提到两条路径之前。**测试没改，改的是实现。**
+
+### 测试策略：两层，缺一不可
+
+字段名是宿主与插件**两个 module 之间**的约定（宿主发 `{"to","subject","body"}`，
+插件读 `ctx["to"]` 等）。改名不会有任何编译错误，插件只会静默读不到字段。
+
+| 层 | 文件 | 覆盖 |
+|---|---|---|
+| 宿主侧契约 | `controllers/notification_email_test.go` | `CreateNotification` 真的触发 `onEmail`，且字段名/内容正确；邮箱为空时不触发 |
+| 插件侧协议 | `examples/plugins/smtp-email/main_test.go` | 假 SMTP 服务器做真实往返：中文主题编码与折行解码、正文编码、头注入、三种 TLS、fail closed、错误文案绝不含 `blocked` |
+| 完整链路 | `pkg/plugin/host/smtp_email_e2e_test.go` | 宿主下发配置 → 拉起子进程 → 派发 `onEmail` → `net/smtp` → 假 SMTP 服务器 → 断言报文 |
+
+### 反向验证：字段名漂移必须被抓住
+
+把插件的 `ctx["to"]` 改成 `ctx["recipient"]`（模拟两个 module 之间的约定断裂）。
+
+第一版测试在 **16 秒后**才失败，报的是"15s 内没收到邮件" —— 排查方向会被
+引到网络/配置上去。原因是插件读不到收件人时直接回 `skipped-no-recipient`、
+**根本不连 SMTP**，所以只会等到超时。
+
+改成先判插件自报状态再等收件后：
+
+```
+--- FAIL: TestSMTPEmailPlugin_EndToEnd (1.02s)
+    smtp_email_e2e_test.go:189: 插件判定收件人为空 —— 宿主发的是 ctx["to"]，
+    插件读的键名对不上（两个 module 的字段名约定断了）。
+```
+
+**1 秒内给出精确原因。** 失败信息的质量本身就是测试质量的一部分。
+
+### 顺带清理的两处"陈旧文案"
+
+反向验证的日志输出暴露了两条与事实相反的提示，都已修正：
+
+- `handleInit` 还在打 `smtp-email 已就绪（占位骨架）…SMTP 投递尚未实现…`
+  → 改为报告 `tls` 模式与失败行为；
+- 配置不完整时的 warn 仍写着"当前仍为占位骨架，不会真实发信"
+  → 改为"补齐后重启即生效；当前状态下邮件不会发出"。
+
+**实现完成却留着"尚未实现"的日志，比没有日志更有害**：它会让管理员
+在已经正常工作（或已经失败）的系统上往错误方向排查。
+
+### 另一处诚实性修正：权限声明
+
+`plugin.json` 原声明了 `write-own-datadir`，但实现没往插件数据目录写任何文件
+（失败记录走宿主日志环形缓冲即可，落盘还要担磁盘被写满的风险）。
+**声明用不到的权限会高估插件所需权限**，而管理员正是靠这份声明判断风险 ——
+已删除该条。
+
+### 验证
+
+| 检查 | 结果 |
+|---|---|
+| 插件 `go vet` / `go build` / `go test` | ✅ 通过，8 个用例 |
+| 宿主 `go build` / `go vet` / `go test ./...` | ✅ 15 个包全绿 |
+| `smoke_plugin.sh` | ✅ 26/26 |
+| `smoke_policy_config.sh` | ✅ 14/14 |
+| 反向验证（字段名漂移） | ✅ 1.02s 精确 FAIL |
+
+示例插件是**独立 module**，`backend` 的 `go test ./...` 覆盖不到 ——
+已在 `.github/workflows/smoke.yml` 增加 `Example plugin checks` 步骤
+（三个插件逐个 `go vet` + `go test`），否则这些断言又是一处"写了但永不运行"。
+
+---
+
+## 22. 接通 onApiAuth：开放 API 的扩展鉴权
+
+第 3 个预留钩子（`Wired=false`）接通。用途：`/api/v1/*` 在内置鉴权
+（PAT / OAuth2）之外接受扩展鉴权方案 —— HMAC 签名、IP 白名单、
+第三方令牌等。
+
+### 设计计划被推翻：不需要同步门
+
+第一版计划写的是"照 `onRateLimit` 的做法加一个同步门（`APIAuthGate`）"。
+实现时发现**前提不成立**：
+
+`onRateLimit` 之所以要另开门，是因为它有 **7 个调用点**、只有 1 个需要读结果 ——
+把整个钩子改成同步会让另外 6 处每次白等一次 IPC 往返。
+而 `onApiAuth` 只有**一个**调用点，且它必须读结果。
+
+所以正确做法就是把它本身改成 `ModeSync` + `Blockable: true`，
+不需要任何额外的门。**计划里"照抄某个模式"的指令，先要核对前提是否相同。**
+
+### 接线位置与语义
+
+落在 `middleware/api_auth.go`：PAT / OAuth2 **都失败之后**才触发。两个原因：
+
+- 热路径零成本 —— `/api/v1/*` 的每个请求都走这个中间件，
+  正常鉴权不该为一次 IPC 往返买单；
+- 内置凭据始终优先，插件无法否决一个已经有效的令牌。
+
+插件有两种表达方式：
+
+| 意图 | 做法 | 宿主行为 |
+|---|---|---|
+| 放行 | 在 ctx 写入 `principalUserId`（>0） | 从库里取出该用户设为当前用户 |
+| 拒绝 | 返回含 `blocked` 的 error | 403 |
+| 不表态 | 两者都没有 | 保持 401（**fail closed**） |
+
+拒绝用 403、未表态用 401：前者是"扩展鉴权明确说不"，后者是"凭据没通过"。
+
+### ctx 契约
+
+```
+{method, path, query, ip, ua, headers, hasAuthorization,
+ contentType, contentLength, bodyHash, bodyTruncated}
+```
+
+两个刻意的决定：
+
+- **`headers` 不含 `Authorization`。** 内置凭据留在宿主这边；插件要用自定义凭据
+  应当用自己的头（HMAC 签名正是这样）。这既减少凭据扩散面，也逼出一个明确约定，
+  而不是让插件去猜"Authorization 里的东西算不算已经验证过"。
+- **`bodyHash` 有上限（64KB）。** 本中间件在**鉴权失败**时才跑到扩展鉴权，
+  而失败路径是攻击者可控的：不限量读 body 等于给了一个内存放大面。
+  超限时不读全文，只置 `bodyTruncated=true` 并把 `bodyHash` 置空 ——
+  半截数据的哈希没有任何意义，给出去只会让插件拿错误的哈希去校验
+  （然后表现为"签名永远不对"）。
+
+`bodyHash` 还有一个必须做对的细节：中间件"顺手看一眼" body 之后，
+后续 handler（例如 `/api/v1/files/upload`）仍要读到**完整**内容。
+用 `io.MultiReader(已读缓冲, 原body)` 放回，读完与截断两条路径都不丢字节。
+测试里专门发了一个带 body 的请求并断言下游读到的内容一字不差。
+
+### 一个只会在"多进程"下暴露的静默失效
+
+`principalUserId` 的值必须兼容多种数字类型：进程内 handler 写进去的是
+Go 的 `int`/`uint`，而**进程外插件的回写经 JSON 往返后是 `float64`**。
+只认其中一种的后果是"进程外插件放行无效"，而且**不报任何错** ——
+这类静默失效正是本项目插件体系里反复出现的一类坑（参见
+`referer-guard` 里对 `ctx["userId"]` 的同类处理）。
+
+float64 路径额外加了 2^53 与整数性校验：JSON 无法精确表示更大的整数，
+拿到的值可能已被四舍五入成**另一个用户**。`int` 路径没有这个歧义
+（它来自进程内、是精确值），所以那里的界限只要求为正 —— 这个不对称
+是有意的，测试里也写了注释说明。
+
+### 反向验证（两次，都针对安全属性）
+
+| 破坏方式 | 结果 |
+|---|---|
+| 把"插件没表态"当成放行 | ✅ FAIL：`插件没表态时应保持 401，实际 200` |
+| 忽略插件的 `blocked` 拒绝 | ✅ FAIL：`插件拒绝应 403，实际 401` |
+
+第一条才是要害：装了插件却把 401 变成 200，等于把开放 API 直接敞开。
+
+### 端到端（真机）
+
+`smoke_plugin.sh` 新增第 8 节：真实进程 + 真实子进程插件。
+
+```
+[PASS] 安装 hmac-auth 200
+[PASS] 启用 hmac-auth 200
+[PASS] 无效令牌经扩展鉴权后仍 401（fail closed）
+[PASS] 插件收到 onApiAuth 事件（钩子真的派发到子进程）
+```
+
+**30/30 通过**（原 26 项 + 新增 4 项）。
+"钩子真的派发到子进程"这一条是从宿主的插件日志环形缓冲里读出来的 ——
+断言的是插件自己打的那行日志，而不是宿主侧的自述。
+
+### 顺带修掉：hmac-auth 声明的契约是错的
+
+占位阶段我给 `hmac-auth` 写了一份"期望宿主提供"的字段清单
+（`timestamp`、`signature`、`appKey`…）。**接通宿主后才发现这些字段宿主根本不发** ——
+它们是插件自定义的**凭据头**，应当从 `ctx["headers"]` 里自己取。
+
+这正是"契约探针"的价值所在，但暴露了一个流程问题：
+**占位阶段的契约是凭空写的，没有对照任何实现**。已修正：
+
+- `contractFields` 改为与 `middleware/api_auth.go` 实际发送的字段一一对应；
+- 新增 `credentialHeaders`（插件自定义头）与 `headerValue()` ——
+  后者同样要兼容 `map[string]string`（进程内）与 `map[string]any`（JSON 往返）；
+- 头部注释、init 日志、README 全部改为"宿主已接通 + 插件尚未校验"的真实状态，
+  并明确 **本插件当前不会放行任何请求**。
+
+### 验证
+
+| 检查 | 结果 |
+|---|---|
+| `go build` / `go vet` / `go test ./...` | ✅ 15 个包全绿（连续两次） |
+| `middleware` 新增 7 个用例 | ✅ 全过 |
+| 反向验证 ×2 | ✅ 各自 FAIL |
+| `smoke_plugin.sh` | ✅ **30/30** |
+| 三个示例插件 `go vet` + `go test` | ✅ 通过 |
+
+> 观察记录（未复现）：一次全量 `go test ./...` 中 `routers` 报 FAIL，
+> 同一次运行里 `pkg/plugin/host` 因示例插件编译错误也 FAIL。
+> 修好后连续两次全量绿，且 `routers` 单独连跑 3 次全绿。
+> 倾向于是并行满载下的偶发（该包会起真实 HTTP 服务）。
+> **记录在案，不掩盖** —— 若再次出现需要单独排查。
+
+---
+
+## 23. hmac-auth 从契约探针变成真的会鉴权
+
+第 22 节接通 `onApiAuth` 后，本轮把插件的校验实现补上。
+至此 `/api/v1/*` 除了 PAT / OAuth2，还能用**共享密钥 + HMAC-SHA256 签名**调用。
+
+### 端到端测试抓出一个只能靠真实请求发现的 bug
+
+实现完成、包级测试全绿之后，冒烟脚本里的签名请求**一直返回 401**。
+现象极具迷惑性：
+
+- 插件进程在跑（`status: running`、真实 pid）；
+- 钩子计数正确（`outProcess: 1`、`mode: sync`）；
+- 插件日志里**一片空白** —— 连一条"收到 onApiAuth"都没有。
+
+也就是说：**钩子注册了，却从未被派发**。
+
+根因在接线位置：`APIAuth` 原本在
+
+```go
+tok := extractBearerToken(c)
+if tok == "" {
+    c.AbortWithStatusJSON(401, "missing token")
+    return          // ← 扩展鉴权在这后面，永远到不了
+}
+```
+
+而 **HMAC 客户端压根不会带 `Authorization` 头**（签名放在自定义头里）。
+于是所有这类请求都在第一步就被 401 挡掉，扩展鉴权形同不存在 ——
+而且返回的 401 看起来完全正常，没有任何异常信号。
+
+**修法**：把"缺 token 就早退"改成延迟到最后兜底，让扩展鉴权在
+内置方式全部失败（**含根本没带凭据**）之后都能拿到请求：
+
+```go
+if tok != "" { /* 1. OAuth2 */ }
+if tok != "" { /* 2. PAT    */ }
+switch u, decision := pluginAPIAuth(c); decision { /* 3. 扩展鉴权 */ }
+if tok == "" { 401 "missing token" } else { 401 "invalid token" }
+```
+
+已补回归测试 `TestAPIAuthPluginWithoutAuthorizationHeader` ——
+断言"不带 Authorization 的请求必须能走到扩展鉴权"，并在注释里写明了
+这个坑的症状，避免以后有人"优化"时又把早退加回去。
+
+> 教训：**包级测试覆盖了所有逻辑分支，却覆盖不了接线位置。**
+> 这次能发现，靠的是端到端脚本里那条真实 HTTP 请求。
+
+### 签名规范串
+
+```
+METHOD\nPATH\nQUERY\nTIMESTAMP\nBODY_SHA256_HEX
+```
+
+五行，**缺一不可**。少任何一行，攻击者就能在不改签名的前提下替换那部分内容。
+测试里用"篡改表"逐项验证：改方法 / 路径 / 查询串 / **请求体摘要** / 时间戳 /
+签名 / 换密钥，每一项都必须被拒。
+
+反向验证：把 `bodyHashHex` 从规范串里去掉后，篡改表里"改请求体摘要"
+当场报红（`该字段没有被纳入规范串`）—— 证明这张表不是摆设。
+
+### 三条安全红线（都有测试）
+
+| 红线 | 做法 |
+|---|---|
+| 未配 `sharedSecret` / `principalUserId` 时**一律拒绝** | 没有密钥就不存在鉴权；没有 principalUserId 无法认定身份（比"随便挑一个用户"安全） |
+| **常量时间比较** | `hmac.Equal`；用 `!=` 会在第一个不同字节处返回，可被逐字节猜签名 |
+| **缺签名头也拒绝** | 否则不带签名头就能绕过这层保护；要放行的端点显式写进 `exemptPaths` |
+
+另外两个容易写错的点：
+
+- **`exemptPaths` 按路径段边界匹配**：配置 `/api/v1/health` 匹配
+  `/api/v1/health` 与 `/api/v1/health/live`，但**不**匹配 `/api/v1/healthcheck`。
+  裸 `strings.HasPrefix` 会意外放行后者 —— 表面只是"多放行一个端点"，
+  实际放行了一个没人打算公开的端点。
+- **`bodyTruncated` 时必须拒绝**：宿主读 body 有 64KB 上限，
+  半截数据的摘要不可信，放行等于允许篡改请求体而签名依然通过。
+
+### 端到端（真机 HTTP）
+
+`smoke_plugin.sh` 第 8 节现在做真实签名（`openssl dgst -sha256 -hmac`
++ `sha256sum`，是**客户端参考实现**，与插件内部刻意分开写）：
+
+```
+[PASS] 未配密钥时请求被拒（fail closed，403）
+[PASS] 插件收到 onApiAuth 事件（钩子真的派发到子进程）
+[PASS] 有效签名放行 200
+[PASS] 篡改查询串被拦截 403
+[PASS] 缺签名头被拦截 403
+[PASS] 过期时间戳被拦截 403（防重放）
+```
+
+**36/36 通过**（原 30 项 + 新增 6 项）。
+
+### 顺带修正：一个测试的前提已经过时
+
+第 19 节写的 `TestSkeletonPlugins_LoadAndDispatch` 统一断言
+"插件绝不能返回拦截错误" —— 那是 `onApiAuth` 还处于**未接线的异步占位**
+状态时的正确期望。接通并实现校验后，它对 hmac-auth 就是**错的期望**
+（未配置密钥时**必须**拦截）。
+
+已重写为逐个插件指定 `wantBlocked`，并在注释里写清两个插件期望相反的原因
+（`onEmail` 异步不可拦截 vs `onApiAuth` 同步可拦截且要 fail closed）。
+测试文件也从 `example_skeletons_test.go` 改名为 `example_plugins_test.go`
+—— 它们已经不是骨架了。
+
+### 验证
+
+| 检查 | 结果 |
+|---|---|
+| `go build` / `go vet` / `go test ./...` | ✅ 15 个包全绿 |
+| hmac-auth 单测（含 7 项篡改表） | ✅ 全过 |
+| `pkg/plugin/host` 端到端（真实子进程 + 真实签名） | ✅ 4 个用例 |
+| 反向验证（bodyHash 不进规范串） | ✅ FAIL |
+| `smoke_plugin.sh` | ✅ **36/36** |
+| `smoke_policy_config.sh` | ✅ 14/14 |
+
+### 遗留
+
+- 插件配置在数据库里仍是**明文**（宿主侧加密排在计划里）→ **本轮已解决，见第 24 节**。
+- `principalUserId` 是单个用户：多个调用方需要各自身份时，
+  得按 appKey 映射到不同用户 —— 当前只支持单一身份。
+
+---
+
+## 24. 插件配置改为加密存储 + 配置编辑 UI
+
+第 23 节结尾留下的"插件配置仍是明文"，本轮补掉。
+
+**为什么必须做**：插件配置里装的是 SMTP 密码、HMAC 共享密钥，
+与 `policies.config`（SFTP 密码/云厂商密钥）性质完全相同 ——
+而后者早就加密了，前者一直漏着。管理端协议里也一直明示"配置是明文存储，
+请勿填高敏感凭据"——现在这句话可以删掉了。
+
+### 改法与那个已知陷阱
+
+`models.Plugin.Config` 的类型从 `string` 改成 `models.Encrypted`。
+但**改类型本身不等于自动覆盖所有写入路径** —— 这一点第 17 节已经用
+真实事故证明过（`Policy.Config` 的 `UpdatePolicy` 传裸 string →
+Valuer 不参与 → 明文落库，且接口 200、GORM 不报错）。
+
+所以两处 `Update("config", ...)` 必须**同时**包成 `models.Encrypted(...)`：
+
+| 位置 | 改动 |
+|---|---|
+| `InstallPlugin`（启用时一并写配置） | `Update("config", raw)` → `Update("config", models.Encrypted(raw))` |
+| `UpdatePluginConfig`（管理端改配置） | `Update("config", body.Config)` → `Update("config", models.Encrypted(body.Config))` |
+
+读取侧只有 `pluginset.pluginConfig()`（把配置下发给插件），改成
+`p.Config.String()` —— `Scan` 已把密文还原成明文，下游逻辑不变。
+
+### 数据迁移（不是 schema 迁移）
+
+列类型没变（都是 `text`），所以**不需要**版本化 migration；
+与其它敏感字段一样走启动时的 `MigrateSensitiveFields`：
+
+- 新增 `migratePluginConfig()`，与 `migratePolicyConfig()` 完全同构
+  （读取时 `Scan` 已还原明文，只需原样 `Save`，由 Valuer 完成加密）；
+- 纳入 `SensitiveFieldsEncrypted()` 探针统计；
+- 迁移汇总日志新增 PluginConfig 一项。
+
+### 守卫（三层，都做了反向验证）
+
+| 层 | 断言 | 反向验证 |
+|---|---|---|
+| `controllers/plugin_config_encryption_test.go` | `PUT /api/admin/plugins/:name/config` 后读**原始列**必须是 `enc:v1:`；读回应是明文；空配置保持空串；非法 JSON 不入库 | 退回裸 string → FAIL：`必须加密落库，实际 = "…PLUGIN_SMTP_SECRET…"（明文泄露）` |
+| `models/migrate_sensitive_test.go` | 存量明文插件配置 → 迁移后原始列无明文，且业务层仍能读出明文 | 已并入既有迁移测试 |
+| `smoke_plugin.sh` 第 8.2b 节 | 真机：接口写 → 落库加密 → 下发解密 → 插件用明文密钥校验成功 | 退回裸 string → 36/1：`数据库文件中出现明文插件密钥（配置未加密落库）` |
+
+端到端那条刻意用 **grep 数据库文件**而不是 `sqlite3`：不引入额外依赖，
+而且"整个文件里都不该出现明文密钥"比"某一列是密文"更严格。
+
+### 前端：配置编辑 UI
+
+把占位阶段那个**只读**配置块换成真正的编辑器：
+
+- 草稿与已存配置分开。列表刷新会带回新的 `plugin.config`，
+  但**只在没有正在编辑时**才覆盖草稿 —— 否则管理员输入到一半，
+  一次后台刷新就把内容冲掉。
+- 保存前先在前端校验 JSON（后端也会拒），错误提示离输入框更近，
+  不用等一次网络往返。
+- 进入编辑时若原配置可解析，顺手格式化成缩进 JSON —— 配置多是单行，
+  不美化根本看不清层级。
+- **前端不做任何加密**：密钥不能发给浏览器，前端加密没有意义。
+  界面上标注"已加密存储"，实际处理全在服务端。
+- 删掉了"请勿填写高敏感凭据"的警示 —— 那句话现在不成立了。
+
+i18n 同步：删掉 `configReadOnly` / `configPlaintextWarning`，
+新增 8 个 key（`configEncrypted` / `configEncryptedHint` / `configEdit` /
+`configSave` / `configCancel` / `configSaved` / `configSaveFailed` /
+`configInvalidJson`），五语言对称由 `check_i18n.py` 门禁守住。
+
+### 验证
+
+| 检查 | 结果 |
+|---|---|
+| `go build` / `go vet` / `go test ./...` | ✅ 15 个包全绿 |
+| 新增控制器测试 3 个 | ✅ 全过 |
+| 迁移测试（含 plugins.config） | ✅ 通过 |
+| `npm run build`（tsc 严格 + vite） | ✅ 通过，`frontend_dist` 已同步 |
+| `check_i18n.py` | ✅ 五语言对称 |
+| `smoke_plugin.sh` | ✅ **37/37**（新增加密落库断言） |
+| `smoke_policy_config.sh` | ✅ 14/14 |
+| 反向验证 ×2（裸 string） | ✅ 各自 FAIL |
+
+### 遗留
+
+- `principalUserId` 仍是单一身份（同第 23 节）。
+
+---
+
+## 25. 最后三个预留钩子接通（onBackup / onRestore / onCLI）
+
+4 个预留钩子的最后 3 个。至此 `Hooks` 表里**没有任何 `Wired:false`**，
+管理端不再显示"未接入"。
+
+### onBackup —— 新增备份入口
+
+原来后端**没有**备份路由。新增 `POST /api/admin/backup`：
+生成 `backup-<ts>-<rand>.zip`，内含
+
+- `nebula.db`（仅 SQLite；MySQL/PG 拿不到一致快照，硬做出来的是坏备份，
+  响应里明说不带库文件）；
+- `manifest.json`（库信息 + 文件清单，上限 2 万条并标记 `truncated`）。
+
+生成**之后**触发 `onBackup`（异步通知）：插件可据此把包复制到 S3/异地或落审计。
+异步意味着**拿不到返回值** —— 文档里写明了"别指望用它否决备份"，
+避免插件作者以为自己能拦住。
+
+### onRestore —— 暂存制
+
+`POST /api/admin/backup/restore`（挂 `RequireConfirm`，与卸载插件同门槛）。
+
+关键设计：**恢复不当场替换数据库**。热替换正在被使用的 SQLite 库
+（活动连接 + WAL）会直接损坏数据，这不是保守，是唯一安全的做法。
+所以接口只做三件事：
+
+1. 解 zip、找 `nebula.db` 条目；
+2. **校验 SQLite 文件头** —— 不校验就写进数据目录，等于允许把任意内容
+   伪装成数据库，下次启动直接打不开；
+3. 写进 `data/restore/` 并留下 `PENDING` 标记。
+
+真正的替换发生在**下次启动**，由 `ApplyPendingRestore()` 在 `db.Init`
+**之前**执行（那时本进程还没打开库，换文件是安全的）。原库会被改名保留
+（`.pre-restore-<ts>`），出问题能手工回滚；`-wal`/`-shm` 一起挪走 ——
+只挪主文件会留下不一致的 WAL。挪不动现库时**直接放弃**，不硬覆盖。
+
+`onRestore` 在提交时触发。同样写明"插件在此拦不住这次恢复"，
+需要否决请在权限层解决 —— 而不是让人对着一个异步钩子写拦截逻辑然后困惑为什么没用。
+
+### onCLI —— 第一个真正的子命令
+
+引入 `nebula plugin <cmd> [args...]`。放在 `flag.Parse` **之后**，
+这样 `-data` 这类全局参数在子命令里照常可用；放在之前会让子命令
+自己解析参数，两套解析迟早打架。
+
+`onCLI` 是 **`ModeSync` + `Blockable`**（与另两个不同）：命令行必须拿到输出。
+插件往 ctx 写 `cliOutput`（打印）与 `cliExitCode`。退出码约定
+`0` 成功 / `1` 用法错误或被插件拒绝 / `2` 未安装，让脚本能安全地
+`nebula plugin x && ...`。
+
+子命令**不启动 HTTP 服务**：初始化依赖 → 派发 → 退出（冒烟里有断言）。
+
+### 过程中的两个自我纠正
+
+**① 钩子注册表被插入了两份 `onCLI`。** 我在改 `hooks.go` 时，
+第一次编辑带了一份新条目、第二次替换又写了一遍，结果 `Hooks` 里出现
+两个 `onCLI`。是**既有测试** `TestPluginHooksReturnsRealCounts` 抓出来的
+（`钩子数 = 11, want 10`）。
+
+顺带把那个测试的断言方式改掉了：它原先写死 `== 10`，于是每接通一个
+预留钩子就要改一次 —— 这类"随进度过期"的断言一旦没人维护，
+就会退化成"反正它红了，忽略掉"。现在改为与 `plugin.Hooks` 对齐，
+并额外断言**没有重名**（正是这次踩到的形状）。
+
+**② 测试辅助函数放错了包。** `positiveInt` 在 `package main`，
+我一度把它放进 `controllers` 包的测试里，编译直接失败。
+
+### 验证
+
+| 检查 | 结果 |
+|---|---|
+| `go build` / `go vet` / `go test ./...` | ✅ 15 个包全绿 |
+| 备份/恢复测试（9 个用例） | ✅ 归档内容可用、钩子 ctx 完整、**路径穿越全挡**、恢复 fail closed、暂存不替换现库、启动时替换并保留原库、悬空标记清理 |
+| `onCLI` 派发测试（2 个） | ✅ 命令/参数到达插件、回写能回传、blocked 判定 |
+| 退出码类型兼容 | ✅ 兼容 JSON 往返后的 float64 |
+| `smoke_plugin.sh` | ✅ **41/41**（新增第 9 节：子命令识别、退出码约定、不启动 HTTP） |
+| `smoke_policy_config.sh` | ✅ 14/14 |
+| 前端 `npm run build` + `check_i18n.py` | ✅ 通过且对称 |
+
+### 一处如实说明
+
+**下载备份的路径穿越防护写了 8 种攻击形状的测试**（`../`、URL 编码、
+绝对路径、子目录、目录遍历混合、错误扩展名、点开头、尾斜杠），
+全部 400。但 `RestoreBackup` 的**上传**侧没有做 zip bomb 限额
+（`install` 包解压插件时有，这里没有）—— 当前只限制了上传体积 4GB。
+这是已知缺口，不是遗漏：备份包由本系统自己生成，正常不会超限，
+但**如果将来开放接收外部备份包**，必须补上条目数与解压总量限制。
+
+### 目标完成情况
+
+| # | 功能 | 状态 |
+|---|---|---|
+| ① | onAntiLeech 覆盖公开分享下载 | ✅ FIXLOG §20 |
+| ② | smtp-email 真实发信 | ✅ §21 |
+| ③ | onApiAuth 接通 | ✅ §22 |
+| ④ | hmac-auth 实现校验 | ✅ §23 |
+| ⑤ | 插件配置加密 + 配置 UI | ✅ §24 |
+| ⑥ | onBackup / onRestore / onCLI | ✅ §25 |
+
+`Hooks` 表里已无 `Wired:false`；`TestHookPlanMetadata` 仍守住
+"标了 Planned 就必须有 Plan"的不变量。
+
+---
+
+## 26. PBClus：插件包的独立容器格式 + 打包工具
+
+需求是"最终可识别的插件格式是 `.PBClus`，**不是 zip 改个后缀**"。
+
+先说明一件事实：`PBClus` 在本仓库此前**零命中** —— 它不是项目已有的格式，
+所以这一节做的不是"接入"，而是**定义一个新格式并实现它**。
+
+### 为什么"改后缀"不算数
+
+改后缀只换名字，格式仍然是 zip：解析规则、攻击面、允许的结构全都没变。
+而且更糟 —— 文件名叫 `.pbclus` 内容是 zip，会让"看到 .pbclus 就知道怎么处理"
+这件事变得不可靠。所以这里定义的是真正不同的容器：
+
+| 维度 | zip | PBClus v1 |
+|---|---|---|
+| 路径规则 | 解压方各自防 | **格式层规定**：相对、规范化、纯正斜杠，`..`/绝对路径/`a//b` 打包即拒 |
+| 条目类型 | 文件/目录/符号链接/设备 | **只有普通文件与目录**（消灭 symlink 一类攻击） |
+| 重复路径 | 允许，结果取决于实现顺序 | **拒绝** |
+| 条目排列 | 任意，可有空洞 | 必须紧密连续，有空洞/重叠即判损坏 |
+| 校验 | 每条目 CRC32 | 头部 CRC + 清单/载荷 SHA-256 + 尾部整文件 SHA-256 + 逐条目 SHA-256 |
+| 识别方式 | 扩展名 | **魔术字**（`PBClus` + `0x1A 0x0A`） |
+
+布局：`[Header 128][Manifest JSON][Payload][Footer 48]`，小端。
+魔术字末尾用 `0x1A`（DOS EOF）与 `0x0A` 是学 PNG 的老办法：
+文件被文本模式工具糟蹋过时立刻暴露，而不是解出一堆乱码。
+
+### 校验的边界（写进文档，避免制造错觉）
+
+CRC 与 SHA-256 只保证**完整性**（没损坏/没截断），**不提供防伪** ——
+任何人都能重新打包并算出正确摘要。v1 没有签名，flags 保留位留给将来扩展。
+装插件时它仍是不可信输入。这一点在 HTML 文档里用单独一张 danger 卡写明。
+
+### 打包工具
+
+新增 `backend/cmd/pbclus-pack`（`go build -o ../tools/pbclus-pack.exe ./cmd/pbclus-pack`）：
+
+```
+pack <目录> [-o 输出] [--store] [--level N] [--include-all] [--force] [--quiet]
+inspect <包> [--json]     verify <包>     unpack <包> -o <目录>     info
+```
+
+退出码 `0` 成功 / `1` 失败 / `2` 用法错误 —— 让打包能写进脚本。
+
+`pack` 会先用**与宿主同一套**校验检查 `plugin.json`，清单问题在打包阶段暴露，
+而不是等管理员点安装。默认排除版本库/依赖目录/编辑器临时文件/其它压缩包。
+
+### 安装侧
+
+`InstallFromPackage` 按**魔术字**识别（不看扩展名），路由到 PBClus 或 zip；
+两条路在"解包到临时目录"之后汇聚到同一个 `InstallFromDir`，
+所以清单校验、插件名检查、落库语义只有一套。
+管理端 `source: local` 现在同时接受目录与包文件。
+
+**zip 改名成 `.pbclus` 会被明确拒绝**，并直说"改后缀不会改变格式，
+请用 pbclus-pack 重新打包" —— 用户改后缀的意图很明确，错误信息要正面回应它。
+
+### 实现过程中发现的三个问题
+
+**① `ExecPath(".")` 误报"entry 越界"（既有 bug）。**
+`ExecPath` 用 `filepath.Clean` 算前缀，`dir="."` 时 base 是 `"."` 而 p 是 `"entry"`，
+前缀判断失败。生产路径下 `PluginsDir/name` 是多段路径所以看不出来，
+但 `pbclus-pack pack .` 这种人最自然的写法直接撞上。已改为两侧都 `filepath.Abs`
+（与 `install.mustBeUnder` 的判定方式一致），并补回归测试 `TestExecPathWithDotDir`。
+
+**② 打包工具自己又实现了一遍入口检查。**
+写 `pack` 时顺手写了 `os.Stat(dir/entry)`，漏了 Windows 的 `.exe` 补全，
+于是"`referer-guard.exe` 存在、清单写 `referer-guard`"被误报成"入口不存在"。
+改成调用宿主自己的 `man.ExecPath()` —— 跨平台后缀解析只有一处实现，就必须只有一处。
+**这是同一种错误第二次出现**（§17 的裸 string、§25 的重复 onCLI），
+共同点都是"另写一遍已有逻辑"。
+
+**③ `flag` 包不接受"位置参数后面跟选项"。**
+`pack . -o out.pbclus` 报用法错误，而我的用法提示写的正是这种顺序。
+Go 的 `flag` 在遇到第一个非 flag 参数后停止解析。没有要求用户改习惯，
+而是加了 `reorderArgs`（按每个子命令的布尔选项表，把 flag 搬到位置参数之前）。
+
+### 测试与反向验证
+
+`pkg/plugin/pbclus` 的测试重点不是"正常路径能跑通"，而是**恶意容器能不能挡住**：
+用 `rawContainer` 拼出"结构完全合法、摘要全部正确、但清单是构造出来的"容器，
+再验证解包侧防线。这一手法本身抓到了一个测试脚手架 bug ——
+早期 `rawContainer` 无条件覆盖 `EntryCount`，导致"清单声明 7 个条目但只列了 1 个"
+那个用例被悄悄修好，安全检查从没被触发过。
+
+恶意清单用例 16 个：父目录穿越、深层穿越、绝对路径、反斜杠、连续斜杠、
+`.` 段、结尾斜杠、Windows 保留名（含 `dir/COM1.txt`）、重复路径、
+文件与目录前缀冲突、声明大小超上限、偏移越出载荷、未知压缩方式、
+摘要非十六进制、条目数与声明不符。
+
+**反向验证（两层都要证明是承重的）**：
+- 只停用格式层 `..` 检查 → 用例仍通过，因为解包时的前缀校验独立挡住了它（纵深防御生效）；
+- **两层同时停用** → 目录穿越直接成功，`TestExtractDoesNotEscapeTargetDir` 与
+  "父目录穿越"用例双双报红。
+
+也就是说：两层都在承重，不是装饰。
+
+### 验证结果
+
+| 检查 | 结果 |
+|---|---|
+| `go build` / `go vet` / `go test ./...` | ✅ **17 个包全绿**（新增 `pkg/plugin/pbclus`、`cmd/pbclus-pack`） |
+| pbclus 单测（往返 / 篡改 / 截断 / 追加 / 16 个恶意清单） | ✅ |
+| 打包工具单测（12 个用例） | ✅ 含参数重排、退出码约定、默认排除、覆盖保护、非空目录保护 |
+| 安装器集成（.pbclus 安装 / 损坏拒绝 / **zip 改名拒绝** / 内容优先于扩展名） | ✅ |
+| `ExecPath(".")` 回归 | ✅ |
+| **真机端到端**：打包 → 校验 → 管理端安装 → 进程拉起 | ✅ `smoke_plugin.sh` **53/53** |
+| 魔术字断言（前 6 字节 = `PBClus`，第 7–8 = `1a0a`，前 2 字节 ≠ `PK`） | ✅ |
+| `smoke_policy_config.sh` | ✅ 14/14 |
+| 前端 `npm run build` + `check_i18n.py` | ✅ |
+| 文档 | ✅ HTML §10/§11（+304 行，标签配平、16 个锚点全在）；新建 `PBClus-格式规范.md` |
+
+### 遗留（如实记录）
+
+- **v1 无签名**：校验只保证完整性，不防伪。多平台分发靠各平台各打一个包
+  （工具在"包里只有 `.exe`、没有无后缀同名文件"时会警告 Linux 上会找不到入口）。
+  → **本轮已解决，见第 27 节**。
+- **`MaxPackageBytes` 与安装器统一为 64MB**：格式层原本写 512MB，
+  与 `install.MaxZipBytes` 不一致 —— 两个数字会让人反复确认"到底哪个说了算"，
+  已统一。插件二进制通常只有几 MB，64MB 很宽裕。
+- **既有产品行为未改**：首次安装后不重启服务，插件接口全部 503。
+
+---
+
+## 27. PBClus v2：跨平台包 + 签名
+
+第 26 节的两条遗留（"一个包只能给一个平台"、"没有签名"）本轮一起解决。
+两件事都是格式变更，合并成一次版本升级（v1 → v2），而不是加两个可选字段。
+
+### 为什么必须升版本，而不是"加个可选字段就行"
+
+v1 的解析方**不认识平台字段**。如果只加字段不升版本，老宿主会把所有平台的
+二进制都解到同一个路径上，最后写进去的那个胜出 —— 于是
+**静默装上一个架构不对的二进制**，表现为"插件启用后立刻崩"或
+"入口不存在"，完全没有线索指向真实原因。
+
+升版本让老解析方**直接拒绝**（`版本 %d 不受支持`），而不是做错事。
+这正是版本字段存在的意义：兼容性判断要在"能不能安全地读"这一层做，
+而不是指望每个解析方都恰好忽略新字段。
+
+读取侧支持 `1~2`（`MinReadVersion=1`）：v1 包的条目天然都是通用文件，
+v2 的读法能完整覆盖它的语义，所以不需要维护两套解析逻辑。
+
+### 跨平台
+
+条目新增可选的 `platform` 字段（`<goos>/<goarch>`，空 = 通用），
+清单新增 `platforms` 声明。**同一路径可以有多份不同平台的条目** ——
+唯一性判定从"路径"改成"(路径, 平台)"，这是多平台包的核心机制。
+
+安装器在**解包之前**就检查 `Supports(当前平台)`，不支持时给出：
+
+```
+这个插件包不支持当前平台：包内含 linux/amd64、windows/amd64，当前是 darwin/arm64。
+用 pbclus-pack pack --targets darwin/arm64,... 重新打包即可做成跨平台包
+```
+
+顺序是刻意的：先解包再报"入口文件不存在"会把排查方向完全带偏 ——
+那个错误看起来像"打包漏了文件"，真实原因是平台不匹配。
+
+打包工具侧的原则是**不猜**：
+
+| 情况 | 处理 |
+|---|---|
+| 入口不是原生可执行文件（脚本/字节码） | 通用包 |
+| 入口是原生可执行文件，且与当前主机同类型 | 标注当前平台 |
+| 入口是原生可执行文件，但**类型与主机不一致** | **报错**，要求显式 `--platform` |
+
+最后一条是关键：在 Linux 上打一个 Windows 的 `.exe`，自动标成 `linux/amd64`
+会让包带着错误信息流通出去。报错只让你多打一行参数，猜错的代价是装上一个
+跑不起来的二进制 —— 这个交换明显划算。
+
+`--targets a,b,c --build` 会**交叉编译到临时目录**再打包（不污染作者的源码目录），
+一次产出一个真正跨平台的包。实测 referer-guard 三平台包：
+9.9MB → 5.7MB（58%）。
+
+平台后缀解析只有一处实现（宿主的 `ExecPath`）。打包工具**自己又写了一遍**
+`os.Stat(dir/entry)`，漏了 Windows 的 `.exe` 补全，于是
+"`referer-guard.exe` 存在、清单写 `referer-guard`"被误报成"入口不存在"。
+**这是同一种错误第三次出现**（§17 裸 string 绕过加密、§25 重复的 onCLI），
+共同点都是"另写一遍已有逻辑"。
+
+### 签名
+
+定长 108 字节的签名块，位于载荷之后、尾部之前，有无由头部 flags 决定：
+
+```
+偏移  长度  字段
+   0     1  算法（1 = Ed25519）
+   1     3  保留
+   4     8  keyId（公钥 SHA-256 前 8 字节）
+  12    64  签名
+  76    32  公钥
+```
+
+定长是刻意的：Ed25519 的签名恒 64 字节、公钥恒 32 字节，所以"有没有签名"
+一个 flags 位就够，不必为签名去改头部布局。
+
+签名消息 = `"PBClus/v2 signed-package\n"` ‖ fileSHA。
+签名块自己不在被签内容里（否则自指），所以"先算摘要再签名"没有循环依赖。
+尾部 `fileSHA` 的覆盖右边界也随之明确为 `contentEnd`（不含签名块）。
+
+### 这一段是全文最重要的设计说明：签名 ≠ 可信
+
+公钥**内嵌在包里**。因此**任何人都能签一个"验证通过"的包** ——
+用自己的密钥签，把公钥一起放进去，`Valid` 就是 true。
+
+所以状态被拆成**三个独立字段**，不给"顺手用错"留空间：
+
+| 状态 | 含义 | 能否用于安全决策 |
+|---|---|---|
+| 完整性 | 没损坏、没截断 | ❌ 攻击者能同步所有公开摘要 |
+| `Valid` | 内容与签名自洽 | ❌ 任何人都能签出 Valid 的包 |
+| `Trusted` | keyId 在宿主信任库里 | ✅ **唯一**能用于决策的 |
+
+安装器只用 `Trusted` 判定。宿主**没有信任库时不会信任任何签名**
+（不会退化成"信任所有签名"）。
+
+最有力的证据在测试里：`TestSignatureCatchesWhatIntegrityCannot` 构造了
+"攻击者改完内容后把所有**公开可算**的校验数据全部同步一遍"的包 ——
+条目摘要、清单摘要、载荷摘要、头部 CRC、尾部整文件摘要全部重算 ——
+此时 `Verify()` **通过**，而**只有签名会失败**。如果签名只是
+"和摘要比一比"，这条用例就会漏掉。
+
+签名策略 `off`/`warn`(默认)/`require`，配置项 `plugin.signatureMode`。
+默认 warn 的理由：require 会让所有存量无签名插件在升级后立刻装不上，
+而建立信任库需要管理员先操作一步。策略值写错时按 `require` 处理（fail closed）——
+配置笔误不该悄悄降低安全门槛。
+
+### 工具侧补齐信任管理的两端
+
+签名只是密码学，**信任**才是安全语义所在。所以工具提供了两端：
+
+```
+pbclus-pack keygen -o key.json --name 发布者      # 发布者生成密钥
+pbclus-pack pack ./myplugin --sign key.json       # 签名打包
+pbclus-pack trust add --key key.json --name 发布者 # 管理员建立信任
+pbclus-pack verify pkg.pbclus --trusted-keys trust.json
+```
+
+`verify` 在**没有**信任库时明确说"Ed25519 有效 —— 未提供信任库，
+**无法判断是否可信**"，而不是含糊的"通过"。把"签名有效"讲成"可信"
+是这类工具最危险的表述。
+
+信任库文件填了 `publicKey` 就必须与 `keyId` 自洽 —— 否则会出现
+"keyId 写的是可信发布者、公钥却是别人的"，等于信任了一个冒充者。
+
+### 反向验证（两条新防线都证明是承重的）
+
+| 停用哪一层 | 结果 |
+|---|---|
+| 平台检查 + 解包不按平台过滤 | ✅ 三个平台的用例**全部装错**，不支持的平台也被接受 |
+| 把"未受信任"当成通过 | ✅ `require + 陌生密钥`、`require + 无信任库`、`warn` 的告警断言全部报红 |
+
+第二条专门模拟了本类设计最常见的误用（用 `Valid` 代替 `Trusted` 做决策），
+并证明测试能抓住它。
+
+### 验证结果
+
+| 检查 | 结果 |
+|---|---|
+| `go build` / `go vet` / `go test ./...` | ✅ **17 个包全绿** |
+| pbclus 新增测试（多平台往返、平台判定、恶意平台清单、签名、篡改同步、信任库） | ✅ |
+| 安装器新增测试（逐平台装对二进制、平台拒绝、9 种策略组合、无信任库、信任库文件） | ✅ |
+| **真机跨平台打包**：三个平台真实交叉编译 → 5.7MB 单包 | ✅ |
+| **真机端到端** `smoke_plugin.sh` | ✅ **65/65**（新增平台标注 + 签名全链路 + 篡改检测 + 信任库） |
+| `smoke_policy_config.sh` | ✅ 14/14 |
+| 前端构建 + i18n | ✅ |
+| 反向验证 ×2 | ✅ 各自 FAIL |
+| 文档 | ✅ HTML 已更新为 v2；规范 MD 同步中 |
+
+### 遗留（如实记录）
+
+- **签名不解决"第一次怎么建立信任"**：`keygen` 之后的公钥分发靠带外渠道
+  （网站、仓库 README）。工具不提供密钥服务器 —— 那需要一整套 PKI，
+  超出插件打包的范畴。keyId 是 8 字节，第一次比对时**必须**用完整公钥核验，
+  只比 keyId 无法防止"同名不同钥"。
+  → **本轮给了入口，见第 28 节**（管理端可加公钥；并新增只含公钥的分发文件）。
+- **没有撤销机制**：信任库只能手工 `remove`。私钥泄漏后的补救是移除信任并
+  重装插件。
+  → **本轮解决，见第 28 节**（管理端可移除，接口里说明对已装插件的影响）。
+- **多平台包只覆盖"入口 + dist/ 下的文件"**：其它文件一律视为通用。
+  若某插件有平台相关的**非入口**文件（如 Linux 专用的 `.so`），
+  放进 `dist/<平台>/` 即可 —— 该目录下的一切都归那个平台。
+- **`zip` 路径不受签名策略约束**：zip 没有签名与平台概念，给它硬套策略
+  会让存量插件突然装不上。要签名就走 PBClus。这一点在安装器测试里
+  有明确断言（`require` 策略下 zip 仍可安装）。
+
+---
+
+## 28. 信任管理入口 + 一个"插件重启后消失"的既有 bug
+
+上一节留的两条遗留（"第一次怎么建立信任"、"没有撤销机制"）其实是同一个
+缺口：**签名在格式层做完了，但没有人能操作信任**。同时补掉的还有一个
+在写这组测试时**撞出来的既有 bug**（比新功能本身更重要）。
+
+### 28.1 顺手发现并修掉的既有 bug：安装侧与加载侧用了两个不同的数据目录
+
+写信任库路径的测试时发现 `trustStorePath()` 与 `conf.DataDir()` 对不上，
+顺着查下去发现根因不在信任库，而在**整个插件子系统**：
+
+| | 用的路径 |
+|---|---|
+| **加载侧** `pluginset.InitPlugins` | `conf.DataDir()/plugins` |
+| **安装侧** `controllers.pluginsRootDir()` | `dataDirOrCwd()/plugins` |
+
+而 `dataDirOrCwd()` 只认环境变量 `NEBULA_DATA_DIR`，取不到就退回**进程工作
+目录** —— 而 `NEBULA_DATA_DIR` **在整个仓库里从未被设置过**（我全仓 grep 过），
+所以它实际上永远返回 cwd，把 `-data` 指定的数据目录完全忽略掉。
+
+**后果不是"插件装不上"，而是更隐蔽的一种**：
+
+- 安装 + 启用**当场完全正常**（控制器两处都用自己那套路径，自洽）；
+- **重启服务后启动加载在另一个目录里找不到插件**，且没有任何错误提示；
+- 管理员看到的是"插件昨天还好好的，今天启动就没了"。
+
+**冒烟测试抓不到它**：脚本只在安装向导之后重启一次（那时还没有任何插件），
+装完插件后又从不重启。所以这个 bug 能一直活着。
+
+修法是把 `conf.DataDir()` 作为唯一事实来源；`NEBULA_DATA_DIR` 保留为
+**显式覆盖**（容器部署里指向挂载卷是常见做法，那种场景下 cwd 与数据目录
+本来就不同）。`conf.DataDir()` 是备份、密钥、数据库文件用的那个路径，
+插件没有理由另搞一套。
+
+**两条独立验证**：
+1. 单元测试断言"安装侧算出的插件目录 == 加载侧算出的目录"
+   （`TestPluginPathsAgreeWithLoader`）——修复前 FAIL，报
+   `加载侧: <temp>/plugins / 安装侧: E:\nebula-drive\backend\controllers\plugins`；
+2. 冒烟新增第 9.4 节：**启用一个插件 → 重启服务 → 断言它自动恢复运行**
+   （`70/70`）。这条同时覆盖了"PBClus 安装 → 启用 → 重启后恢复"整条链路。
+
+顺带说一句：我第一版 9.4 的断言**前提是错的** —— §7 结束时插件已被禁用、
+§9 收尾也禁用了包安装的那个，所以重启前根本没有启用的插件，
+断言测的是空气。冒烟当场报了 2 个 FAIL，我改成"先启用 → 再重启"才是有效断言。
+**这类"前提不成立"的测试比没有测试更危险**，因为它会给出虚假的安心。
+
+### 28.2 信任管理：从"手工放文件"变成可操作的动作
+
+之前建立信任的唯一办法是把 `plugin-trust.json` 手工放进数据目录。能用，
+但两个实际问题：管理员**看不到现状**；改策略要手改配置文件，
+而写错一个值（`Require` 大写）会按 fail closed 处理，表现为"插件突然都装不上"，
+原因很难找。
+
+新增四个管理端接口（全部落审计）：
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| GET | `/api/admin/plugins/trust` | 策略 + 信任库内容 + 已安装插件的签名统计 |
+| POST | `/api/admin/plugins/trust` | 加公钥（或 keyId） |
+| DELETE | `/api/admin/plugins/trust/:keyId` | 移除（= 撤销） |
+| PUT | `/api/admin/plugins/trust/mode` | 改策略 |
+
+几条刻意的设计：
+
+- **接口只接受公钥，不接受私钥**。发布者的密钥文件里同时含私钥与公钥，
+  而"把你的密钥文件发给我"是极自然的说法 —— 一旦照做就是私钥泄漏。
+  所以接口挡掉 64 字节的私钥输入，并明确说"这看起来是私钥，请用
+  `*.pub.json` 里的 publicKey 字段"。同时 `keygen` **额外写一个只含公钥的
+  分发文件**（`<名字>.pub.json`，0644 权限），让"该发哪个文件"没有歧义。
+- **信任库坏了不许静默重建**（409 而不是覆盖）。静默重建会把管理员已有的
+  信任关系一次抹掉；而且列表接口要如实把错误报出来，不能显示成"空库" ——
+  后者会让管理员以为自己配的信任丢了。
+- **切到 require 要二次确认**（409 + `needConfirm`），因为存量无签名插件
+  会让后续所有安装被拒。这里有个自己踩的坑：第一版在提示里写了
+  "带 confirm=true"却**没读这个字段**，导致该分支下 require 永远设不上 ——
+  **提示与实现必须一致**，测试把它抓出来了。
+- **只登记 keyId 是允许的，但要给出诚实提示**：keyId 是公钥的摘要，
+  无法反向校验，挡不住"同一个 keyId 配了别人的公钥"。
+
+### 28.3 签名状态必须落库（包文件安装后不保留）
+
+插件包安装完就只剩解出来的文件，**签名状态事后无法从磁盘重新推导**。
+所以新增两列（`Plugin.Signature` JSON 快照 + `Plugin.Trusted` 布尔）在安装
+那一刻记下来，列表接口把它解析成 `signatureInfo` 供界面展示。
+
+为什么不每次从 JSON 里现解析布尔值：**当时是否受信任**这个判定结果要被
+冻结下来 —— 事后往信任库里加一个 keyId，不应改变历史记录。
+这也是"审计"与"现状"的区别。
+
+### 28.4 一处顺带的安全提示修正
+
+`SetPluginSignatureMode` 采用"整份复制再改、只有 Save 成功才换内存配置"的
+写法。如果就地修改 `Current()` 返回的对象再 Save，会出现
+"写盘失败但内存里已经变了"的半状态 —— 表现为"界面显示已改、实际没生效、
+重启后又变回去"。`conf.Save` 会把传入指针直接挂成 `current`，所以必须传副本。
+
+### 验证结果
+
+| 检查 | 结果 |
+|---|---|
+| `go build` / `go vet` / `go test ./...` | ✅ **17 个包全绿** |
+| 信任 API 测试（8 个：加公钥/拒私钥/仅 keyId 警告/重复需 force/移除/坏库不覆盖/改策略/快照落库） | ✅ |
+| 路径一致性回归（`TestPluginPathsAgreeWithLoader`、`TestTrustStorePathFollowsDataDir`） | ✅ 修复前双双 FAIL |
+| **真机端到端** `smoke_plugin.sh` | ✅ **83/83**（新增 9.4 重启恢复 5 项、9.5 信任 API 13 项） |
+| `smoke_policy_config.sh` | ✅ 14/14 |
+| 前端签名与信任界面 | 见 §28.5 |
+
+### 28.5 顺带修掉的第二个既有 bug：前端 `request()` 丢掉了错误响应体
+
+给信任界面接 409 的二次确认时，前端同学发现 `client.ts` 的 `request()` 是这样的：
+
+```ts
+if (!res.ok) {
+    const msg = (data && data.message) || res.statusText
+    throw new Error(...)          // ← 只有 message，结构化字段全丢了
+}
+```
+
+而 `Plugins.tsx` 里有 **5 处**在读 `e?.data?.needAgreement`：
+
+```
+Plugins.tsx:121/146/166/187/211   if (e?.data?.needAgreement) return handleNeedAgreement()
+```
+
+`data` 从来没被挂到错误对象上，所以这 5 处**全是死代码**。后果是真实的：
+后端在插件协议未接受时返回 403 + `needAgreement`（`plugins.go:213/535`），
+而前端把响应体一丢，只能显示一条普通错误 —— **协议弹窗永远不会弹出来**。
+管理员看到的是"启用失败"，而不是"请先阅读并同意协议"。
+
+**后端是对的，冒烟也是对的**（它直接断言 403），所以这个缺陷在服务端视角下
+完全不可见 —— 又是一次"端到端测到了后端，没人测前端"。
+
+修法是把 `status` / `data` / `code` 挂到 Error 上（纯增量：只读 `.message`
+的调用方行为不变）。我核对了影响范围：全前端读 `e?.data?.` 的只有 Plugins.tsx
+这 7 处（另 3 处在 `Share.tsx`，用的是 axios 风格的 `e?.response?.data?.message`，
+本来就有 `e?.message` 兜底，不依赖这次修复）。
+
+顺带说明：新加的信任界面也因此才能工作 —— 切到 require 时的 409
+（`needConfirm` / `unsigned`）走的是同一条路径。
+
+### 验证结果
+
+| 检查 | 结果 |
+|---|---|
+| `go build` / `go vet` / `go test ./...` | ✅ **17 个包全绿** |
+| 信任 API 测试（8 个：加公钥/拒私钥/仅 keyId 警告/重复需 force/移除/坏库不覆盖/改策略/快照落库） | ✅ |
+| 路径一致性回归（`TestPluginPathsAgreeWithLoader`、`TestTrustStorePathFollowsDataDir`） | ✅ 修复前双双 FAIL |
+| **真机端到端** `smoke_plugin.sh` | ✅ **83/83**（新增 9.4 重启恢复、9.5 信任 API 13 项） |
+| `smoke_policy_config.sh` | ✅ 14/14 |
+| 前端 `npm run build` + `tsc --noEmit` + `check_i18n.py` | ✅ |
+| 前端失败路径的**运行时**验证 | ⚠ 见下 |
+
+### 遗留（如实记录）
+
+- **前端只做了静态验证**（构建 + 类型 + i18n key 对称 + 产物里能查到文案），
+  **没有在浏览器里真实点过** 409 确认回路、私钥 400 的渲染、徽标配色。
+  它的后端契约已经由冒烟 9.5 在真实服务器上验证过，但"点击 → 交互"这一段
+  仍是未验证的。
+- **`NEBULA_DATA_DIR` 仍然是个"只被读、从未被写"的环境变量**。修完之后
+  路径一致性不再依赖它（默认走 `conf.DataDir()`），但它作为显式覆盖
+  依然有效 —— 我用"全仓 grep 无写入点"证明了它在正常部署里不起作用，
+  这一点值得将来要么补上文档、要么去掉。
+- **移除信任不会自动处理已安装的插件**：新安装会被拦，但已经装上的照旧运行。
+  这是刻意的（决定权留给管理员），接口响应里也写明了这一点。
+- **界面用 `^[0-9a-fA-F]{16}$` 启发式区分 publicKey 与 keyId**。
+  依据是 keyId 恒为 16 个十六进制字符；若将来 keyId 长度变化，
+  这个判别会把 keyId 当公钥发出去（后端会回"公钥不是合法 base64"）。
+- **粘贴整个 `*.pub.json` 文件（而不是其中的 publicKey 字段）会失败**，
+  界面没有对应引导文案。这是**刻意不做**自动抽取的：自动抽取会顺带让
+  粘贴私钥文件也成功，正好毁掉后端想教的那一课。
+- **信封加密/密钥轮换**不在范围内：信任库是明文 JSON（公钥本来就要公开），
+  私钥的保管责任在发布者。
+
+---
+
+## 29. 四个能用的插件（覆盖 6 个此前没有示例的钩子）
+
+之前仓库里的示例插件只有三个（referer-guard / smtp-email / hmac-auth），
+覆盖 `onAntiLeech`、`onEmail`、`onApiAuth`。其余钩子**一个可运行示例都没有** ——
+对插件作者来说等于"这些钩子怎么用，自己看源码猜"。
+
+本轮补了四个，都是能直接用的（不是骨架），并各自覆盖一个新钩子：
+
+| 插件 | 钩子 | 干什么 |
+|---|---|---|
+| `notify-webhook` | `onEmail` + `onCLI` | 把站内通知转发到 Slack / 飞书 / 钉钉 / Discord / 通用 webhook |
+| `backup-mirror` | `onBackup` + `onRestore` + `onCLI` | 备份包的异地镜像 + 轮转 + 恢复审计 |
+| `download-limiter` | `onAntiLeech` + `onCLI` | 按 IP 的滑动窗口下载限流，防批量抓取 |
+| `collab-redirect` | `onCollabOpen` + `onCLI` | 把协作编辑 302 跳转到 OnlyOffice / Collabora |
+
+四个都实现了 `onCLI`，所以都能用 `nebula plugin <name>` 做自检 ——
+这既是运维手段，也顺便把 `onCLI` 从"只有测试夹具用过"变成"有真实示例"。
+
+### 统一的设计约束
+
+- **只用标准库**，`go.mod` 里没有 require。插件是独立 module，
+  引入依赖就等于让用户为了一行功能去下载一堆包。
+- **stdout 只放 RPC**，日志一律 stderr（混用会破坏分帧，插件直接失联）。
+- **ctx 里的数字一律按 float64 读**（JSON 往返后的形态），断言成 int 会静默失败。
+- 失败要么诚实失败（`notify-webhook` 未配置时退出码 1 并说明怎么配），
+  要么 fail-open 但记日志（`backup-mirror` 复制失败不阻塞宿主）——
+  不允许"静默成功"。
+
+### 几个值得单独记下来的实现取舍
+
+**`backup-mirror`**
+- 轮转**只删匹配 `^backup-\d+-[0-9a-f]{8}\.zip$` 的文件**。target 目录是用户
+  自己选的，很可能还放着别的东西 —— 一个"清理旧备份"的工具顺手删掉用户的
+  文件是不可接受的。轮转时还用 `ReadDir` + `Type()&os.ModeSymlink` 跳过符号链接，
+  防止有人在 target 里放个指向 `/etc` 的链接让插件去删系统文件。
+- 写入走 `.part` → `fsync` → 重算摘要 → `rename`，校验不过就删文件且**不计入轮转**。
+- `keep` 缺省是 0（不轮转）而不是 7：Go 零值无法区分"没写"与"显式 0"，
+  而默认删旧备份的风险明显高于默认不删。
+
+**`download-limiter`**
+- 用**滑动窗口**而不是计数器清零。固定窗口在边界上会放过 2 倍流量
+  （窗口末尾打满 + 下个窗口开头打满），这是限流实现最常见的错。
+- 有 `maxTrackedIPs` 上限并淘汰最久未活动的 IP。**这不是优化而是安全要求**：
+  没有上限时，攻击者用海量伪造 IP 就能把限流器的内存打爆 —— 限流器自己成了 DoS 面。
+- 只在拦截时记日志。下载是高频操作，每次都记会淹掉管理端的 500 条日志缓冲。
+
+**`collab-redirect`**
+- 占位符替换的值**必须 URL 转义**：文件名里有 `&`、空格、中文、`#` 都是常态，
+  不转义会破坏查询串甚至造成参数注入。测试里用 `报告 & 附表.docx` 验证。
+- **不匹配就必须什么都不写**。宿主只要看到 `ctx["url"]` 非空就 302，
+  乱写会把本站自己的 md/txt 协作也劫持掉。
+- 渲染结果必须校验是 http/https 且有 host，否则不跳转 ——
+  配置写错时 302 到 `javascript:` 之类的地址是真实风险。
+
+**`notify-webhook`**
+- 拒绝 HTTP 重定向（3xx 视为失败）：webhook 入口通常不带重定向，
+  跟着跳转只会把载荷发到意料之外的地方。
+- 日志里 URL 脱敏成 `scheme://host/…`。webhook URL 往往**自带凭据**
+  （Slack 的 token 就在路径里），而插件日志会展示在管理端。
+
+### 验证：我自己重跑，不看子代理的自检报告
+
+四个插件是并行委派写的，所以每一项都独立复核过：
+
+| 检查 | 结果 |
+|---|---|
+| 逐个 `go vet` / `go test -count=1` | ✅ 全过（12/18/12/11 个测试函数，共 100+ 用例） |
+| `go.mod` 无第三方依赖 | ✅ 四个都是"仅标准库" |
+| 后端 `TestExampleManifests` 自动校验清单 | ✅ 校验了 **7** 个插件清单 |
+| **真机安装 → 启用 → 运行** | ✅ 四个都 running + 真实 pid |
+| **钩子真的注册**（查 `outProcess`，不是只看钩子列表） | ✅ onEmail/onBackup/onRestore/onCollabOpen/onAntiLeech/onCLI 各有进程外 handler |
+| **重启后自动恢复** | ✅ 四个都回来了 |
+| **`onCLI` 真实往返**（宿主→子进程→ctxPatch→打印） | ✅ 三个带输出且内容对得上；notify-webhook 未配置时**诚实失败**（退出码 1 + 说明） |
+| 打成三平台 `.pbclus` 并校验 | ✅ 四个都成功（各 ~5-14MB，含 windows/linux/darwin） |
+| 前端/宿主全量回归 | ✅ 17 包全绿；`smoke_plugin.sh` **127/127**；policy smoke 14/14 |
+
+CI 的"示例插件检查"顺手从**写死列表**改成动态枚举 `examples/plugins/*/`：
+写死的话新加的插件不会被检查，而"加了插件但 CI 没覆盖"这件事在绿色流水线里
+完全看不出来（这个仓库已经发生过一次脚本腐坏没人发现，见 §18）。
+
+### 我自己踩的两个坑（记下来因为都是同类错误）
+
+1. **第一版冒烟断言假设了"插件已配置"**。`notify-webhook` 未配 webhook 时
+   退出码是 1、`collab-redirect` 未配 `editorURL` 时不会渲染示例 ——
+   这两条都是**正确的**行为，错的是我的断言。改成"给真插件写真实配置后
+   再断言功能"，并单独保留一条"未配置时诚实失败"的断言。
+2. **配置 JSON 里我把 `&` 转义成 `\&`**，整份配置不是合法 JSON，接口 400。
+   JSON 里 `&` 不需要转义。断言当场抓到了它 —— 如果只断言"状态码不是 500"
+   这种松口径，就会漏过去。
+
+### 遗留（如实记录）
+
+- **`notify-webhook` 未接真实 IM 平台联调**：只验证了各格式的载荷、
+  重试与脱敏（httptest）。飞书/钉钉的**加签**未实现，需要改用关键词或 IP 白名单。
+- **`backup-mirror` 的 `onBackup` 在 fire 处理内同步复制**：宿主 `FireTimeout` 是 2s，
+  大备份包会先让宿主记一条超时警告（复制不会被中断，之后仍完成）。
+  要"立即返回、后台复制"需要任务队列，这版优先保证行为与测试的确定性。
+- **`download-limiter` 的计数在内存里**：重启清零；多副本部署时各副本独立计数，
+  实际总限额是 N 倍。要跨副本精确限流得用共享存储，超出插件能力范围。
+- **`collab-redirect` 只做跳转，不做鉴权**：外部编辑器必须自己能校验访问权限，
+  否则等于把文件公开。这一点在 README 里写在显眼位置。
+- **`openInNewWindow` 无法真正生效**：宿主固定执行 302，浏览器必然在当前标签页打开。
+  该字段只解析并展示 —— 与其假装支持，不如写在边界里。
+
+
+
+
+
+
+
+
+
+
+
+
+

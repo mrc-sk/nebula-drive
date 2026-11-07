@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NebulaDrive 插件开发 Wiki</title>
+<style>
+:root{
+  --bg:#0B1020; --bg2:#0F1626; --panel:#121A2E; --panel2:#16203A;
+  --text:#E6EAF2; --muted:#9AA6BE; --faint:#6B7690;
+  --indigo:#818CF8; --cyan:#22D3EE; --purple:#A855F7; --green:#34D399;
+  --border:rgba(255,255,255,.08); --border2:rgba(255,255,255,.14);
+  --code-bg:#0A0F1E;
+  --maxw:880px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(129,140,248,.10), transparent 60%),
+    radial-gradient(900px 500px at -10% 10%, rgba(34,211,238,.08), transparent 55%),
+    radial-gradient(700px 500px at 50% 120%, rgba(168,85,247,.08), transparent 60%),
+    var(--bg);
+  color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  line-height:1.75; font-size:16px;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--cyan);text-decoration:none}
+a:hover{text-decoration:underline}
+.layout{display:flex;min-height:100vh}
+/* ---- sidebar ---- */
+.sidebar{
+  width:300px;flex:0 0 300px;position:sticky;top:0;height:100vh;overflow-y:auto;
+  background:linear-gradient(180deg,rgba(18,26,46,.95),rgba(11,16,32,.95));
+  border-right:1px solid var(--border);padding:22px 16px 60px;backdrop-filter:blur(6px);
+}
+.sidebar .brand{display:flex;align-items:center;gap:10px;margin-bottom:6px;padding:0 6px}
+.sidebar .logo{width:30px;height:30px;border-radius:8px;
+  background:conic-gradient(from 200deg,var(--indigo),var(--cyan),var(--purple),var(--indigo));
+  box-shadow:0 0 18px rgba(129,140,248,.45)}
+.sidebar .brand b{font-size:15px;letter-spacing:.3px}
+.sidebar .ver{font-size:11px;color:var(--faint);padding:0 6px 14px}
+.nav-group{margin:6px 0}
+.nav-top{display:block;font-weight:600;font-size:13.5px;color:var(--text);
+  padding:7px 10px;border-radius:8px;transition:.15s}
+.nav-top:hover{background:var(--panel2);text-decoration:none;color:#fff}
+.nav-sub{list-style:none;margin:2px 0 2px;padding:0 0 0 10px;
+  border-left:1px solid var(--border)}
+.nav-sub li a{display:block;font-size:12.5px;color:var(--muted);padding:4px 10px;border-radius:6px}
+.nav-sub li a:hover{background:var(--panel2);color:#fff;text-decoration:none}
+.nav-top.active,.nav-sub li a.active{color:#fff;background:linear-gradient(90deg,rgba(129,140,248,.22),transparent)}
+.nav-sub li a.active{box-shadow:inset 2px 0 0 var(--cyan)}
+/* ---- main ---- */
+.main{flex:1;min-width:0;display:flex;justify-content:center;padding:48px 28px 120px}
+.content{width:100%;max-width:var(--maxw)}
+.section{scroll-margin-top:24px}
+.section + .section{margin-top:8px}
+h1{font-size:30px;line-height:1.25;margin:.2em 0 .6em;
+  background:linear-gradient(90deg,var(--indigo),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
+h2{font-size:22px;margin:1.8em 0 .7em;padding-bottom:.3em;border-bottom:1px solid var(--border);color:#fff}
+h3{font-size:18px;margin:1.5em 0 .5em;color:var(--indigo)}
+h4{font-size:15.5px;margin:1.2em 0 .4em;color:var(--cyan)}
+p{margin:.7em 0}
+ul,ol{margin:.7em 0;padding-left:1.4em}
+li{margin:.3em 0}
+.h2{scroll-margin-top:20px}
+hr{border:none;border-top:1px solid var(--border);margin:2em 0}
+blockquote{margin:1em 0;padding:12px 16px;border-left:3px solid var(--purple);
+  background:rgba(168,85,247,.08);border-radius:0 8px 8px 0;color:var(--muted)}
+blockquote p{margin:.3em 0}
+code{font-family:"JetBrains Mono",Consolas,"SFMono-Regular",Menlo,monospace;
+  font-size:.88em;background:rgba(255,255,255,.06);padding:.12em .4em;border-radius:5px;
+  border:1px solid var(--border)}
+pre.code{position:relative;margin:1em 0;background:var(--code-bg);border:1px solid var(--border2);
+  border-radius:10px;padding:16px 16px 14px;overflow-x:auto}
+pre.code code{background:none;border:none;padding:0;font-size:13px;line-height:1.6;color:#cdd6f4}
+pre.code[data-lang]:not([data-lang=""])::before{content:attr(data-lang);position:absolute;top:8px;right:12px;
+  font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:var(--faint)}
+.table-wrap{overflow-x:auto;margin:1em 0;border:1px solid var(--border);border-radius:10px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:9px 13px;text-align:left;border-bottom:1px solid var(--border)}
+thead th{background:linear-gradient(180deg,rgba(129,140,248,.16),rgba(129,140,248,.06));
+  color:#fff;font-weight:600;border-bottom:1px solid var(--border2)}
+tbody tr:nth-child(odd){background:rgba(255,255,255,.02)}
+tbody tr:hover{background:rgba(34,211,238,.06)}
+/* top bar inside content */
+.topbar{position:sticky;top:0;z-index:5;margin:-48px -28px 24px;padding:14px 28px;
+  background:rgba(11,16,32,.7);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);
+  display:none}
+@media (max-width:880px){
+  .sidebar{display:none}
+  .main{padding:24px 16px 80px}
+  .topbar{display:block}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand"><div class="logo"></div><b>NebulaDrive</b></div>
+    <div class="ver">插件开发 Wiki · V26-10.0-d</div>
+    <div class="nav-group"><a href="#sec-overview" class="nav-top">开始之前</a><ul class="nav-sub"><li><a href="#overview-这是什么" class="sub">这是什么</a></li><li><a href="#overview-本-wiki-的结构" class="sub">本 Wiki 的结构</a></li><li><a href="#overview-与其他文档的关系" class="sub">与其他文档的关系</a></li><li><a href="#overview-一句话上手" class="sub">一句话上手</a></li></ul></div>
+<div class="nav-group"><a href="#sec-architecture" class="nav-top">01 · 架构</a><ul class="nav-sub"><li><a href="#architecture-为什么是子进程而不是-pluginopen-或-wasm" class="sub">为什么是子进程，而不是 `plugin.Open` 或 WASM</a></li><li><a href="#architecture-两种插件形态" class="sub">两种插件形态</a></li><li><a href="#architecture-派发模式sync-async" class="sub">派发模式：sync / async</a></li><li><a href="#architecture-生命周期与隔离" class="sub">生命周期与隔离</a></li><li><a href="#architecture-信任边界重要" class="sub">信任边界（重要）</a></li></ul></div>
+<div class="nav-group"><a href="#sec-manifest" class="nav-top">02 · 清单 plugin.json</a><ul class="nav-sub"><li><a href="#manifest-全部字段" class="sub">全部字段</a></li><li><a href="#manifest-合法示例" class="sub">合法示例</a></li><li><a href="#manifest-常见校验失败" class="sub">常见校验失败</a></li><li><a href="#manifest-关于-entry-的硬约束" class="sub">关于 `entry` 的硬约束</a></li></ul></div>
+<div class="nav-group"><a href="#sec-protocol" class="nav-top">03 · 协议 JSON-RPC</a><ul class="nav-sub"><li><a href="#protocol-协议版本" class="sub">协议版本</a></li><li><a href="#protocol-方法method" class="sub">方法（method）</a></li><li><a href="#protocol-init-参数与结果" class="sub">init 参数与结果</a></li><li><a href="#protocol-fire-参数与结果" class="sub">fire 参数与结果</a></li><li><a href="#protocol-三条铁律写插件必读" class="sub">三条铁律（写插件必读）</a></li><li><a href="#protocol-超时与兜底" class="sub">超时与兜底</a></li><li><a href="#protocol-最小可运行插件骨架go" class="sub">最小可运行插件骨架（Go）</a></li></ul></div>
+<div class="nav-group"><a href="#sec-hooks" class="nav-top">04 · 钩子清单</a><ul class="nav-sub"><li><a href="#hooks-总览以当前代码为准" class="sub">总览（以当前代码为准）</a></li><li><a href="#hooks-拦截的统一定义" class="sub">拦截的统一定义</a></li><li><a href="#hooks-onantileech-防盗链sync-可拦截已接线" class="sub">`onAntiLeech` · 防盗链（sync / 可拦截）✅已接线</a></li><li><a href="#hooks-onratelimit-的特殊处理" class="sub">`onRateLimit` 的特殊处理</a></li><li><a href="#hooks-oncollabopen-协作打开sync-不可拦截已接线" class="sub">`onCollabOpen` · 协作打开（sync / 不可拦截）✅已接线</a></li><li><a href="#hooks-oncollabsave-协作保存async-不可拦截已接线" class="sub">`onCollabSave` · 协作保存（async / 不可拦截）✅已接线</a></li><li><a href="#hooks-onemail-邮件外发async-不可拦截已接线" class="sub">`onEmail` · 邮件外发（async / 不可拦截）✅已接线</a></li><li><a href="#hooks-ondbmigrate-数据库迁移async-不可拦截已接线" class="sub">`onDBMigrate` · 数据库迁移（async / 不可拦截）✅已接线</a></li><li><a href="#hooks-onbackup-备份后async-不可拦截已接线" class="sub">`onBackup` · 备份后（async / 不可拦截）✅已接线</a></li><li><a href="#hooks-onrestore-恢复前async-不可拦截已接线" class="sub">`onRestore` · 恢复前（async / 不可拦截）✅已接线</a></li><li><a href="#hooks-onapiauth-开放-api-鉴权sync-可拦截已接线" class="sub">`onApiAuth` · 开放 API 鉴权（sync / 可拦截）✅已接线</a></li><li><a href="#hooks-oncli-命令行子命令sync-可拦截已接线" class="sub">`onCLI` · 命令行子命令（sync / 可拦截）✅已接线</a></li></ul></div>
+<div class="nav-group"><a href="#sec-trust" class="nav-top">05 · 签名与信任</a><ul class="nav-sub"><li><a href="#trust-一条必须先说清的事签名-可信" class="sub">一条必须先说清的事：签名 ≠ 可信</a></li><li><a href="#trust-三种签名状态" class="sub">三种签名状态</a></li><li><a href="#trust-keyid-与密钥" class="sub">KeyID 与密钥</a></li><li><a href="#trust-公钥分发文件-pubjson" class="sub">公钥分发文件 `.pub.json`</a></li><li><a href="#trust-信任库truststore" class="sub">信任库（TrustStore）</a></li><li><a href="#trust-三种签名策略trustmode" class="sub">三种签名策略（trustMode）</a></li><li><a href="#trust-管理接口见-08-管理端08-adminmd" class="sub">管理接口（见 [08-管理端](08-admin.md)）</a></li><li><a href="#trust-安全与诚实边界" class="sub">安全与诚实边界</a></li></ul></div>
+<div class="nav-group"><a href="#sec-tutorial" class="nav-top">06 · 上手教程</a><ul class="nav-sub"><li><a href="#tutorial-目标" class="sub">目标</a></li><li><a href="#tutorial-步骤-1-建目录与清单" class="sub">步骤 1 · 建目录与清单</a></li><li><a href="#tutorial-步骤-2-写-maingo" class="sub">步骤 2 · 写 main.go</a></li><li><a href="#tutorial-步骤-3-构建" class="sub">步骤 3 · 构建</a></li><li><a href="#tutorial-步骤-4-安装" class="sub">步骤 4 · 安装</a></li><li><a href="#tutorial-步骤-5-启用-配置" class="sub">步骤 5 · 启用 + 配置</a></li><li><a href="#tutorial-步骤-6-看日志-调试" class="sub">步骤 6 · 看日志 / 调试</a></li><li><a href="#tutorial-进程内插件内置功能" class="sub">进程内插件（内置功能）</a></li></ul></div>
+<div class="nav-group"><a href="#sec-examples" class="nav-top">07 · 官方示例</a><ul class="nav-sub"><li><a href="#examples-推荐阅读顺序" class="sub">推荐阅读顺序</a></li></ul></div>
+<div class="nav-group"><a href="#sec-admin" class="nav-top">08 · 管理端与 API</a><ul class="nav-sub"><li><a href="#admin-插件生命周期接口" class="sub">插件生命周期接口</a></li><li><a href="#admin-插件协议关卡agreement" class="sub">插件协议关卡（agreement）</a></li><li><a href="#admin-安装安全解压一个-zip-就跑起任意代码这里是唯一屏障" class="sub">安装安全（解压一个 zip 就跑起任意代码，这里是唯一屏障）</a></li><li><a href="#admin-信任管理接口签名信任" class="sub">信任管理接口（签名/信任）</a></li><li><a href="#admin-最容易被忽略的坑" class="sub">最容易被忽略的坑</a></li></ul></div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <section id="sec-overview" class="section"><h1 id="overview">NebulaDrive 插件开发 Wiki</h1>
+<blockquote><p>适用版本：<strong>V26-10.0-d</strong> 及之后</p><p>读者：想给 NebulaDrive 写<strong>第三方插件</strong>的开发者，以及需要管理插件的管理员</p><p>本 Wiki 所有结论均从源码（<code>backend/pkg/plugin/**</code>、<code>backend/controllers/plugins.go</code>、<code>examples/plugins/**</code>）逐行核对得出。<strong>凡与代码不符之处，一律以代码为准。</strong></p></blockquote>
+<hr>
+<h2 id="overview-这是什么">这是什么</h2>
+<p>NebulaDrive 的插件系统让你<strong>不修改、不重编译主服务</strong>就能扩展它的能力：防盗链、HMAC 鉴权、SMTP 发信、备份镜像、协作跳转……都可以做成独立插件，热插拔、可独立崩溃。</p>
+<p>插件以<strong>独立子进程</strong>运行，通过 stdin/stdout 上的 <strong>JSON-RPC 2.0</strong> 与主服务（宿主）通信。宿主在固定的「钩子（hook）」点调用插件，插件读 <code>ctx</code>、写回 <code>ctxPatch</code>、必要时用含 <code>blocked</code> 的 error 拦截请求。</p>
+<h2 id="overview-本-wiki-的结构">本 Wiki 的结构</h2>
+<div class="table-wrap"><table><thead><tr><th>页面</th><th>内容</th></tr></thead><tbody><tr><td><a href="#sec-architecture">01-架构</a></td><td>子进程模型、两种插件形态、sync/async 派发、生命周期与隔离</td></tr><tr><td><a href="#sec-manifest">02-清单 plugin.json</a></td><td><code>plugin.json</code> 全部字段、校验规则、合法/非法示例</td></tr><tr><td><a href="#sec-protocol">03-协议 JSON-RPC</a></td><td><code>init</code>/<code>fire</code>/<code>shutdown</code>/<code>ping</code>/<code>log</code>、参数与结果、<code>blocked</code> 语义、超时与日志铁律</td></tr><tr><td><a href="#sec-hooks">04-钩子清单</a></td><td>全部 10 个钩子的字段表、模式、是否可拦截、是否真正接线</td></tr><tr><td><a href="#sec-trust">05-签名与信任</a></td><td>PBClus 包格式、签名状态（present/valid/trusted）、信任库、三种策略</td></tr><tr><td><a href="#sec-tutorial">06-上手教程</a></td><td>从零写一个插件：脚手架 → 构建 → 安装 → 配置 → 调试</td></tr><tr><td><a href="#sec-examples">07-官方示例</a></td><td>仓库内 7 个示例插件的功能与钩子一览</td></tr><tr><td><a href="#sec-admin">08-管理端与 API</a></td><td>安装/启用/配置接口、插件协议关卡、信任管理接口</td></tr></tbody></table></div>
+<h2 id="overview-与其他文档的关系">与其他文档的关系</h2>
+<ul><li>本 Wiki 是<strong>开发者入口</strong>，偏「怎么写、怎么接」。</li><li><a href="../PBClus-格式规范.md">../PBClus-格式规范.md</a> 是 PBClus 包格式（v2）的<strong>逐字节协议规范</strong>，签发/校验/尾部布局看这里。</li><li><a href="../插件制作指南.html">../插件制作指南.html</a> 是面向发布者的制作指引（打包、签名、上架商店）。</li><li><a href="../插件系统完全指南.md">../插件系统完全指南.md</a> 是早期的内部总览，部分章节（如「预留未接入的钩子」）已过时——<strong>以本 Wiki 与代码为准</strong>。</li></ul>
+<h2 id="overview-一句话上手">一句话上手</h2>
+<pre class="code" data-lang="bash"><code>cp -r examples/plugins/referer-guard myplugin
+cd myplugin &amp;&amp; go build -o myplugin .
+# 然后把目录交给管理端「本地安装」，启用、填配置、看日志</code></pre>
+<p>不放心？直接读 <a href="#sec-tutorial">06-上手教程</a>。</p></section>
+<section id="sec-architecture" class="section"><h1 id="architecture">01 · 架构</h1>
+<blockquote><p>源码：<code>backend/pkg/plugin/hooks.go</code>、<code>backend/pkg/plugin/host/manager.go</code>、<code>backend/pkg/plugin/host/proc_{windows,unix}.go</code></p></blockquote>
+<h2 id="architecture-为什么是子进程而不是-pluginopen-或-wasm">为什么是子进程，而不是 <code>plugin.Open</code> 或 WASM</h2>
+<div class="table-wrap"><table><thead><tr><th>方案</th><th>结论</th></tr></thead><tbody><tr><td>Go 原生 <code>plugin.Open</code></td><td>❌ 只支持 Linux/macOS 且需要 cgo；Windows 根本编译不了，且工具链/依赖版本一升级就可能让已构建的插件失效</td></tr><tr><td>WASM（wasmtime-go）</td><td>❌ 需要 CGO，Go host function 绑定成本过高</td></tr><tr><td><strong>独立子进程 + JSON-RPC over stdio</strong></td><td>✅ 跨平台、语言无关（插件可以用任何语言写）、崩溃隔离、真正热插拔</td></tr></tbody></table></div>
+<p>代价：每次调用多一次本地管道 IPC 往返（亚毫秒级）。</p>
+<h2 id="architecture-两种插件形态">两种插件形态</h2>
+<p>业务代码对形态<strong>完全透明</strong>——只调 <code>plugin.Fire(hook, ctx)</code>，不关心 handler 在哪。</p>
+<div class="table-wrap"><table><thead><tr><th>形态</th><th>加载方式</th><th>适用</th></tr></thead><tbody><tr><td><strong>进程外（主流）</strong></td><td>独立可执行文件，宿主拉起并通过 RPC 调用</td><td>第三方扩展，可热插拔</td></tr><tr><td><strong>进程内</strong></td><td>宿主二进制里 <code>init()</code> 调 <code>plugin.Register</code></td><td>内置功能，零 IPC 开销</td></tr><tr><td>混合</td><td>两者同时存在，<code>Fire</code> 会<strong>先跑完进程内、再派发进程外</strong></td><td>常见：内置补核心能力，外部做扩展</td></tr></tbody></table></div>
+<p>进程内插件写法见 <a href="#sec-tutorial">06-教程 §进程内插件</a>；它改动要重编译主服务，不适合第三方。</p>
+<h2 id="architecture-派发模式sync-async">派发模式：sync / async</h2>
+<p>每个钩子在 <code>Hooks</code> 表里标注 <code>Mode</code>：</p>
+<div class="table-wrap"><table><thead><tr><th>模式</th><th>行为</th><th>适用</th></tr></thead><tbody><tr><td><code>ModeSync</code></td><td>阻塞等插件返回（超时 2s）</td><td>业务要读结果才能决策：<code>onAntiLeech</code>（下载拦截）、<code>onCollabOpen</code>（302）、<code>onApiAuth</code>、<code>onCLI</code></td></tr><tr><td><code>ModeAsync</code></td><td>每插件一个 goroutine，<strong>结果不回传</strong></td><td>纯事件通知：邮件、审计、协作保存、备份/恢复事件、DB 迁移、限流事件</td></tr></tbody></table></div>
+<p><code>ModeAsync</code> 不回写 <code>ctx</code>：业务已经继续往下走了，回写只会造成竞态。需要回传请用 <code>ModeSync</code>，或用 <code>plugin.RateLimitGate()</code> 强制同步（见 <a href="#sec-hooks">04-钩子 · onRateLimit</a>）。</p>
+<h2 id="architecture-生命周期与隔离">生命周期与隔离</h2>
+<div class="table-wrap"><table><thead><tr><th>能力</th><th>状态</th></tr></thead><tbody><tr><td>安装即用，不改源码、不重编译主服务</td><td>✅</td></tr><tr><td>启用 = 拉起进程；禁用 = 杀进程；<strong>主服务不重启</strong></td><td>✅</td></tr><tr><td>崩溃隔离（崩溃只杀子进程，不影响宿主）</td><td>✅</td></tr><tr><td>崩溃自动重启（指数退避，最长 5 分钟）</td><td>✅</td></tr><tr><td>连续 5 次崩溃后停止并转人工</td><td>✅</td></tr><tr><td>日志缓冲（每插件 500 条环形）</td><td>✅</td></tr><tr><td>进程组隔离：Windows <code>taskkill /T /F</code>；Unix <code>kill(-pgid)</code></td><td>✅（避免孙进程变孤儿）</td></tr></tbody></table></div>
+<h2 id="architecture-信任边界重要">信任边界（重要）</h2>
+<p>插件与主服务<strong>同权等系统权限，没有沙箱</strong>。隔离靠的是「进程边界 + 权限自觉」，不是容器/沙箱。对第三方插件，安全保证来自 <a href="#sec-trust">PBClus 签名 + 信任库</a>，而非操作系统隔离。详见 <a href="#sec-trust">05-安全与诚实边界</a>。</p></section>
+<section id="sec-manifest" class="section"><h1 id="manifest">02 · 清单 plugin.json</h1>
+<blockquote><p>源码：<code>backend/pkg/plugin/manifest.go</code>（<code>ParseManifest</code> / <code>Validate</code>）</p><p>每个插件目录根下<strong>必须</strong>有一个 <code>plugin.json</code>。宿主加载时解析并逐字段校验；任何一项不合法直接拒载，错误信息含具体字段名，可直接展示给管理员。</p></blockquote>
+<h2 id="manifest-全部字段">全部字段</h2>
+<div class="table-wrap"><table><thead><tr><th>字段</th><th>类型</th><th>必需</th><th>说明 / 校验</th></tr></thead><tbody><tr><td><code>name</code></td><td>string</td><td>✅</td><td>唯一标识。<code>[a-z0-9-_]</code>，长度 2–64；不能以 <code>-</code>/<code>_</code> 开头；不能是 Windows 保留名（<code>CON</code>/<code>NUL</code>/<code>COM1</code>…）。也是数据目录下的子目录名</td></tr><tr><td><code>title</code></td><td>string</td><td></td><td>展示名，≤128 字符；为空回退到 <code>name</code></td></tr><tr><td><code>version</code></td><td>string</td><td></td><td>语义化版本 <code>x.y.z</code>（三段式，每段 ≤5 位数字）。空表示不限</td></tr><tr><td><code>author</code></td><td>string</td><td></td><td>作者名，≤64</td></tr><tr><td><code>description</code></td><td>string</td><td></td><td>一句话描述，≤512</td></tr><tr><td><code>entry</code></td><td>string</td><td>✅</td><td>可执行文件名。**必须是单个文件名，不能含 <code>/</code>、<code>\</code>、<code>..</code> 或 `:*?"<></td><td><code>**。不带 </code>.exe<code> 即可跨平台通用（Windows 上自动补 </code>.exe`）</td></tr><tr><td><code>args</code></td><td>[]string</td><td></td><td>传给可执行文件的参数，每条 ≤1024，禁止 NUL</td></tr><tr><td><code>env</code></td><td>map</td><td></td><td>附加环境变量，<strong>会覆盖</strong>宿主同名变量——故不用于传敏感配置</td></tr><tr><td><code>protocolVersion</code></td><td>int</td><td>✅</td><td><strong>必须等于 <code>1</code></strong>，否则拒载</td></tr><tr><td><code>hooks</code></td><td>[]string</td><td>✅</td><td>声明本插件实现哪些钩子；不声明就不会被调用（避免被误用于没实现的钩子）。最多 32 个；必须是已知钩子名且不能重复</td></tr><tr><td><code>permissions</code></td><td>[]string</td><td></td><td>权限声明，<strong>仅供管理员安装前参考，宿主不强制、不校验</strong>（每条 ≤64）</td></tr><tr><td><code>license</code></td><td>string</td><td></td><td>SPDX 标识，≤64；空值默认 <code>AGPL-3.0-only</code></td></tr><tr><td><code>homepage</code></td><td>string</td><td></td><td>项目地址，≤256</td></tr><tr><td><code>minHostVersion</code></td><td>string</td><td></td><td>最低宿主版本（<code>x.y.z</code>），空表示不限</td></tr></tbody></table></div>
+<p><strong>全局限制</strong>：清单文件 ≤ 64 KB；未知字段会报错（<code>json.Decoder.DisallowUnknownFields</code>，拼错字段名不再静默生效）；字段长度超限、版本非法都会被精确拦截。</p>
+<h2 id="manifest-合法示例">合法示例</h2>
+<pre class="code" data-lang="json"><code>{
+  "name": "referer-guard",
+  "title": "防盗链守卫",
+  "version": "1.0.0",
+  "author": "NebulaDrive",
+  "description": "下载前校验 Referer，不在白名单内返回 403",
+  "entry": "referer-guard",
+  "args": [],
+  "protocolVersion": 1,
+  "hooks": ["onAntiLeech"],
+  "permissions": ["read-download-metadata", "write-own-datadir"],
+  "license": "AGPL-3.0-only"
+}</code></pre>
+<h2 id="manifest-常见校验失败">常见校验失败</h2>
+<ul><li><code>name</code> 含大写 / 中文 → <code>name 含非法字符</code>（只允许小写字母、数字、<code>-</code>、<code>_</code>）</li><li><code>entry</code> 写成 <code>bin/myplugin</code> 或 <code>..\x</code> → <code>entry 必须是单个文件名，不能含路径分隔符或 ..</code>（这是安全红线，见下）</li><li><code>protocolVersion</code> 写成 <code>2</code> 或漏写 → <code>protocolVersion 不匹配：插件声明 2，宿主要求 1</code></li><li><code>hooks</code> 写错成 <code>onAntileech</code>（大小写错） → <code>未知钩子 &quot;onAntileech&quot;</code>（已知钩子见 <a href="#sec-hooks">04-钩子</a>）</li></ul>
+<h2 id="manifest-关于-entry-的硬约束">关于 <code>entry</code> 的硬约束</h2>
+<blockquote><p><code>entry</code> 会拼成 <code>&lt;插件目录&gt;/&lt;entry&gt;</code> 再交给 <code>exec</code>。若允许路径分隔符，manifest 就能让宿主执行插件目录外的任意文件——等于任意代码执行。所以不仅 <code>Validate</code> 挡，运行时 <code>ExecPath</code> 还会二次校验解析后路径确实落在插件目录内。</p></blockquote>
+<p>跨平台写法：清单里写 <code>&quot;entry&quot;: &quot;myplugin&quot;</code>（不带后缀），Windows 上 <code>ExecPath</code> 会自动尝试 <code>myplugin.exe</code>；清单显式写了 <code>.exe</code> 但文件不存在时<strong>不会</strong>静默补（那是真缺文件）。</p></section>
+<section id="sec-protocol" class="section"><h1 id="protocol">03 · 协议 JSON-RPC</h1>
+<blockquote><p>源码：<code>backend/pkg/plugin/manifest.go</code>（<code>RPC*</code> 常量与结构）、<code>backend/pkg/plugin/host/manager.go</code></p><p>协议极简：<strong>一行一个 JSON 对象，UTF-8，不做跨行分帧</strong>。插件日志走 stderr，绝不污染 stdout。</p></blockquote>
+<h2 id="protocol-协议版本">协议版本</h2>
+<p><code>ProtocolVersion = 1</code>。清单 <code>protocolVersion</code> 必须与之相等，否则宿主拒载。</p>
+<h2 id="protocol-方法method">方法（method）</h2>
+<div class="table-wrap"><table><thead><tr><th>方法</th><th>方向</th><th>作用</th></tr></thead><tbody><tr><td><code>init</code></td><td>宿主→插件</td><td>启动后插件<strong>必须主动等待</strong>这个请求才能工作。插件回 <code>ok/hooks/version</code></td></tr><tr><td><code>fire</code></td><td>宿主→插件</td><td>一次钩子调用。参数 <code>{hook, ctx, seq}</code></td></tr><tr><td><code>shutdown</code></td><td>宿主→插件</td><td>插件收到后应清理资源并<strong>退出进程</strong></td></tr><tr><td><code>ping</code></td><td>宿主→插件</td><td>健康检查，插件应立即响应（如 <code>{&quot;pong&quot;:true}</code>）</td></tr><tr><td><code>log</code></td><td>插件→宿主</td><td>通知：把一条日志发给宿主统一落库/转发。可选，更常见是写 stderr</td></tr></tbody></table></div>
+<h2 id="protocol-init-参数与结果">init 参数与结果</h2>
+<pre class="code" data-lang="jsonc"><code>// 宿主下发（init 的 params）
+{
+  "hostVersion": "V26-10.0-d",
+  "hostProtocol": 1,
+  "pluginName": "referer-guard",   // = manifest.name
+  "dataDir": "/var/lib/nebula/plugins/referer-guard", // 已创建，可写；持久化放这里
+  "config": { ... },               // 管理员填的配置（JSON 字符串反序列化后的对象）
+  "startTimeoutMillis": 10000,
+  "siteUrl": "https://disk.example.com"  // 可选，插件需要回调宿主时可用
+}
+
+// 插件返回（init 的 result）
+{ "ok": true, "name": "referer-guard", "version": "1.0.0", "hooks": ["onAntiLeech"] }
+// ok=false 时宿主会卸载并记录 error</code></pre>
+<blockquote><p>插件<strong>不要</strong>去写宿主的数据目录，只写 <code>dataDir</code>。<code>config</code> 来是 <code>plugins.config</code>（JSON 字符串），安装后由管理员填写。</p></blockquote>
+<h2 id="protocol-fire-参数与结果">fire 参数与结果</h2>
+<pre class="code" data-lang="jsonc"><code>// 宿主下发（fire 的 params）
+{ "hook": "onAntiLeech", "ctx": { "userId": 1, "ip": "1.2.3.4", "referer": "https://a.com", "fileName": "x.zip" }, "seq": 7 }
+
+// 插件返回（fire 的 result）
+{
+  "ctxPatch": { "refererGuard": "allowed" },  // 浅层合并，顶层键覆盖；不能删宿主已有键（要删请显式置 null）
+  "error": "blocked by referer-guard: 外站访问"  // 含 "blocked" → 宿主把它转成可拦截请求的 error
+}</code></pre>
+<p><strong>致命细节</strong>：<code>FireResult</code> <strong>没有 <code>Blocked</code> 布尔字段</strong>。拦截<strong>只能</strong>通过 <code>error</code> 文本包含子串 <code>blocked</code>（区分大小写）来表达。这与进程内插件的既有约定一致，两种形态拦截语义完全相同。</p>
+<h2 id="protocol-三条铁律写插件必读">三条铁律（写插件必读）</h2>
+<ol><li><strong>stdout 专供 RPC，一行一个 JSON。</strong> 日志一律写 <strong>stderr</strong>。混用会破坏分帧，插件直接失联。</li><li><strong>唯一输出通道是 <code>ctxPatch</code>（浅层合并，顶层键覆盖）。</strong> <code>result</code> 里没有「设置 ctx 字段」的语义，想改 ctx 就写 <code>ctxPatch</code>。</li><li><strong>拦截用 error，且文本必须含小写 <code>blocked</code>。</strong><ol><li><code>{&quot;error&quot;: &quot;blocked by x: 外网 IP&quot;}</code> → 403 ✅</li><li><code>{&quot;ctxPatch&quot;: {&quot;blocked&quot;: true}}</code> → <strong>不会</strong>拦截 ❌</li></ol></li></ol>
+<h2 id="protocol-超时与兜底">超时与兜底</h2>
+<div class="table-wrap"><table><thead><tr><th>常量</th><th>值</th><th>含义</th></tr></thead><tbody><tr><td><code>DefaultStartTimeout</code></td><td>10s</td><td>启动 + init 往返预算</td></tr><tr><td><code>DefaultFireTimeout</code></td><td>2s</td><td>单次 fire 同步往返超时</td></tr><tr><td>单条日志</td><td>≤2000 字符</td><td>超出截断（按 rune 截断，不切坏 UTF-8）</td></tr><tr><td>一次响应日志行</td><td>≤50 条</td><td>超出丢弃</td></tr></tbody></table></div>
+<p>宿主对超时/崩溃做隔离与自动重启（见 <a href="#sec-architecture">01-架构</a>）。插件侧应尽量快：把重活异步化，别在 <code>fire</code> 里同步做网络 IO 又卡满 2s。</p>
+<h2 id="protocol-最小可运行插件骨架go">最小可运行插件骨架（Go）</h2>
+<pre class="code" data-lang="go"><code>package main
+
+import ("bufio"; "encoding/json"; "os")
+
+func main() {
+    sc := bufio.NewScanner(os.Stdin)
+    for sc.Scan() {
+        var req struct {
+            ID int64 `json:"id"`; Method string `json:"method"`; Params json.RawMessage `json:"params"`
+        }
+        if json.Unmarshal(sc.Bytes(), &amp;req) != nil { continue }
+        switch req.Method {
+        case "init":
+            reply(req, map[string]any{"ok": true, "hooks": []string{"onAntiLeech"}}, nil)
+        case "fire":
+            reply(req, map[string]any{"ctxPatch": map[string]any{"ok": true}}, nil)
+        case "shutdown":
+            reply(req, map[string]any{"bye": true}, nil); return
+        }
+    }
+}
+func reply(req struct{ID int64 `json:"id"`}, result any, rerr any) { /* 序列化 + 写 stdout + '\n' */ }</code></pre>
+<blockquote><p>插件<strong>不 import 宿主包</strong>：宿主与插件是独立进程，import 宿主会把整个后端拖进依赖图并造成版本耦合。协议结构在插件侧独立声明即可（参考 <code>examples/plugins/*/main.go</code> 顶部的「协议结构」段）。</p></blockquote></section>
+<section id="sec-hooks" class="section"><h1 id="hooks">04 · 钩子清单</h1>
+<blockquote><p>源码：<code>backend/pkg/plugin/hooks.go</code>（<code>Hooks</code> 元信息表、<code>HookModeOf</code>、<code>MetaOf</code>）</p><p>钩子是宿主「在某某时机调用插件」的固定点。插件只在 <code>plugin.json</code> 的 <code>hooks</code> 里<strong>声明</strong>的钩子才会被派发。</p></blockquote>
+<h2 id="hooks-总览以当前代码为准">总览（以当前代码为准）</h2>
+<div class="table-wrap"><table><thead><tr><th>钩子</th><th>模式</th><th>可拦截</th><th>已接线</th><th>用途</th></tr></thead><tbody><tr><td><code>onAntiLeech</code></td><td>sync</td><td>✅</td><td>✅</td><td>下载/预览前触发，<strong>唯一下载拦截点</strong>，做防盗链必须用它</td></tr><tr><td><code>onCollabOpen</code></td><td>sync</td><td>❌</td><td>✅</td><td>协作打开时触发；写 <code>url</code> 则 302 跳外部编辑器</td></tr><tr><td><code>onCollabSave</code></td><td>async</td><td>❌</td><td>✅</td><td>协作内容保存时触发，纯通知</td></tr><tr><td><code>onEmail</code></td><td>async</td><td>❌</td><td>✅</td><td>创建站内通知时触发，纯通知。<strong>系统本身不含发信实现，此钩子是邮件外发唯一入口</strong></td></tr><tr><td><code>onDBMigrate</code></td><td>async</td><td>❌</td><td>✅</td><td>AutoMigrate + 版本迁移全部完成后触发，<strong>每次启动都触发</strong>（不只升级）</td></tr><tr><td><code>onRateLimit</code></td><td>async</td><td>❌</td><td>✅</td><td>高频操作前触发（登录/上传/下载/分享增删/全局限流中间件）；拦截走 <code>RateLimitGate</code></td></tr><tr><td><code>onBackup</code></td><td>async</td><td>❌</td><td>✅</td><td>管理端创建备份<strong>之后</strong>触发，纯通知</td></tr><tr><td><code>onRestore</code></td><td>async</td><td>❌</td><td>✅</td><td>管理端提交恢复<strong>之前</strong>触发，纯通知（暂存制，恢复发生在下次启动）</td></tr><tr><td><code>onApiAuth</code></td><td>sync</td><td>✅</td><td>✅</td><td>内置鉴权（PAT/OAuth2）<strong>失败后</strong>触发，扩展鉴权方案</td></tr><tr><td><code>onCLI</code></td><td>sync</td><td>✅</td><td>✅</td><td><code>nebula plugin &lt;cmd&gt; [args...]</code> 时触发，同步拿输出</td></tr></tbody></table></div>
+<blockquote><p>⚠️ 旧文档（<code>插件系统完全指南.md</code>）曾把 <code>onBackup</code>/<code>onRestore</code>/<code>onApiAuth</code>/<code>onCLI</code> 标为「预留未接入」——<strong>那已过时</strong>。当前代码 <code>Hooks</code> 表里这 4 个均为 <code>Wired: true</code>，且已有对应调用点（<code>backend/controllers/backup.go</code>、<code>middleware/api_auth.go</code>、<code>runPluginCLI</code>）和示例插件。<strong>以本表与代码为准。</strong></p></blockquote>
+<h2 id="hooks-拦截的统一定义">拦截的统一定义</h2>
+<p>全项目<strong>唯一</strong>的拦截判定：<code>strings.Contains(err.Error(), &quot;blocked&quot;)</code>（区分大小写）。<code>middleware/rate_limit.go</code>、<code>controllers/file.go</code> 与进程外派发门都走 <code>plugin.IsBlockedError</code>。想拦截就必须让返回的 error 文本含小写 <code>blocked</code>。</p>
+<hr>
+<h2 id="hooks-onantileech-防盗链sync-可拦截已接线"><code>onAntiLeech</code> · 防盗链（sync / 可拦截）✅已接线</h2>
+<p>下载/预览前触发，覆盖两条路径：</p>
+<ol><li><strong>登录下载</strong> <code>GET /api/files/:id/download</code></li><li><strong>公开分享</strong> <code>GET /api/shares/:id/download</code> 与 <code>/preview</code></li></ol>
+<ul><li>登录下载 <code>ctx</code>：<code>{userId, userName, ip, ua, fileId, fileName, referer}</code></li><li>公开分享 <code>ctx</code>：<code>{userId(恒为0), userName(恒为空), ip, ua, fileId, fileName, referer, shareId, shareKind, shareOwnerId}</code></li><li><code>shareKind</code> 取值 <code>download</code> 或 <code>preview</code>——<strong>两者都是完整文件内容的出口</strong>，宿主一视同仁过闸；只想保护下载、放行本站分享页内联预览的插件，请自行按 <code>shareKind</code> 放行。</li><li>返回 error 且文本含 <code>blocked</code> → 403。<strong>做防盗链必须用它。</strong></li><li>⚠️ 分享访问者是匿名的：<code>userId</code> 恒为 0，插件不能假设它有值，也不会像登录下载那样天然有「所有者」可比。</li></ul>
+<h2 id="hooks-onratelimit-的特殊处理"><code>onRateLimit</code> 的特殊处理</h2>
+<p>它在 <strong>7 处</strong>被调用，但只有限流中间件那一处需要读返回值做拦截决策。整个钩子设为 <code>ModeSync</code> 会让另外 6 处（登录/上传/下载/分享增删）每次白等 IPC 往返；保持 <code>ModeAsync</code> 又会让中间件拦截失效。</p>
+<p><strong>解决</strong>：钩子保持异步（不拖累热路径），限流中间件改调 <code>plugin.RateLimitGate(ctx)</code>——它走 <code>Dispatcher.DispatchSync</code> <strong>强制同步等待</strong>。代价是最多一个 <code>FireTimeout</code>（默认 2s），且<strong>只在有插件声明了 <code>onRateLimit</code> 时才有实际等待</strong>；没有插件时立即返回空。</p>
+<h2 id="hooks-oncollabopen-协作打开sync-不可拦截已接线"><code>onCollabOpen</code> · 协作打开（sync / 不可拦截）✅已接线</h2>
+<p><code>ctx = {userId, userName, fileId, fileName, mimeType, ip}</code>。在 <code>ctx</code> 写入 <code>url</code> 字段则 302 跳转到该地址（OnlyOffice 等外部编辑器）。注意 <code>ctx</code> 是引用类型，异步派发时业务读 <code>ctx</code> 可能早于插件写入 → 竞态，故强制 sync。</p>
+<h2 id="hooks-oncollabsave-协作保存async-不可拦截已接线"><code>onCollabSave</code> · 协作保存（async / 不可拦截）✅已接线</h2>
+<p><code>ctx = {userId, userName, fileId, fileName, content}</code>；<code>content</code> 是完整文件明文，大文件会显著增加内存占用。仅事件通知。</p>
+<h2 id="hooks-onemail-邮件外发async-不可拦截已接线"><code>onEmail</code> · 邮件外发（async / 不可拦截）✅已接线</h2>
+<p><code>ctx = {to, subject, body}</code>，用户邮箱为空则不触发。系统本身不含任何发信实现，<strong>此钩子是邮件外发的唯一入口</strong>（示例：<code>smtp-email</code>、<code>notify-webhook</code>）。</p>
+<h2 id="hooks-ondbmigrate-数据库迁移async-不可拦截已接线"><code>onDBMigrate</code> · 数据库迁移（async / 不可拦截）✅已接线</h2>
+<p><code>ctx = {fromVersion, toVersion}</code>，两者相等表示本次无迁移。<strong>每次启动都会触发</strong>，不是「首次升级才触发」。插件建表必须幂等（<code>CREATE TABLE IF NOT EXISTS</code>），否则重复执行会报错。</p>
+<h2 id="hooks-onbackup-备份后async-不可拦截已接线"><code>onBackup</code> · 备份后（async / 不可拦截）✅已接线</h2>
+<p>管理端创建备份<strong>之后</strong>触发。<code>ctx = {kind, filename, size, sha256, dbPath, fileCount, createdAt, operator}</code>。宿主负责生成备份包（SQLite 库 + 文件清单 manifest.json），插件可把它复制到 S3/异地或落审计。<strong>异步派发拿不到返回值</strong>，别指望用它否决备份。</p>
+<h2 id="hooks-onrestore-恢复前async-不可拦截已接线"><code>onRestore</code> · 恢复前（async / 不可拦截）✅已接线</h2>
+<p>管理端提交恢复<strong>之前</strong>触发。<code>ctx = {filename, size, stagedPath, operator, currentDb}</code>。用途是校验/审计/通知。⚠️ 恢复是<strong>暂存制</strong>：真正的库替换发生在下次启动（热替换正在使用的 SQLite 库不安全），所以插件在此拦不住这次恢复——需要否决请在管理端权限层解决。</p>
+<h2 id="hooks-onapiauth-开放-api-鉴权sync-可拦截已接线"><code>onApiAuth</code> · 开放 API 鉴权（sync / 可拦截）✅已接线</h2>
+<p><code>/api/v1/*</code> 的内置鉴权（PAT/OAuth2）<strong>失败之后</strong>触发，用于扩展鉴权方案（HMAC 签名、IP 白名单、第三方令牌等）。</p>
+<ul><li><code>ctx = {method, path, query, ip, ua, headers, hasAuthorization, contentType, contentLength, bodyHash, bodyTruncated}</code></li><li><code>headers</code> <strong>不含 <code>Authorization</code></strong>（内置凭据留在宿主，插件请用自己的头）。</li><li><strong>放行</strong>：在 <code>ctx</code> 写入 <code>principalUserId</code>（>0），宿主据此认定调用者身份。</li><li><strong>拒绝</strong>：返回含 <code>blocked</code> 的 error，宿主返回 403。</li><li>两者都没有则视为未通过（fail closed）。</li><li>⚠️ 内置鉴权成功时<strong>不会</strong>触发本钩子：既保证热路径零 IPC 开销，也意味着插件无法否决一个已有效的令牌——内置凭据始终优先。示例：<code>hmac-auth</code>。</li></ul>
+<h2 id="hooks-oncli-命令行子命令sync-可拦截已接线"><code>onCLI</code> · 命令行子命令（sync / 可拦截）✅已接线</h2>
+<p>执行 <code>nebula plugin &lt;cmd&gt; [args...]</code> 时触发，<strong>同步</strong>等待以便拿到输出。<code>ctx = {command, args, argsRaw}</code>；插件可写入 <code>cliOutput</code>（字符串，会被打印）与 <code>cliExitCode</code>（数字）。返回含 <code>blocked</code> 的 error 会让 CLI 以非 0 退出码结束。多个插件同时响应时 <code>cliOutput</code> 是<strong>后写覆盖</strong>，请自行加前缀区分。</p></section>
+<section id="sec-trust" class="section"><h1 id="trust">05 · 签名与信任</h1>
+<blockquote><p>源码：<code>backend/pkg/plugin/pbclus/pbclus_sign.go</code>、<code>backend/pkg/plugin/pbclus/pbclus.go</code>、<code>backend/controllers/plugin_trust.go</code>、<code>backend/pkg/plugin/install/install.go</code></p><p>包格式逐字节规范见 <a href="../PBClus-格式规范.md">../PBClus-格式规范.md</a>。</p></blockquote>
+<p>NebulaDrive 的插件分发格式叫 <strong>PBClus</strong>（v2）。一个 PBClus 包 = 头部 + 清单(<code>plugin.json</code>) + 载荷(目录) + 尾部(签名块)。安装器解包、校验签名，再交给 <a href="#sec-manifest">02-清单</a> 解析。</p>
+<h2 id="trust-一条必须先说清的事签名-可信">一条必须先说清的事：签名 ≠ 可信</h2>
+<p>公钥<strong>内嵌在包里</strong>，所以<strong>任何人都能签一个合法的包</strong>：用自己的密钥签，再把公钥一起放进去，<code>Valid</code> 就是 true。「验证通过」只证明<strong>内容与签名自洽</strong>，不证明签名者是谁、也不证明你要信任它。</p>
+<p>安全语义完全来自宿主侧的<strong>信任库</strong>（keyId 白名单）：只有 <code>Trusted</code> 才有意义。安装决策<strong>只能用 <code>Trusted</code></strong>，用 <code>Valid</code> 做决策等于没校验——这是这类设计最常见也最危险的误用，所以代码把两个状态拆成两个字段，不给「顺手用错」留空间。</p>
+<h2 id="trust-三种签名状态">三种签名状态</h2>
+<div class="table-wrap"><table><thead><tr><th>字段</th><th>含义</th></tr></thead><tbody><tr><td><code>present</code></td><td>包里是否有签名块</td></tr><tr><td><code>valid</code></td><td>签名与内容是否自洽（<strong>不代表可信</strong>）</td></tr><tr><td><code>trusted</code></td><td>签名者的 keyId 是否在宿主的信任库里</td></tr></tbody></table></div>
+<p><code>valid</code> 的判定：签名消息 = 域分隔前缀 <code>PBClus/v2 signed-package\n</code> ‖ 文件 SHA-256；用内嵌公钥做 Ed25519 验证。缺少 <code>Verify()</code> 步骤时攻击者可以改内容同时改 SHA，签名照样「通过」，所以安装前<strong>必须</strong>先 <code>Verify</code> 再读状态。</p>
+<h2 id="trust-keyid-与密钥">KeyID 与密钥</h2>
+<ul><li>算法：<strong>Ed25519</strong>（当前唯一，<code>SigAlgEd25519 = 1</code>）。</li><li><strong>KeyID</strong> = 公钥 SHA-256 的<strong>前 8 字节</strong>的十六进制（16 个字符）。用 8 字节而非 32：keyId 是给人看、给人抄的（管理员第一次信任发布者时要能一眼比对），在「插件发布者数量」量级上碰撞可忽略。</li><li><code>SigningKey</code> 结构：<code>name</code> / <code>privateKey</code>(64 字节 base64) / <code>publicKey</code>(32 字节 base64) / <code>keyId</code>。</li><li>生成：<code>pbclus.GenerateSigningKey(name)</code>；保存：<code>Save(path)</code> 权限 <strong>0600</strong>（这是能签出「被信任包」的私钥，泄漏等于别人可冒充该发布者；Windows 不认 POSIX 位，文档另提醒别把私钥提交进版本库）。</li></ul>
+<h2 id="trust-公钥分发文件-pubjson">公钥分发文件 <code>.pub.json</code></h2>
+<p><code>keygen</code> 会额外写一个 <code>&lt;名字&gt;.pub.json</code>，专门交给管理员：</p>
+<pre class="code" data-lang="json"><code>{ "keyId": "...", "name": "NebulaDrive", "algorithm": "ed25519",
+  "publicKey": "base64...", "notice": "这是公钥，可公开；私钥在另一个文件，绝不要发送或提交它。" }</code></pre>
+<p>为什么要单独一个只有公钥、名字里就写着 <code>pub</code> 的文件：私钥文件里<strong>同时含私钥与公钥</strong>，而「把你的密钥文件发给我」是极自然的表达——一旦照做就是私钥泄漏。给一个只有公钥的文件能把这条歧义堵住。</p>
+<h2 id="trust-信任库truststore">信任库（TrustStore）</h2>
+<p>信任库是 <code>keyId → 名称</code> 的白名单（<code>KeyRing</code>，字段 <code>keys: [{keyId, name, publicKey?, addedAt}]</code>）。建立信任的<strong>唯一推荐入口</strong>是 <code>TrustRecordFromPublicKey(pubBase64, name)</code>：keyId 由公钥推导，两者必然自洽，从根上排除「keyId 写的是可信发布者、公钥却是别人的」替换。也允许 <code>TrustRecordFromKeyID(keyId, name)</code>（发布者只公布了 keyId 时），但<strong>不如给公钥安全</strong>：keyId 是公钥摘要，无法反向校验，挡不住「同一 keyId 配了别人的公钥」。</p>
+<p>信任库自身 <code>Validate()</code> 会校验：keyId 长度 16 且为十六进制、不重复、填了 <code>publicKey</code> 就必须与 keyId 自洽。</p>
+<h2 id="trust-三种签名策略trustmode">三种签名策略（trustMode）</h2>
+<div class="table-wrap"><table><thead><tr><th>模式</th><th>行为</th></tr></thead><tbody><tr><td><code>off</code></td><td>关闭签名检查。任何包都能安装，界面也不再提示签名状态</td></tr><tr><td><code>warn</code>（默认）</td><td>照常安装，但会提示签名状态</td></tr><tr><td><code>require</code></td><td>只接受受信任签名的包。<strong>没有信任任何发布者时，所有 PBClus 包都会被拒绝</strong></td></tr></tbody></table></div>
+<p>改 <code>require</code> 前的诚实提示：存量无签名插件会让<strong>新安装</strong>全部被拒（已安装的不受影响）。接口在「有存量无签名插件」时要求带 <code>confirm=true</code> 才放行。</p>
+<h2 id="trust-管理接口见-08-管理端08-adminmd">管理接口（见 <a href="#sec-admin">08-管理端</a>）</h2>
+<ul><li><code>GET /api/admin/plugins/trust</code> — 查策略 + 信任库内容 + 已安装/已签名/已信任计数</li><li><code>POST /api/admin/plugins/trust/key</code> — 加一枚公钥（<strong>只收 <code>publicKey</code> 或 <code>keyId</code>，明确拒绝私钥</strong>）</li><li><code>DELETE /api/admin/plugins/trust/:keyId</code> — 移除一枚公钥（撤销的唯一手段；已安装的插件不会被自动卸载）</li><li><code>PUT /api/admin/plugins/trust/mode</code> — 改策略（<code>off</code>/<code>warn</code>/<code>require</code>，<code>require</code> 需 <code>confirm</code>）</li></ul>
+<h2 id="trust-安全与诚实边界">安全与诚实边界</h2>
+<ul><li><strong>插件没有沙箱</strong>：与主服务同权系统权限，隔离靠进程边界 + 权限自觉，不是容器。</li><li><strong><code>permissions</code> 声明不强制</strong>：只展示给管理员看，宿主不校验。</li><li><strong><code>valid</code> 不等于 <code>trusted</code></strong>：安装决策只用 <code>trusted</code>。</li><li><strong>商店条目 <code>version</code>/<code>author</code> 不可信</strong>：真实清单以下载后的 <code>plugin.json</code> 为准。</li><li><strong>别把私钥发到任何地方</strong>：接口只收公钥；私钥文件权限 0600 且严禁提交版本库。</li></ul></section>
+<section id="sec-tutorial" class="section"><h1 id="tutorial">06 · 上手教程</h1>
+<blockquote><p>跟着做一遍，你就能拥有一个可运行的插件。完整可参考 <code>examples/plugins/referer-guard/</code>。</p></blockquote>
+<h2 id="tutorial-目标">目标</h2>
+<p>写一个最小防盗链插件：在 <code>onAntiLeech</code> 里，Referer 不在白名单就返回含 <code>blocked</code> 的 error（→ 403）。</p>
+<h2 id="tutorial-步骤-1-建目录与清单">步骤 1 · 建目录与清单</h2>
+<pre class="code" data-lang="bash"><code>mkdir myplugin &amp;&amp; cd myplugin</code></pre>
+<p><code>plugin.json</code>：</p>
+<pre class="code" data-lang="json"><code>{
+  "name": "myplugin",
+  "title": "我的第一个插件",
+  "version": "1.0.0",
+  "author": "你",
+  "description": "Referer 在白名单外就拦截",
+  "entry": "myplugin",
+  "protocolVersion": 1,
+  "hooks": ["onAntiLeech"],
+  "permissions": ["read-download-metadata"]
+}</code></pre>
+<h2 id="tutorial-步骤-2-写-maingo">步骤 2 · 写 main.go</h2>
+<pre class="code" data-lang="go"><code>package main
+
+import (
+    "bufio"; "encoding/json"; "fmt"; "os"; "strings"
+)
+
+func main() {
+    sc := bufio.NewScanner(os.Stdin)
+    for sc.Scan() {
+        var req struct {
+            ID int64 `json:"id"`; Method string `json:"method"`; Params json.RawMessage `json:"params"`
+        }
+        if json.Unmarshal(sc.Bytes(), &amp;req) != nil { continue }
+        switch req.Method {
+        case "init":
+            reply(req, map[string]any{"ok": true, "hooks": []string{"onAntiLeech"}}, nil)
+        case "fire":
+            var p struct {
+                Hook string `json:"hook"`; Ctx map[string]any `json:"ctx"`
+            }
+            json.Unmarshal(req.Params, &amp;p)
+            allow := false
+            if ref, _ := p.Ctx["referer"].(string); strings.HasPrefix(ref, "https://trusted.example.com") {
+                allow = true
+            }
+            res := map[string]any{}
+            if !allow {
+                res["error"] = "blocked by myplugin: 外站 Referer " + fmt.Sprint(p.Ctx["referer"])
+            }
+            reply(req, res, nil)
+        case "shutdown":
+            reply(req, map[string]any{"bye": true}, nil); return
+        }
+    }
+}
+
+func reply(req struct{ ID int64 `json:"id"` }, result any, rerr any) {
+    m := map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result}
+    b, _ := json.Marshal(m)
+    os.Stdout.Write(append(b, '\n'))
+}</code></pre>
+<blockquote><p>真实项目里把协议结构（<code>request</code>/<code>response</code>/<code>initParams</code>/<code>fireParams</code>/<code>fireResult</code>）单独声明并复用，别每次手写——<code>examples/plugins/*/main.go</code> 顶部有可直接抄的版本。</p></blockquote>
+<h2 id="tutorial-步骤-3-构建">步骤 3 · 构建</h2>
+<pre class="code" data-lang="bash"><code>go build -o myplugin .          # Windows: -o myplugin.exe .</code></pre>
+<p>不限于 Go：<strong>任何语言</strong>能读写 stdin/stdout 的 JSON 行即可。只要实现了 <code>init</code>/<code>fire</code>/<code>shutdown</code> 循环，并遵守 <a href="#sec-protocol">03-协议</a> 的三条铁律。</p>
+<h2 id="tutorial-步骤-4-安装">步骤 4 · 安装</h2>
+<p>两种方式：</p>
+<ul><li><strong>本地目录</strong>（开发最方便）：管理端「插件 → 安装」，选 <code>source=local</code>，<code>path</code> 填该目录绝对路径；或直接 <code>POST /api/admin/plugins/install {&quot;source&quot;:&quot;local&quot;,&quot;path&quot;:&quot;/abs/myplugin&quot;}</code>。</li><li><strong>URL / 商店</strong>：<code>source=url</code> 填 zip 地址（仅允许 http/https）。</li></ul>
+<blockquote><p><strong>安装不会自动启用</strong>——必须显式点「启用」。这是刻意的：否则「阅读并同意插件协议」那一步形同虚设。首次进插件页会弹协议，必须<strong>滚动到底</strong>才能勾选，且后端 <code>requireAgreement</code> 强制（未同意时安装/启用接口直接 403，只靠前端弹窗可被 API 绕过）。</p></blockquote>
+<h2 id="tutorial-步骤-5-启用-配置">步骤 5 · 启用 + 配置</h2>
+<p>启用后插件进程被拉起。<code>onAntiLeech</code> 不需要配置即可工作；如果需要配置，在插件页（或 <code>PUT /api/admin/plugins/:name/config</code>）填 JSON，重启后生效。<strong>配置不要放敏感值到 <code>env</code></strong>（env 会覆盖宿主变量）。</p>
+<h2 id="tutorial-步骤-6-看日志-调试">步骤 6 · 看日志 / 调试</h2>
+<ul><li>插件日志：<code>GET /api/admin/plugins/logs?name=myplugin&amp;limit=200</code>（每插件 500 条环形缓冲）。</li><li>协议关卡失败、init 返回 <code>ok=false</code>、启动超 10s、单次 fire 超 2s、崩溃 5 次 → 都会在列表的 <code>status</code>/<code>error</code> 字段暴露。</li><li><strong>经典坑</strong>：<code>entry</code> 写成带路径的、<code>protocolVersion</code> 写错、hooks 拼错大小写 → 直接拒载，看列表错误信息即可定位。</li><li>进程外插件崩溃只杀子进程，宿主会指数退避自动重启（最长 5 分钟）。</li></ul>
+<h2 id="tutorial-进程内插件内置功能">进程内插件（内置功能）</h2>
+<p>改动要重编译主服务，适合内置能力，<strong>不适合第三方</strong>。写法：</p>
+<pre class="code" data-lang="go"><code>package plugin // backend/pkg/plugin/custom/ 下
+
+func init() {
+    Register(HookAntiLeech, func(ctx map[string]any) (map[string]any, error) {
+        defer func() { recover() }() // 必须，进程内 panic 会炸请求
+        return nil, nil
+    })
+}</code></pre>
+<p>注意：<code>ctx</code> 字段必须带类型断言（<code>ctx[&quot;userId&quot;].(uint)</code> 实际是 <code>float64</code> 会 panic）；不要在 handler 里调 <code>Register</code>（旧实现持锁会死锁）；<code>ctx</code> 被同钩子所有 handler 共享，恶意/有 bug 的插件可篡改后续所见数据。</p></section>
+<section id="sec-examples" class="section"><h1 id="examples">07 · 官方示例</h1>
+<blockquote><p>全部位于 <code>examples/plugins/</code>，每个目录含 <code>plugin.json</code> + <code>main.go</code> + <code>go.mod</code>（+ 多数有 <code>README.md</code> / <code>main_test.go</code>）。版本均为 <code>1.0.0</code>，可直接 <code>go build</code> 后本地安装。</p></blockquote>
+<div class="table-wrap"><table><thead><tr><th>示例</th><th>钩子</th><th>做什么</th></tr></thead><tbody><tr><td><a href="../../examples/plugins/referer-guard/">referer-guard</a></td><td><code>onAntiLeech</code></td><td>下载前校验 Referer，不在白名单内返回 403。支持通配符与正则模式，记录下载审计。<strong>最完整的「拦截型」范例</strong></td></tr><tr><td><a href="../../examples/plugins/download-limiter/">download-limiter</a></td><td><code>onAntiLeech</code>, <code>onCLI</code></td><td>按客户端 IP 做滑动窗口下载限流（1 分钟/1 小时双阈值），超出 403。支持登录用户豁免、分享预览豁免</td></tr><tr><td><a href="../../examples/plugins/hmac-auth/">hmac-auth</a></td><td><code>onApiAuth</code></td><td>为 <code>/api/v1/*</code> 提供 PAT/OAuth2 之外的 HMAC-SHA256 签名鉴权；校验通过认定调用者身份，签名不符或时间戳超窗一律拒绝</td></tr><tr><td><a href="../../examples/plugins/smtp-email/">smtp-email</a></td><td><code>onEmail</code></td><td>把站内通知通过 SMTP 投递到用户邮箱；支持 starttls/implicit/none 三种 TLS，中文主题正文正确编码</td></tr><tr><td><a href="../../examples/plugins/notify-webhook/">notify-webhook</a></td><td><code>onEmail</code>, <code>onCLI</code></td><td>把站内通知转发到 Slack、飞书、钉钉、Discord 或任意通用 webhook；URL 日志脱敏，超时控制，5xx 自动重试一次</td></tr><tr><td><a href="../../examples/plugins/backup-mirror/">backup-mirror</a></td><td><code>onBackup</code>, <code>onRestore</code>, <code>onCLI</code></td><td>把宿主生成的备份包流式镜像到多个异地目录，按保留数轮转，并把恢复操作追加进本地审计日志</td></tr><tr><td><a href="../../examples/plugins/collab-redirect/">collab-redirect</a></td><td><code>onCollabOpen</code>, <code>onCLI</code></td><td>按扩展名或 MIME 前缀判断文件是否交外部编辑器，命中时把协作打开 302 跳转到模板化编辑器地址（只做跳转，不代理文件、不做鉴权）</td></tr></tbody></table></div>
+<h2 id="examples-推荐阅读顺序">推荐阅读顺序</h2>
+<ol><li><strong>想写拦截型插件</strong> → <code>referer-guard</code>（看 <code>init</code>/<code>fire</code>/<code>shutdown</code> 循环 + <code>blocked</code> 用法 + ctx 数字字段的 <code>float64</code> 类型断言坑）。</li><li><strong>想写异步事件型插件</strong> → <code>smtp-email</code> / <code>notify-webhook</code>（看 <code>onEmail</code> 的 ctx 用法、网络失败重试）。</li><li><strong>想写扩展鉴权</strong> → <code>hmac-auth</code>（看 <code>onApiAuth</code> 的 <code>principalUserId</code> 放行 + 时间窗防重放 + 常量时间比较）。</li><li><strong>想写 CLI 子命令</strong> → 任意带 <code>onCLI</code> 的示例（看 <code>cliOutput</code>/<code>cliExitCode</code> 回写）。</li></ol></section>
+<section id="sec-admin" class="section"><h1 id="admin">08 · 管理端与 API</h1>
+<blockquote><p>源码：<code>backend/controllers/plugins.go</code>、<code>backend/controllers/plugin_trust.go</code></p><p>全部在 <code>/api/admin/plugins</code>，需管理员登录。</p></blockquote>
+<h2 id="admin-插件生命周期接口">插件生命周期接口</h2>
+<div class="table-wrap"><table><thead><tr><th>方法</th><th>路径</th><th>作用</th></tr></thead><tbody><tr><td>GET</td><td>``（根）</td><td>列表（含实时 <code>status</code> / <code>pid</code> / 运行 <code>error</code>）</td></tr><tr><td>GET</td><td><code>/hooks</code></td><td>钩子清单 + 真实 handler 计数（进程内 + 进程外，分开展示）</td></tr><tr><td>GET</td><td><code>/store</code></td><td>远端商店清单</td></tr><tr><td>GET</td><td><code>/agreement</code></td><td>协议全文 + 当前同意状态</td></tr><tr><td>POST</td><td><code>/agreement</code></td><td>记录同意（协议版本不匹配返回 409）</td></tr><tr><td>GET</td><td><code>/logs?name=&amp;limit=</code></td><td>插件日志（每插件 500 条环形）</td></tr><tr><td>POST</td><td><code>/install</code></td><td>安装（<code>source</code>: <code>local</code> / <code>url</code>）</td></tr><tr><td>POST</td><td><code>/:name/enable</code></td><td>启用（拉起子进程）</td></tr><tr><td>POST</td><td><code>/:name/disable</code></td><td>禁用（杀子进程）</td></tr><tr><td>POST</td><td><code>/:name/restart</code></td><td>重启（重读清单）</td></tr><tr><td>POST</td><td><code>/:name/uninstall</code></td><td>卸载（<strong>需 <code>X-Confirm-Password</code> 二次确认</strong>）</td></tr><tr><td>PUT</td><td><code>/:name/config</code></td><td>改配置（重启后生效）</td></tr></tbody></table></div>
+<h2 id="admin-插件协议关卡agreement">插件协议关卡（agreement）</h2>
+<ul><li>首次进入插件页弹窗，要求阅读并同意。</li><li><strong>必须滚动到底</strong>才能勾选——一打开就能点同意等于没要求同意。</li><li><strong>后端强制</strong>（<code>requireAgreement</code>）：未同意时安装/启用接口直接 403。只靠前端弹窗的话，直接调 API 就能绕过。</li><li>协议正文硬编码在 <code>pkg/plugin/agreement.go</code>，不从配置文件读（避免部署者改掉管理员看到的内容）。协议升级后需重新同意。</li></ul>
+<h2 id="admin-安装安全解压一个-zip-就跑起任意代码这里是唯一屏障">安装安全（解压一个 zip 就跑起任意代码，这里是唯一屏障）</h2>
+<div class="table-wrap"><table><thead><tr><th>风险</th><th>防护</th></tr></thead><tbody><tr><td>zip slip（<code>../../etc/passwd</code>）</td><td>每条目 <code>filepath.Clean</code> 后校验前缀，越界立即<strong>报错</strong>（不静默跳过）</td></tr><tr><td>zip bomb</td><td>解压总量 256MB / 单文件 64MB / 条目数 2000 三重限额</td></tr><tr><td>符号链接指向宿主文件</td><td>直接拒绝</td></tr><tr><td>Windows 保留名插件</td><td>拦截（<code>CON</code>/<code>NUL</code>/<code>COM1</code>…）</td></tr><tr><td><code>entry</code> 越界执行</td><td>禁止路径分隔符 + 运行时二次前缀校验</td></tr><tr><td>下载非 http(s)</td><td>只允许 http/https（挡掉 <code>file://</code>）</td></tr><tr><td>卸载误操作</td><td><code>RequireConfirm</code> 中间件，需二次确认密码</td></tr></tbody></table></div>
+<p>逐条实现见 <code>backend/pkg/plugin/install/install.go</code> 与 <a href="#sec-manifest">02-清单 · entry 约束</a>。</p>
+<h2 id="admin-信任管理接口签名信任">信任管理接口（签名/信任）</h2>
+<div class="table-wrap"><table><thead><tr><th>方法</th><th>路径</th><th>作用</th></tr></thead><tbody><tr><td>GET</td><td><code>/trust</code></td><td>查策略（<code>off</code>/<code>warn</code>/<code>require</code>）+ 信任库内容 + 已安装/已签名/已信任计数</td></tr><tr><td>POST</td><td><code>/trust/key</code></td><td>加一枚公钥（只收 <code>publicKey</code> 或 <code>keyId</code>；<strong>明确拒绝私钥</strong>）</td></tr><tr><td>DELETE</td><td><code>/trust/:keyId</code></td><td>移除一枚公钥（撤销的唯一手段；已安装插件不自动卸载）</td></tr><tr><td>PUT</td><td><code>/trust/mode</code></td><td>改策略；<code>require</code> 在「有存量无签名插件」时需 <code>confirm=true</code></td></tr></tbody></table></div>
+<blockquote><p>加公钥接口只接受 <code>publicKey</code>（base64，推荐）或 <code>keyId</code>——<strong>绝不接受私钥</strong>（64 字节 base64，长度即可区分）。若有人把私钥贴进来，接口会明确回拒并提示改用 <code>.pub.json</code> 里的 <code>publicKey</code>。</p></blockquote>
+<h2 id="admin-最容易被忽略的坑">最容易被忽略的坑</h2>
+<p>安装 / 启用成功后，列表会暴露「<strong>数据库说启用但进程没跑</strong>」的矛盾——管理员会看到「已启用」却毫无效果。先查列表的 <code>status</code>/<code>error</code>，再看 <code>/logs</code>；多半是 <code>entry</code> 拼错、init 返回 <code>ok=false</code>、或启动超 10s。</p></section>
+    </div>
+  </div>
+</div>
+<script>
+// 侧栏高亮：滚动到哪个 section / 子标题，就高亮对应导航项
+const groups = document.querySelectorAll('.nav-group');
+const tops = [...document.querySelectorAll('.nav-top')];
+const subs = [...document.querySelectorAll('.nav-sub li a')];
+const map = new Map();
+subs.forEach(a=>map.set(a.getAttribute('href').slice(1), a));
+tops.forEach(a=>map.set(a.getAttribute('href').slice(1), a));
+const targets = [...document.querySelectorAll('section[id^="sec-"] h2, section[id^="sec-"] h3, section[id^="sec-"]')];
+const obs = new IntersectionObserver((entries)=>{
+  entries.forEach(e=>{
+    if(e.isIntersecting){
+      const id = e.target.id;
+      map.forEach(v=>v.classList.remove('active'));
+      const el = map.get(id);
+      if(el){ el.classList.add('active');
+        const top = el.classList.contains('sub') ? el.closest('.nav-group').querySelector('.nav-top') : el;
+        top && top.classList.add('active');
+      }
+    }
+  });
+},{rootMargin:'-10% 0px -75% 0px',threshold:0});
+targets.forEach(t=>obs.observe(t));
+// 默认高亮第一项
+if(tops[0]) tops[0].classList.add('active');
+</script>
+</body>
+</html>
