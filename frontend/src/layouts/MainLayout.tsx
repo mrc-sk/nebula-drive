@@ -46,13 +46,14 @@ import NotificationBell from '../components/NotificationBell'
 import ProfileSettings from '../components/ProfileSettings'
 import PluginThemePicker from '../components/PluginThemePicker'
 import PluginSettingsPanel from '../components/PluginSettingsPanel'
+import GlobalSearch from '../components/GlobalSearch'
 import {
   normalizePageURL,
   pluginPagePath,
   shouldOpenNewTab,
   usePluginUIStore,
 } from '../store/pluginUI'
-import type { PluginSidebarItem } from '../api/client'
+import type { PluginSidebarItem, AIStatus } from '../api/client'
 import { useAuthStore } from '../store/auth'
 import { useUserPrefsStore } from '../store/user'
 import { api } from '../api/client'
@@ -82,6 +83,7 @@ const ADMIN_SUB = [
   { to: '/admin/policies', key: 'policies', Icon: Database, labelKey: 'policies' },
   { to: '/admin/plugins', key: 'plugins', Icon: Puzzle, labelKey: 'plugins' },
   { to: '/admin/settings', key: 'settings', Icon: Settings, labelKey: 'settings' },
+  { to: '/admin/ai', key: 'aiSettings', Icon: Sparkles, labelKey: 'aiSettings' },
   { to: '/admin/about', key: 'about', Icon: Info, labelKey: 'about' },
 ] as const
 
@@ -199,6 +201,46 @@ export default function MainLayout(props: MainLayoutProps) {
   )
   // 版本默认值与发布名 V26-10.0-d 对齐（后端 brand.version 同源，见 52c70a8）
   const [brand, setBrand] = useState({ name: 'NebulaDrive', author: 'NebulaDrive Team', version: '26-10.0-d' })
+  // 智能时代入口按后台开关动态显示：AI 总开关 → AI 助手，代码空间开关 → 代码空间。
+  // 没开启时不渲染入口，也不加载对应 chunk（App.tsx 里是 lazy 路由）。
+  const [aiStatus, setAiStatus] = useState<AIStatus | null>(null)
+  useEffect(() => {
+    api.ai.status().then((r) => setAiStatus(r.data)).catch(() => {})
+  }, [])
+  const aiNavItems = (collapsedSidebar: boolean, onNavigate?: () => void) => {
+    const items = [
+      ...(aiStatus?.enabled ? [{ to: '/ai', Icon: Sparkles, label: t('ai.assistant') }] : []),
+      ...(aiStatus?.codeSpaceEnabled ? [{ to: '/code', Icon: Code2, label: t('ai.codeSpace') }] : []),
+    ]
+    if (!items.length) return null
+    return (
+      <>
+        {!collapsedSidebar && (
+          <div className="mt-4 mb-1 px-3 text-[10px] uppercase tracking-wider text-slate-400">
+            {t('ai.intelligence')}
+          </div>
+        )}
+        {items.map(({ to, Icon, label }) => (
+          <NavLink
+            key={to}
+            to={to}
+            onClick={onNavigate}
+            title={collapsedSidebar ? label : undefined}
+            className={({ isActive }) =>
+              `group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
+                isActive
+                  ? 'bg-gradient-to-r from-nebula-500/30 to-cyan-glow/15 text-white shadow-inner-glow'
+                  : 'text-slate-200 hover:bg-white/10 hover:text-white'
+              } ${collapsedSidebar ? 'justify-center px-2' : ''}`
+            }
+          >
+            <Icon className="h-5 w-5 shrink-0" />
+            {!collapsedSidebar && <span className="truncate">{label}</span>}
+          </NavLink>
+        ))}
+      </>
+    )
+  }
   const userRef = useRef<HTMLDivElement>(null)
   const avatarClickTimes = useRef<number[]>([])
 
@@ -280,6 +322,8 @@ export default function MainLayout(props: MainLayoutProps) {
             {!collapsed && <span className="truncate">{t(labelKey)}</span>}
           </NavLink>
         ))}
+        {/* 智能时代：AI 助手 / 代码空间（按后台开关动态显示） */}
+        {aiNavItems(collapsed)}
         {/* 主界面侧边栏扩展点：插件在 co.BEGG 里声明 area=main / public */}
         <PluginNavItems items={mainPluginItems} collapsed={collapsed} />
         {isAdmin && (
@@ -361,6 +405,7 @@ export default function MainLayout(props: MainLayoutProps) {
             items={mainPluginItems}
             onNavigate={() => setMobileOpen(false)}
           />
+          {aiNavItems(false, () => setMobileOpen(false))}
           {isAdmin && (
             <>
               <div className="mt-4 mb-1 px-3 text-[10px] uppercase tracking-wider text-slate-400">
@@ -407,7 +452,7 @@ export default function MainLayout(props: MainLayoutProps) {
         </button>
       ) : null}
       {breadcrumb && breadcrumb.length > 0 ? (
-        <div className="flex min-w-0 flex-1 flex-wrap items-center text-sm">
+        <div className="flex min-w-0 flex-wrap items-center text-sm">
           {breadcrumb.map((b, i) => (
             <span key={i} className={`flex items-center ${i < breadcrumb.length - 1 ? 'crumb-sep' : ''}`}>
               <button
@@ -435,9 +480,9 @@ export default function MainLayout(props: MainLayoutProps) {
             </button>
           ) : null}
         </div>
-      ) : (
-        <div className="flex-1" />
-      )}
+      ) : null}
+      {/* 全局智能搜索：后端 10 维检索 + 联想 / 历史 / 近期常用 / 热门 */}
+      <GlobalSearch />
       {toolbar}
       <ThemeToggle />
       <PluginThemePicker />

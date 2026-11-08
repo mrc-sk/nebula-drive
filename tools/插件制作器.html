@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NebulaDrive 插件制作器 · 一键构建</title>
+<style>
+:root{
+  --bg:#0b1020; --bg2:#111830; --panel:#151d38; --panel2:#1b2445;
+  --line:#2a3560; --txt:#e6ecff; --muted:#8d9cc4; --pri:#22d3ee; --pri2:#0ea5e9;
+  --ok:#34d399; --warn:#fbbf24; --err:#f87171; --purple:#a78bfa;
+  --radius:12px; --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;overflow:hidden}
+button,input,select,textarea{font-family:inherit}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:#33406e;border-radius:6px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- 顶栏 ---------- */
+header{height:60px;display:flex;align-items:center;gap:14px;padding:0 18px;border-bottom:1px solid var(--line);background:linear-gradient(90deg,#101734,#0d142c)}
+.logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:16px;white-space:nowrap}
+.logo .mark{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--pri),#6366f1);display:grid;place-items:center;font-size:15px;box-shadow:0 0 18px #22d3ee55}
+.logo small{color:var(--muted);font-weight:400;font-size:11px}
+.hsep{width:1px;height:26px;background:var(--line)}
+.tpl{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px}
+select,input[type=text],input[type=number],textarea{
+  background:var(--bg2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 10px;outline:none;font-size:13px
+}
+select:focus,input:focus,textarea:focus{border-color:var(--pri);box-shadow:0 0 0 2px #22d3ee22}
+.btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:8px 13px;cursor:pointer;font-size:13px;white-space:nowrap;transition:.15s;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--pri);background:#20305c}
+.btn.primary{background:linear-gradient(135deg,var(--pri2),#6366f1);border:none;color:#fff;font-weight:600;box-shadow:0 3px 14px #0ea5e944}
+.btn.primary:hover{filter:brightness(1.12)}
+.btn.ghost{background:transparent}
+.btn.sm{padding:5px 9px;font-size:12px}
+.spacer{flex:1}
+.tabs{display:flex;gap:3px;background:var(--bg2);padding:3px;border-radius:10px;border:1px solid var(--line)}
+.tab{padding:6px 15px;border-radius:7px;cursor:pointer;font-size:13px;color:var(--muted);border:none;background:transparent}
+.tab.on{background:var(--panel2);color:var(--pri);font-weight:600}
+
+/* ---------- 布局 ---------- */
+.wrap{height:calc(100% - 60px);display:flex;flex-direction:column}
+.view{flex:1;min-height:0;display:none}
+.view.on{display:flex}
+.col{display:flex;flex-direction:column;min-height:0}
+.side{width:236px;flex-shrink:0;border-right:1px solid var(--line);background:var(--bg2);overflow:auto}
+.side.right{width:288px;border-right:none;border-left:1px solid var(--line)}
+.center{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg)}
+.sec-title{padding:11px 14px 7px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--bg2);z-index:2;border-bottom:1px solid #ffffff08}
+
+/* 控件库 */
+.palette{padding:8px 10px 20px}
+.pgroup{margin-bottom:12px}
+.pgroup h4{margin:0 0 6px;font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.05em}
+.pitem{display:flex;align-items:center;gap:9px;padding:8px 10px;margin-bottom:5px;background:var(--panel);border:1px solid var(--line);border-radius:9px;cursor:grab;font-size:12.5px;transition:.14s;user-select:none}
+.pitem:hover{border-color:var(--pri);transform:translateX(2px);background:var(--panel2)}
+.pitem:active{cursor:grabbing}
+.pitem .ic{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:12px;background:#22d3ee1a;color:var(--pri);flex-shrink:0}
+.pitem .sub{color:var(--muted);font-size:10.5px;margin-left:auto}
+
+/* 画布 */
+.canvas-bar{padding:9px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px;background:var(--bg2);flex-shrink:0}
+.canvas-bar .hint{color:var(--muted);font-size:12px}
+.canvas{flex:1;overflow:auto;padding:14px}
+.dropzone{min-height:100%;border:1.5px dashed var(--line);border-radius:var(--radius);padding:14px;transition:.15s}
+.dropzone.over{border-color:var(--pri);background:#22d3ee08}
+.empty{text-align:center;color:var(--muted);padding:48px 12px;font-size:13px}
+.empty .big{font-size:34px;opacity:.45;display:block;margin-bottom:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer;display:flex;align-items:flex-start;gap:10px;transition:.14s;position:relative}
+.card:hover{border-color:#4a5a95}
+.card.sel{border-color:var(--pri);background:#16234a;box-shadow:0 0 0 1px #22d3ee33}
+.card.drag{opacity:.4}
+.card .grip{cursor:grab;color:var(--muted);font-size:14px;padding-top:2px;user-select:none}
+.card .body{flex:1;min-width:0}
+.card .t{font-weight:600;font-size:13px;display:flex;align-items:center;gap:7px}
+.card .d{color:var(--muted);font-size:11.5px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip{font-size:10px;padding:1px 7px;border-radius:20px;background:#22d3ee1c;color:var(--pri);border:1px solid #22d3ee44;font-weight:500}
+.chip.g{background:#34d39918;color:var(--ok);border-color:#34d39944}
+.chip.p{background:#a78bfa18;color:var(--purple);border-color:#a78bfa44}
+.chip.y{background:#fbbf2418;color:var(--warn);border-color:#fbbf2444}
+.card .ops{display:flex;gap:3px;opacity:.55}
+.card:hover .ops{opacity:1}
+.iconbtn{border:none;background:transparent;color:var(--muted);cursor:pointer;padding:2px 5px;border-radius:5px;font-size:12px}
+.iconbtn:hover{background:#ffffff12;color:var(--txt)}
+.iconbtn.del:hover{color:var(--err)}
+
+/* 属性面板 */
+.inspect{padding:10px 12px 40px;overflow:auto;flex:1}
+.field{margin-bottom:11px}
+.field label{display:block;font-size:11.5px;color:var(--muted);margin-bottom:4px;font-weight:600}
+.field label b{color:var(--pri);font-weight:600}
+.field input,.field select,.field textarea{width:100%}
+.field textarea{min-height:64px;resize:vertical;font-family:var(--mono);font-size:12px}
+.field .help{font-size:10.5px;color:var(--muted);margin-top:3px;line-height:1.45}
+.inspect .none{color:var(--muted);text-align:center;padding:40px 8px;font-size:12.5px}
+.kv{display:flex;gap:5px;margin-bottom:5px}
+.kv input{flex:1;min-width:0}
+.section-box{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:12px;background:#ffffff04}
+.section-box h5{margin:0 0 9px;font-size:12px;color:var(--pri)}
+
+/* 预览 */
+.preview-bar{padding:7px 14px;background:var(--bg2);border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);display:flex;gap:12px;align-items:center}
+.preview{flex:1;overflow:auto;padding:16px;background:#0a0f1e}
+.pv-shell{border:1px solid var(--line);border-radius:12px;overflow:hidden;max-width:900px;margin:0 auto;background:#0f1630}
+.pv-top{height:40px;background:#141d3c;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;padding:0 13px;font-size:12px}
+.pv-dot{width:9px;height:9px;border-radius:50%}
+.pv-main{display:flex;min-height:340px}
+.pv-side{width:170px;border-right:1px solid var(--line);padding:10px 8px;background:#0d1530}
+.pv-side .ttl{font-size:10px;color:var(--muted);padding:4px 8px;text-transform:uppercase;letter-spacing:.1em}
+.pv-nav{padding:7px 9px;border-radius:7px;font-size:12px;display:flex;gap:8px;align-items:center;margin-bottom:2px;color:#b9c6ee}
+.pv-nav.plugin{background:#22d3ee14;color:var(--pri);border:1px dashed #22d3ee55}
+.pv-nav.static{opacity:.55}
+.pv-content{flex:1;padding:16px;min-width:0}
+.widget{margin-bottom:10px}
+.widget h1,.widget h2,.widget h3{margin:0 0 6px;color:var(--txt)}
+.pv-card{border:1px solid var(--line);border-radius:10px;padding:12px;background:#141d3c}
+.pv-btn{display:inline-block;padding:7px 14px;border-radius:8px;background:linear-gradient(135deg,var(--pri2),#6366f1);color:#fff;font-size:12px}
+.pv-input{display:block;width:100%;max-width:280px;background:#0b1020;border:1px solid var(--line);border-radius:7px;padding:7px 10px;color:var(--txt);font-size:12px}
+.pv-stat{font-size:24px;font-weight:700;color:var(--pri)}
+.pv-table{width:100%;border-collapse:collapse;font-size:12px}
+.pv-table td,.pv-table th{border:1px solid var(--line);padding:6px 9px;text-align:left}
+.pv-table th{color:var(--muted);background:#141d3c}
+.pv-alert{padding:9px 12px;border-radius:8px;background:#fbbf2415;border:1px solid #fbbf2455;color:var(--warn);font-size:12px}
+.pv-divider{height:1px;background:var(--line);margin:12px 0}
+.pv-theme-swatch{display:inline-block;width:16px;height:16px;border-radius:4px;vertical-align:-3px;margin-right:5px;border:1px solid #ffffff22}
+
+/* 代码模式 */
+.code-wrap{flex:1;display:flex;flex-direction:column;min-height:0}
+.filetabs{display:flex;gap:2px;padding:8px 12px 0;background:var(--bg2);border-bottom:1px solid var(--line);overflow-x:auto}
+.filetab{padding:8px 14px;border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;cursor:pointer;font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
+.filetab.on{background:var(--bg);color:var(--pri);border-color:var(--line)}
+.filetab.dirty::after{content:'●';color:var(--warn);font-size:9px;margin-left:6px;vertical-align:2px}
+.code-tool{padding:7px 13px;display:flex;align-items:center;gap:8px;background:var(--bg);border-bottom:1px solid var(--line);font-size:11.5px;color:var(--muted)}
+.editor{flex:1;min-height:0;position:relative}
+.editor textarea{position:absolute;inset:0;width:100%;height:100%;border:none;border-radius:0;padding:14px 16px;background:var(--bg);color:#cfe0ff;font-family:var(--mono);font-size:12.5px;line-height:1.65;resize:none;tab-size:2}
+.code-status{font-size:11px;padding:5px 13px;background:var(--bg2);border-top:1px solid var(--line);color:var(--muted)}
+
+/* 校验 / 构建 */
+.pane{flex:1;overflow:auto;padding:18px 22px 60px}
+.pane h3{margin:0 0 6px;font-size:16px}
+.pane .lead{color:var(--muted);font-size:12.5px;margin-bottom:18px}
+.check{display:flex;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:7px;background:var(--panel);align-items:flex-start}
+.check .st{width:19px;height:19px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;flex-shrink:0;margin-top:1px}
+.check.ok .st{background:#34d39922;color:var(--ok);border:1px solid #34d39955}
+.check.bad .st{background:#f8717122;color:var(--err);border:1px solid #f8717155}
+.check.warn .st{background:#fbbf2422;color:var(--warn);border:1px solid #fbbf2455}
+.check .txt{flex:1;font-size:12.5px}
+.check .txt b{display:block;font-size:13px;margin-bottom:1px}
+.check .txt span{color:var(--muted);font-size:11.5px}
+.summary{padding:12px 15px;border-radius:10px;margin-bottom:16px;font-size:13px;font-weight:600}
+.summary.ok{background:#34d39915;border:1px solid #34d39955;color:var(--ok)}
+.summary.bad{background:#f8717115;border:1px solid #f8717155;color:var(--err)}
+.tree{font-family:var(--mono);font-size:12.5px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:16px;line-height:1.9;white-space:pre;overflow:auto}
+.tree .dir{color:var(--pri)}
+.tree .file{color:#cfe0ff}
+.tree .note{color:var(--muted)}
+.filelist{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:16px}
+.filepill{font-family:var(--mono);font-size:11.5px;padding:6px 11px;border:1px solid var(--line);border-radius:8px;background:var(--panel);cursor:pointer}
+.filepill:hover{border-color:var(--pri);color:var(--pri)}
+.filepill.on{background:#22d3ee18;border-color:var(--pri);color:var(--pri)}
+pre.codebox{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto;font-family:var(--mono);font-size:12px;line-height:1.6;max-height:420px;color:#cfe0ff;margin:0}
+.note-box{background:#fbbf240d;border:1px solid #fbbf2444;border-radius:10px;padding:12px 15px;color:#e8d5a3;font-size:12.5px;margin-bottom:16px;line-height:1.7}
+
+/* 钩子选择器 */
+.hooksearch{width:100%;margin-bottom:8px}
+.hooklist{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:9px}
+.hgroup{padding:6px 9px;background:#0e1632;color:var(--muted);font-size:10.5px;letter-spacing:.08em;position:sticky;top:0;border-bottom:1px solid var(--line)}
+.hrow{display:flex;align-items:flex-start;gap:8px;padding:7px 10px;border-bottom:1px solid #ffffff08;cursor:pointer;font-size:12px}
+.hrow:hover{background:#ffffff08}
+.hrow input{margin-top:3px;accent-color:var(--pri)}
+.hrow .hn{font-family:var(--mono);font-size:11.5px;color:#bcd4ff;white-space:nowrap}
+.hrow .hd{color:var(--muted);font-size:11px;line-height:1.45}
+.hrow .badges{display:flex;gap:4px;margin-left:auto;flex-shrink:0}
+.badge{font-size:9px;padding:1px 5px;border-radius:4px;background:#ffffff10;color:var(--muted)}
+.badge.s{background:#a78bfa20;color:var(--purple)}
+.badge.b{background:#f8717120;color:var(--err)}
+.badge.m{background:#34d39920;color:var(--ok)}
+
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--panel2);border:1px solid var(--pri);color:var(--txt);padding:10px 18px;border-radius:10px;font-size:13px;box-shadow:0 8px 30px #0008;transition:.25s;z-index:99;opacity:0}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.modal-bg{position:fixed;inset:0;background:#0009;display:none;place-items:center;z-index:50;padding:20px}
+.modal-bg.show{display:grid}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;max-width:560px;width:100%;max-height:82vh;overflow:auto}
+.modal h3{margin:0 0 12px}
+.modal .row{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><span class="mark">◈</span> 插件制作器 <small>v2 · 一键构建</small></div>
+  <div class="hsep"></div>
+  <div class="tpl">模板
+    <select id="tplSel" onchange="applyTemplate(this.value)">
+      <option value="php">PHP 面板（ASS 目录）</option>
+      <option value="python">Python 数据看板</option>
+      <option value="node">Node 页面服务</option>
+      <option value="external">外部 HTTPS 页面</option>
+      <option value="theme">主题 + 设置面板</option>
+      <option value="hooks">纯钩子插件（JSON-RPC）</option>
+      <option value="blank">空白工程</option>
+    </select>
+  </div>
+  <button class="btn ghost sm" onclick="importProject()">导入工程</button>
+  <button class="btn ghost sm" onclick="exportProject()">导出工程</button>
+  <div class="spacer"></div>
+  <div class="tabs">
+    <button class="tab on" data-v="design" onclick="switchView('design')">设计</button>
+    <button class="tab" data-v="code" onclick="switchView('code')">代码</button>
+    <button class="tab" data-v="check" onclick="switchView('check')">校验</button>
+    <button class="tab" data-v="build" onclick="switchView('build')">构建</button>
+  </div>
+  <button class="btn primary" onclick="buildZip()">⬇ 一键构建 ZIP</button>
+</header>
+
+<div class="wrap">
+  <!-- ============ 设计视图 ============ -->
+  <div class="view on" id="v-design">
+    <div class="side col">
+      <div class="sec-title">控件库 <span style="text-transform:none;letter-spacing:0">拖到中间</span></div>
+      <div class="palette" id="palette"></div>
+    </div>
+    <div class="center col">
+      <div class="canvas-bar">
+        <div class="tabs" style="padding:2px">
+          <button class="tab on" id="cvStruct" onclick="switchCanvas('struct')">插件结构</button>
+          <button class="tab" id="cvPage" onclick="switchCanvas('page')">页面设计</button>
+        </div>
+        <span class="hint" id="canvasHint">拖动控件到此处，或点击左侧「+」添加</span>
+        <div class="spacer"></div>
+        <button class="btn sm" onclick="togglePreview()" id="pvBtn">隐藏预览</button>
+      </div>
+      <div class="canvas"><div class="dropzone" id="dropzone"></div></div>
+      <div id="previewPanel" class="col" style="height:38%;border-top:1px solid var(--line);flex-shrink:0">
+        <div class="preview-bar"><b>实时预览</b><span>· 模拟宿主侧边栏与插件页面（iframe 内容）</span><span class="spacer"></span><span id="pvTheme"></span></div>
+        <div class="preview"><div class="pv-shell" id="pvShell"></div></div>
+      </div>
+    </div>
+    <div class="side right col">
+      <div class="sec-title">属性 <span id="selName" style="text-transform:none;letter-spacing:0;color:var(--pri)">未选中</span></div>
+      <div class="inspect" id="inspect"><div class="none">点击左侧控件或画布中的卡片<br>在这里编辑属性</div></div>
+    </div>
+  </div>
+
+  <!-- ============ 代码视图 ============ -->
+  <div class="view" id="v-code">
+    <div class="code-wrap col">
+      <div class="filetabs" id="filetabs"></div>
+      <div class="code-tool">
+        <span>直接编辑源码；改动会覆盖自动生成内容（带 ● 标记）。</span>
+        <div class="spacer"></div>
+        <button class="btn sm" onclick="syncCodeToModel()">同步回设计</button>
+        <button class="btn sm" onclick="resetCode()">重置本文件</button>
+      </div>
+      <div class="editor"><textarea id="editor" spellcheck="false" oninput="onCodeEdit()"></textarea></div>
+      <div class="code-status" id="codeStatus">自动生成 · 与宿主 v2 契约一致</div>
+    </div>
+  </div>
+
+  <!-- ============ 校验视图 ============ -->
+  <div class="view" id="v-check">
+    <div class="pane" style="flex:1">
+      <h3>契约校验</h3>
+      <div class="lead">逐条复刻宿主 <code>ParseManifest</code> / <code>ParseGoDecl</code> / <code>ParseBegg</code> / <code>crossCheck</code> / <code>ValidateFiles</code> / <code>verifyEntry</code> 的规则。构建前请确认全部通过。</div>
+      <div id="checkResult"></div>
+    </div>
+  </div>
+
+  <!-- ============ 构建视图 ============ -->
+  <div class="view" id="v-build">
+    <div class="pane" style="flex:1">
+      <h3>构建插件包</h3>
+      <div class="lead">生成的目录可直接解压到 <code>plugins/&lt;name&gt;/</code>。安装器递归定位三文件，不挑目录层级。</div>
+      <div class="note-box" id="buildNotes"></div>
+      <div class="tree" id="tree"></div>
+      <div class="filelist" id="filepills"></div>
+      <pre class="codebox" id="filebox">点击上方文件名查看内容</pre>
+      <div style="margin-top:16px;display:flex;gap:9px;flex-wrap:wrap">
+        <button class="btn primary" onclick="buildZip()">⬇ 下载插件 ZIP</button>
+        <button class="btn" onclick="copyAll()">复制全部文件（JSON）</button>
+        <button class="btn" onclick="exportProject()">保存工程文件</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept=".json" style="display:none" onchange="onImportFile(event)">
+<div class="toast" id="toast"></div>
+<div class="modal-bg" id="modalBg"><div class="modal" id="modalBox"></div></div>
+
+<script>
+/* ==================== 数据 ==================== */
+const HOOKS = [{"name":"onBoot","group":"system","groupLabel":"系统生命周期","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"bootstrap 完成后触发（DB/迁移/JWT/插件宿主均就绪）。每次启动一次。ctx={version,protocolVersion,dataDir,siteURL}"},{"name":"onShutdown","group":"system","groupLabel":"系统生命周期","mode":"sync","blockable":false,"mutatable":false,"since":2,"doc":"收到退出信号后、宿主关闭前触发。插件应在此 flush 缓冲。ctx={reason}"},{"name":"onConfigChanged","group":"system","groupLabel":"系统生命周期","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"后台保存站点设置后触发。ctx={operatorId,operatorName,changed}"},{"name":"onDBMigrate","group":"system","groupLabel":"系统生命周期","mode":"async","blockable":false,"mutatable":false,"since":1,"doc":"AutoMigrate 与版本化迁移完成后触发，每次启动都会触发。插件建表必须幂等。ctx={fromVersion,toVersion}"},{"name":"onScheduledTick","group":"system","groupLabel":"系统生命周期","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"宿主定时心跳（每 5 分钟）。插件可据此做周期任务，无需另起进程。ctx={tick,at}"},{"name":"onHealthCheck","group":"system","groupLabel":"系统生命周期","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"GET /api/health 时触发。写 ctx.checks 追加健康项，写 ctx.healthy=false 可返回 503。"},{"name":"onRequestBefore","group":"request","groupLabel":"HTTP 请求","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"所有 /api 请求进入业务前触发。可拦截（WAF/维护模式）、可改写上下文。ctx={method,path,ip,ua,userId,userName,requestId}"},{"name":"onRequestAfter","group":"request","groupLabel":"HTTP 请求","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"请求完成后触发。ctx={method,path,status,durationMs,userId,requestId}"},{"name":"onOpenAPIRequest","group":"request","groupLabel":"HTTP 请求","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"/api/v1/* 开放接口专用，APIAuth 之后触发。ctx={method,path,clientId,userId,scope,ip}"},{"name":"onAuthBeforeLogin","group":"auth","groupLabel":"认证与会话","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"校验密码之前触发。可拦截；写 ctx.provider 切换注册型认证源、写 ctx.username 改写登录名。"},{"name":"onAuthProviderResolve","group":"auth","groupLabel":"认证与会话","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"注册型(auth)：外部认证源校验。插件写 ctx.ok=true 放行，可附 ctx.claims 注入身份信息。"},{"name":"onAuthLoginSuccess","group":"auth","groupLabel":"认证与会话","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"登录成功、会话建立后触发。ctx={userId,userName,ip,ua}"},{"name":"onAuthLoginFailed","group":"auth","groupLabel":"认证与会话","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"登录失败触发（含被钩子拦截）。ctx 不含密码。ctx={username,ip,ua,reason}"},{"name":"onAuthLogout","group":"auth","groupLabel":"认证与会话","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"登出触发，可联动外置 SSO 单点登出。ctx={userId,userName,ip}"},{"name":"onAuthRegisterBefore","group":"auth","groupLabel":"认证与会话","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"注册写入前触发。可拦截；写 ctx.email/ctx.groupId 实现自动分组。"},{"name":"onAuthRegisterAfter","group":"auth","groupLabel":"认证与会话","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"注册成功后触发。用于欢迎邮件、初始空间分配。ctx={userId,userName,email}"},{"name":"onAuthPasswordChange","group":"auth","groupLabel":"认证与会话","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"修改密码成功后触发。ctx 不含任何密码或哈希。"},{"name":"onAuth2FAVerify","group":"auth","groupLabel":"认证与会话","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"2FA 设置/验证时触发，stage=setup|confirm|login。可拦截以接入硬件密钥。"},{"name":"onAuthTokenIssue","group":"auth","groupLabel":"认证与会话","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"JWT 签发前触发。写 ctx.claims 注入自定义 claim、改 ctx.ttl 调有效期。"},{"name":"onPermissionCheck","group":"user","groupLabel":"用户与权限","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"鉴权中间件通过身份校验后触发。可拦截实现 ABAC/部门级权限。高频，走轻量门。"},{"name":"onUserCreate","group":"user","groupLabel":"用户与权限","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"管理员创建用户后触发。ctx={operatorId,userId,userName,groupId}"},{"name":"onUserUpdate","group":"user","groupLabel":"用户与权限","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"管理员修改用户后触发。ctx={operatorId,userId,changed}"},{"name":"onUserDelete","group":"user","groupLabel":"用户与权限","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"管理员删除用户后触发，可做外部账号回收。"},{"name":"onUserQuotaChange","group":"user","groupLabel":"用户与权限","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"计算有效配额时触发。写 ctx.maxStorage 覆盖额度（对接外部计费）。source=plan|group|fallback"},{"name":"onGroupChange","group":"user","groupLabel":"用户与权限","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"用户组增删改后触发，action=create|update|delete。"},{"name":"onFileTypePolicy","group":"content","groupLabel":"内容治理","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"扩展名白名单判定时触发。写 ctx.allowed 覆盖判定，实现按用户/目录的类型策略。"},{"name":"onFileUploadBefore","group":"file","groupLabel":"文件管理","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"上传落盘前触发。可拦截；写 ctx.fileName 重命名、ctx.policyId 改存储策略、ctx.parentId 改归档位置。HTTP/分片/WebDAV/开放 API 共用。"},{"name":"onFileUploadAfter","group":"file","groupLabel":"文件管理","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"文件落盘后触发。同步可拦截：deny 时宿主回滚记录与引用，用于病毒扫描不通过即拒绝。可写 ctx.tags 自动打标签。"},{"name":"onFileUploadFailed","group":"file","groupLabel":"文件管理","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"上传失败（校验/落盘/被拦截）后触发。ctx={userId,fileName,size,reason}"},{"name":"onFileRapidBefore","group":"file","groupLabel":"文件管理","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"秒传命中前触发。可拦截以禁用特定用户/哈希的秒传。"},{"name":"onFileChunkInit","group":"file","groupLabel":"文件管理","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"分片上传会话创建前触发。可拦截大文件、限制分片数。"},{"name":"onFileChunkComplete","group":"file","groupLabel":"文件管理","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"分片合并完成后触发。mergedSize 是实际落盘字节数（非客户端声明值）。"},{"name":"onFileDownloadBefore","group":"file","groupLabel":"文件管理","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"登录用户下载前触发。可拦截；写 ctx.fileName 改下载名、ctx.headers 注入响应头。高频，走轻量门。"},{"name":"onAntiLeech","group":"file","groupLabel":"文件管理","mode":"sync","blockable":true,"mutatable":false,"since":1,"doc":"【v1 兼容】登录用户下载前防盗链，error 含 \"blocked\" 即 403。语义不变；新插件建议用 onFileDownloadBefore。公开分享下载不走本钩子。"},{"name":"onFileDownloadAfter","group":"file","groupLabel":"文件管理","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"下载响应结束后触发，bytes 为实际发送字节数。用于流量计费。"},{"name":"onFilePreview","group":"file","groupLabel":"文件管理","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"在线预览前触发。注册型(preview)：写 ctx.redirect 接管预览，宿主 302 过去。"},{"name":"onFileThumb","group":"file","groupLabel":"文件管理","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"缩略图生成/命中后触发。ctx={fileId,fileName,width,height,cacheHit}"},{"name":"onFileRename","group":"file","groupLabel":"文件管理","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"重命名前触发。写 ctx.newName 可规范化命名（去敏感词、加前缀）。"},{"name":"onFileMove","group":"file","groupLabel":"文件管理","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"移动前触发。可拦截实现「禁止移出部门目录」。"},{"name":"onFileCopy","group":"file","groupLabel":"文件管理","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"批量复制前触发，ctx.fileIds 为 ID 列表。"},{"name":"onFileDelete","group":"file","groupLabel":"文件管理","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"删除（移入回收站）前触发。可拦截实现合规保留期锁定。"},{"name":"onFileRestore","group":"file","groupLabel":"文件管理","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"从回收站恢复后触发。"},{"name":"onFilePurge","group":"file","groupLabel":"文件管理","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"彻底删除（Purge/回收站自动清理）前触发。可拦截实现法务保全。"},{"name":"onFileVersionCreate","group":"file","groupLabel":"文件管理","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"新版本归档后触发。ctx={userId,fileId,version,size}"},{"name":"onFileVersionRestore","group":"file","groupLabel":"文件管理","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"恢复历史版本前触发，可拦截实现版本审批。"},{"name":"onFileTagChange","group":"file","groupLabel":"文件管理","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"标签增删改后触发，action=add|remove|update。"},{"name":"onContentScan","group":"content","groupLabel":"内容治理","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"注册型(contentScan)：上传完成后、对外可见前触发。写 ctx.verdict=\"reject\" 即拦截并回滚；可写 ctx.labels/ctx.tags 回填分类。"},{"name":"onContentHashCheck","group":"content","groupLabel":"内容治理","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"计算完哈希后触发。可拦截实现违规文件哈希黑名单。"},{"name":"onContentReport","group":"content","groupLabel":"内容治理","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"用户提交举报（POST /api/reports）后触发。宿主只落库不做判定。"},{"name":"onShareCreateBefore","group":"share","groupLabel":"分享","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"创建分享前触发。可拦截；改写 ctx.expireAt/ctx.extractCode 强制站点级分享策略。"},{"name":"onShareCreateAfter","group":"share","groupLabel":"分享","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"分享创建成功后触发，ctx.url 为完整分享链接。"},{"name":"onShareAccess","group":"share","groupLabel":"分享","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"访问公开分享页时触发（未认证）。可拦截实现地区限制、风控。"},{"name":"onShareVerify","group":"share","groupLabel":"分享","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"校验提取码/密码时触发。写 ctx.ok 放行自定义凭证或额外拒绝。ctx 不含明文密码。"},{"name":"onShareDownloadBefore","group":"share","groupLabel":"分享","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"公开分享下载/预览前触发，补上 v1 onAntiLeech 覆盖不到的公开分享盲区（防盗链/限速/次数）。"},{"name":"onShareDelete","group":"share","groupLabel":"分享","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"分享删除后触发。"},{"name":"onShareExpire","group":"share","groupLabel":"分享","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"定时心跳检测到分享过期时触发。"},{"name":"onTaskCreateBefore","group":"task","groupLabel":"离线下载","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"离线下载任务创建前触发。可拦截（URL 黑名单/BT 禁用）；写 ctx.url 做镜像改写。宿主出站 IP 校验在其后执行。"},{"name":"onTaskCreateAfter","group":"task","groupLabel":"离线下载","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"任务入库后触发。"},{"name":"onTaskComplete","group":"task","groupLabel":"离线下载","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"离线下载完成并归档为文件后触发。"},{"name":"onTaskFailed","group":"task","groupLabel":"离线下载","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"任务失败后触发。ctx={userId,taskId,reason}"},{"name":"onTaskCancel","group":"task","groupLabel":"离线下载","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"任务取消后触发。"},{"name":"onWebDAVRequest","group":"webdav","groupLabel":"WebDAV","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"每个 WebDAV 方法进入前触发。可拦截实现方法级白名单、只读模式。"},{"name":"onWebDAVPropfind","group":"webdav","groupLabel":"WebDAV","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"PROPFIND 组装响应前触发。写 ctx.props 注入自定义 DAV 属性。"},{"name":"onWebDAVPut","group":"webdav","groupLabel":"WebDAV","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"WebDAV PUT 写入前触发（协议层，可见原始 DAV 路径）。"},{"name":"onWebDAVDelete","group":"webdav","groupLabel":"WebDAV","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"WebDAV DELETE 前触发。"},{"name":"onWebDAVLock","group":"webdav","groupLabel":"WebDAV","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"LOCK/UNLOCK 前触发，operation=lock|unlock。可拦截实现外置锁协调。"},{"name":"onStorageResolve","group":"storage","groupLabel":"存储与策略","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"注册型(storage)：filesystem.New 遇到未知策略类型时触发。写 ctx.handled=true + ctx.plugin 让宿主改走代理读写。"},{"name":"onStorageBeforeWrite","group":"storage","groupLabel":"存储与策略","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"物理对象写入前触发。可拦截实现写入审计、加密前置。"},{"name":"onStorageAfterWrite","group":"storage","groupLabel":"存储与策略","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"物理对象写入后触发。用于跨区复制、WORM 归档。"},{"name":"onStorageBeforeRead","group":"storage","groupLabel":"存储与策略","mode":"sync","blockable":true,"mutatable":false,"since":2,"doc":"物理对象读取前触发。可拦截实现冷存储解冻、按用户限流。"},{"name":"onStoragePolicyChange","group":"storage","groupLabel":"存储与策略","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"存储策略增删改后触发，action=create|update|delete。"},{"name":"onCollabOpen","group":"collab","groupLabel":"协作编辑","mode":"sync","blockable":false,"mutatable":true,"since":1,"doc":"【v1 兼容】打开协作编辑时触发。写 ctx.url 则 302 跳转（OnlyOffice 等）。v2 语义不变。"},{"name":"onCollabSave","group":"collab","groupLabel":"协作编辑","mode":"async","blockable":false,"mutatable":false,"since":1,"doc":"【v1 兼容】保存协作内容时触发，仅通知。content 是完整明文，大文件占内存。"},{"name":"onCollabConnect","group":"collab","groupLabel":"协作编辑","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"协作 WebSocket 建立连接后触发。"},{"name":"onCollabDisconnect","group":"collab","groupLabel":"协作编辑","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"协作 WebSocket 断开后触发。"},{"name":"onEmail","group":"notify","groupLabel":"通知与邮件","mode":"async","blockable":false,"mutatable":false,"since":1,"doc":"【v1 兼容】创建站内通知时触发，邮箱为空则不触发。系统不含发信实现，此钩子是邮件外发入口之一。"},{"name":"onNotificationSend","group":"notify","groupLabel":"通知与邮件","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"注册型(notify)：站内通知落库前触发。写 ctx.channel 切渠道、ctx.delivered=true 表示已由插件投递。"},{"name":"onNotificationRead","group":"notify","groupLabel":"通知与邮件","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"通知标记已读后触发。"},{"name":"onCodeRedeemBefore","group":"billing","groupLabel":"套餐与付费","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"兑换码核销前触发。可拦截；写 ctx.planId 改写实际到账套餐。"},{"name":"onCodeRedeemAfter","group":"billing","groupLabel":"套餐与付费","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"兑换成功后触发。"},{"name":"onPlanSubscribe","group":"billing","groupLabel":"套餐与付费","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"用户订阅生效后触发，source=redeem|payment|admin。"},{"name":"onPlanExpire","group":"billing","groupLabel":"套餐与付费","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"定时心跳检测到订阅过期时触发。"},{"name":"onPaymentCallback","group":"billing","groupLabel":"套餐与付费","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"注册型(payment)：POST /api/pay/callback/:provider 命中时触发。插件验签并写 ctx.status/userId/planId，宿主据此开通。"},{"name":"onAuditLog","group":"audit","groupLabel":"审计与统计","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"写操作（POST/PUT/DELETE /api）完成后触发。用于审计外送、SIEM 对接。"},{"name":"onStatsCollect","group":"audit","groupLabel":"审计与统计","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"后台统计取数时触发。插件可写 ctx.traffic/fileTypes/activity 提供数据 —— 这是让三个图表真正有数据的实现方式。"},{"name":"onDashboardQuery","group":"audit","groupLabel":"审计与统计","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"后台 KPI 查询时触发。写 ctx.cards 追加自定义指标卡片。"},{"name":"onBackup","group":"backup","groupLabel":"备份与恢复","mode":"sync","blockable":false,"mutatable":true,"since":1,"doc":"POST /api/admin/backup 触发。注册型(backup)：插件导出到 ctx.target 并写 ctx.result。宿主不做备份实现，只鉴权+审计。"},{"name":"onRestore","group":"backup","groupLabel":"备份与恢复","mode":"sync","blockable":true,"mutatable":true,"since":1,"doc":"POST /api/admin/restore 触发。插件从 ctx.source 恢复并写 ctx.result。dryRun=true 只校验不写入。需二次确认。"},{"name":"onApiAuth","group":"api","groupLabel":"开放 API 与 CLI","mode":"sync","blockable":true,"mutatable":true,"since":1,"doc":"middleware.APIAuth 校验 PAT/OAuth token 后触发。可拦截实现细粒度授权；写 ctx.claims 注入身份信息。"},{"name":"onCLI","group":"api","groupLabel":"开放 API 与 CLI","mode":"sync","blockable":false,"mutatable":true,"since":1,"doc":"nebula hook <name> [args...] 触发。注册型(cli)：插件把结果写进 ctx.output，宿主打印到 stdout。"},{"name":"onPluginInstall","group":"plugin","groupLabel":"插件生命周期","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"插件安装成功后触发（此时尚未启用）。"},{"name":"onPluginEnable","group":"plugin","groupLabel":"插件生命周期","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"插件启用（子进程拉起成功）后触发。"},{"name":"onPluginDisable","group":"plugin","groupLabel":"插件生命周期","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"插件禁用后触发。"},{"name":"onPluginConfigChange","group":"plugin","groupLabel":"插件生命周期","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"插件配置更新后触发。插件需自行重启才会读到新配置。"},{"name":"onUIPageOpen","group":"ui","groupLabel":"UI 扩展点","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"用户打开插件注册页面（iframe 加载）时触发。ctx={plugin,page,userId,userName,ip}"},{"name":"onUIThemeApply","group":"ui","groupLabel":"UI 扩展点","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"前端应用插件主题时触发。写 ctx.variables 可动态覆盖 CSS 变量。"},{"name":"onUISettingsSave","group":"ui","groupLabel":"UI 扩展点","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"插件设置面板保存时触发。可拦截校验；写 ctx.values 覆盖落库值。"},{"name":"onUIPageRegister","group":"ui","groupLabel":"UI 扩展点","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"宿主聚合 /api/plugins/ui 时触发。插件可写 ctx.sidebar/ctx.theme/ctx.settings 动态注入 UI 点。"},{"name":"onAIRequest","group":"ai","groupLabel":"AI 智能","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"AI 网关向模型发起请求前触发。可拦截（决策 deny 即本次不外发）；可写 ctx.model/ctx.prompt 改写请求。ctx={userId,scene,provider,model,promptChars,codeSpace}"},{"name":"onAIResponse","group":"ai","groupLabel":"AI 智能","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"AI 请求结束后触发（成功或失败都发）。ctx={userId,scene,provider,model,success,latencyMs,promptTokens,completionTokens,error}"},{"name":"onAIProviderResolve","group":"ai","groupLabel":"AI 智能","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"注册型(ai)：宿主点名调用 AI 能力提供方时触发。插件写 ctx.handled=true 并写 ctx.result 即可完全接管模型调用。ctx={userId,scene,prompt,maxTokens}"},{"name":"onAIComplete","group":"ai","groupLabel":"AI 智能","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"代码空间请求补全时触发（AI 网关之前）。插件写 ctx.completion 可直接提供结果，宿主不再调模型。ctx={userId,fileId,fileName,language,prefix,suffix,maxTokens}"},{"name":"onAIRecommend","group":"ai","groupLabel":"AI 智能","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"搜索联想/近期常用/热门推荐生成时触发。插件可写 ctx.suggestions 或 ctx.fileIds 覆盖内置结果。ctx={userId,q,limit}"},{"name":"onAISearch","group":"ai","groupLabel":"AI 智能","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"自然语言搜文件时触发。插件可写 ctx.filters 覆盖解析出的检索条件、写 ctx.answer 直接作答；可拦截。ctx={userId,query,scope}"},{"name":"onAISummary","group":"ai","groupLabel":"AI 智能","mode":"sync","blockable":false,"mutatable":true,"since":2,"doc":"生成文件摘要与自动标签时触发。插件可写 ctx.summary / ctx.tags 接管。ctx={userId,fileId,fileName,mimeType,size,textChars}"},{"name":"onAIAsk","group":"ai","groupLabel":"AI 智能","mode":"sync","blockable":true,"mutatable":true,"since":2,"doc":"AI 助手问答时触发。插件可写 ctx.answer 直接回答；可拦截。ctx={userId,question,historyChars}"},{"name":"onAIConfigChange","group":"ai","groupLabel":"AI 智能","mode":"async","blockable":false,"mutatable":false,"since":2,"doc":"后台保存 AI 配置后触发。ctx={operatorId,operatorName,enabled,provider,model,changed}"},{"name":"onRateLimit","group":"limit","groupLabel":"限流","mode":"async","blockable":false,"mutatable":false,"since":1,"doc":"【v1 兼容】高频操作前触发。整体异步仅通知；限流中间件这一处通过 RateLimitGate 强制同步读取拦截决策。"}];
+const HOOK_NAMES = HOOKS.map(h=>h.name);
+const GROUPS = {};
+HOOKS.forEach(h=>{(GROUPS[h.group]=GROUPS[h.group]||{label:h.groupLabel,items:[]}).items.push(h)});
+
+const RUNTIMES = {
+  php:{label:'PHP',requires:'php>=7.4',home:'in.php',entry:'',cmd:'php -S {host}:{port} -t {static}'},
+  python:{label:'Python',requires:'python3',home:'index.html',entry:'server.py',cmd:'python3 {entry}'},
+  node:{label:'Node.js',requires:'node>=18',home:'index.html',entry:'server.js',cmd:'node {entry}'},
+  go:{label:'Go',requires:'go',home:'index.html',entry:'main.go',cmd:'go run {entry}'},
+  binary:{label:'二进制',requires:'',home:'index.html',entry:'plugin-bin',cmd:'{entry}'},
+  external:{label:'外部页面',requires:'',home:'',entry:'',cmd:''}
+};
+const PROVIDER_KINDS = ['storage','auth','notify','preview','payment','contentScan','backup','restore','cli','search','theme','page'];
+const PROVIDER_DEFAULT_HOOK = {storage:'onStorageResolve',auth:'onAuthProviderResolve',notify:'onNotificationSend',preview:'onFilePreview',payment:'onPaymentCallback',contentScan:'onContentScan',backup:'onBackup',restore:'onRestore',cli:'onCLI',search:'onStatsCollect',theme:'onUIThemeApply',page:'onUIPageOpen'};
+const ICONS = ['sparkles','layout-dashboard','puzzle','settings','chart-no-axes-combined','shield','bell','database','file-text','globe','image','users','hard-drive','star','zap','heart','rocket','code','palette','table'];
+const AREAS = ['main','admin','public'];
+const ROLES = ['any','admin','user'];
+const EMBEDS = ['iframe','newtab'];
+const SETTING_TYPES = ['text','password','number','bool','select','textarea'];
+
+/* 控件定义 */
+const STRUCT_CONTROLS = [
+  {t:'page',ic:'▤',name:'页面',sub:'PageDecl',desc:'侧边栏可打开的插件页面'},
+  {t:'sidebar',ic:'☰',name:'侧边栏项',sub:'override',desc:'覆盖某页面的标题/图标/排序'},
+  {t:'setting',ic:'⚙',name:'设置字段',sub:'SettingField',desc:'插件设置面板里的一个表单项'},
+  {t:'theme',ic:'◐',name:'主题',sub:'单例',desc:'顶栏可选的主题配色'},
+  {t:'provider',ic:'⬡',name:'注册型能力',sub:'Provider',desc:'声明我能当某种后端'},
+  {t:'hook',ic:'⚡',name:'钩子订阅',sub:'108 个',desc:'打开选择器批量勾选钩子'},
+  {t:'customfile',ic:'📄',name:'自定义文件',sub:'任意',desc:'额外的 PHP/JS/CSS/静态文件'}
+];
+const WIDGET_CONTROLS = [
+  {t:'w-heading',ic:'H',name:'标题',desc:'大标题 + 副标题'},
+  {t:'w-text',ic:'¶',name:'段落文本',desc:'一段说明文字'},
+  {t:'w-card',ic:'▣',name:'卡片',desc:'带标题的内容卡片'},
+  {t:'w-stat',ic:'#',name:'统计数字',desc:'大数字指标'},
+  {t:'w-button',ic:'▷',name:'按钮',desc:'操作按钮'},
+  {t:'w-input',ic:'⌨',name:'输入框',desc:'表单输入项'},
+  {t:'w-table',ic:'▦',name:'表格',desc:'数据表格'},
+  {t:'w-alert',ic:'!',name:'提示条',desc:'警告 / 提示信息'},
+  {t:'w-divider',ic:'—',name:'分隔线',desc:'水平分隔'},
+  {t:'w-html',ic:'<>',name:'自定义 HTML',desc:'直接写 HTML/PHP 片段'}
+];
+
+/* ==================== 状态 ==================== */
+function blankState(){return{
+  meta:{name:'my-plugin',title:'我的插件',version:'1.0.0',author:'you',description:'一个 NebulaDrive 插件',license:'AGPL-3.0-only',homepage:'',minHostVersion:'',protocolVersion:2,permissions:[]},
+  runtime:{runtime:'php',requires:['php>=7.4'],home:'in.php',entry:'',static:'',listen:'0.0.0.0',port:0,command:'',env:{}},
+  dirLayout:'ass',
+  pages:[],sidebar:[],settings:[],theme:null,providers:[],hooks:[],customFiles:[],widgets:[],
+  advanced:{jsonrpc:false,lang:'python'},
+  codeOverride:{},
+  cv:'struct',sel:null,codeFile:'plugin.json',previewOn:true
+};}
+let S = blankState();
+
+const TEMPLATES = {
+ php:()=>{let s=blankState();s.meta={...s.meta,name:'ass-demo',title:'ASS 面板',description:'PHP 嵌入页面示例，声明文件放在 ASS/ 子目录'};
+  s.dirLayout='ass';s.runtime={...s.runtime,runtime:'php',requires:['php>=7.4'],home:'in.php',static:'',listen:'0.0.0.0'};
+  s.pages=[{name:'home',title:'ASS 面板',home:'in.php',area:'main',role:'any',icon:'layout-dashboard',embed:'iframe',order:10,public:false,url:''},
+           {name:'stats',title:'数据统计',home:'stats.php',area:'admin',role:'admin',icon:'chart-no-axes-combined',embed:'iframe',order:20,public:false,url:''}];
+  s.sidebar=[{page:'home',title:'ASS 面板',icon:'layout-dashboard',area:'main',role:'any',order:10}];
+  s.settings=[{key:'greeting',label:'问候语',type:'text',default:'Hello',options:'',help:'显示在面板顶部'},
+              {key:'level',label:'等级',type:'select',default:'1',options:'1,2,3',help:''}];
+  s.theme={name:'ass-blue',label:'ASS 蓝',css:'theme.css',preview:'',variables:{'--nebula-primary':'#3b82f6','--nebula-accent':'#60a5fa'}};
+  s.widgets=[{t:'w-heading',text:'ASS 面板',sub:'由可视化制作器生成'},
+             {t:'w-card',text:'运行环境',sub:'PHP · 端口由宿主分配'},
+             {t:'w-stat',text:'99',sub:'可用钩子'},
+             {t:'w-alert',text:'插件页面鉴权由插件自己负责，宿主完全透传。',sub:''},
+             {t:'w-button',text:'点我试试',sub:''}];
+  s.customFiles=[{path:'stats.php',content:PHP_STATS},{path:'theme.css',content:THEME_CSS}];return s;},
+ python:()=>{let s=blankState();s.meta={...s.meta,name:'py-dashboard',title:'数据看板',description:'Python 标准库起 HTTP 服务'};
+  s.dirLayout='flat';s.runtime={...s.runtime,runtime:'python',requires:['python3'],home:'index.html',entry:'server.py',command:'python3 {entry}',listen:'0.0.0.0'};
+  s.pages=[{name:'home',title:'数据看板',home:'index.html',area:'admin',role:'admin',icon:'chart-no-axes-combined',embed:'iframe',order:10,public:false,url:''}];
+  s.widgets=[{t:'w-heading',text:'数据看板',sub:'Python 插件示例'},{t:'w-stat',text:'1,024',sub:'今日文件'},
+             {t:'w-table',text:'最近活动',sub:''},{t:'w-alert',text:'页面由 python3 server.py 提供。',sub:''}];return s;},
+ node:()=>{let s=blankState();s.meta={...s.meta,name:'node-panel',title:'Node 面板',description:'Node.js 起页面服务'};
+  s.dirLayout='flat';s.runtime={...s.runtime,runtime:'node',requires:['node>=18'],home:'index.html',entry:'server.js',command:'node {entry}',listen:'0.0.0.0'};
+  s.pages=[{name:'home',title:'Node 面板',home:'index.html',area:'main',role:'any',icon:'zap',embed:'iframe',order:10,public:false,url:''}];
+  s.widgets=[{t:'w-heading',text:'Node 面板',sub:'由 node server.js 提供'},{t:'w-card',text:'环境变量',sub:'NB_PLUGIN_PORT'},{t:'w-button',text:'刷新',sub:''}];return s;},
+ external:()=>{let s=blankState();s.meta={...s.meta,name:'ext-page',title:'外部页面',description:'iframe 直连外部 HTTPS 页面，不反代'};
+  s.dirLayout='flat';s.runtime={...s.runtime,runtime:'external',requires:[],home:'',entry:'',command:'',listen:'https://example.com/app'};
+  s.pages=[{name:'home',title:'外部页面',home:'',area:'main',role:'any',icon:'globe',embed:'iframe',order:10,public:true,url:'https://example.com/app'}];
+  s.widgets=[];return s;},
+ theme:()=>{let s=blankState();s.meta={...s.meta,name:'ocean-theme',title:'海洋蓝主题',description:'只提供主题与设置面板的轻量插件'};
+  s.dirLayout='flat';s.runtime={...s.runtime,runtime:'php',requires:['php>=7.4'],home:'in.php',listen:'0.0.0.0'};
+  s.pages=[{name:'home',title:'主题设置',home:'in.php',area:'main',role:'any',icon:'palette',embed:'iframe',order:10,public:false,url:''}];
+  s.theme={name:'ocean',label:'海洋蓝',css:'theme.css',preview:'',variables:{'--nebula-primary':'#0ea5e9','--nebula-accent':'#38bdf8','--nebula-bg':'#08131f'}};
+  s.settings=[{key:'blur',label:'背景模糊',type:'bool',default:'true',options:'',help:''},
+              {key:'density',label:'界面密度',type:'select',default:'normal',options:'compact,normal,loose',help:''}];
+  s.widgets=[{t:'w-heading',text:'海洋蓝',sub:'主题与设置面板示例'},{t:'w-card',text:'CSS 变量覆盖',sub:'--nebula-primary 等'},{t:'w-divider',text:'',sub:''},{t:'w-text',text:'在顶栏主题选择器里切换即可生效。',sub:''}];
+  s.customFiles=[{path:'theme.css',content:THEME_CSS}];return s;},
+ hooks:()=>{let s=blankState();s.meta={...s.meta,name:'upload-guard',title:'上传守卫',description:'订阅钩子拦截上传的 JSON-RPC 插件'};
+  s.dirLayout='flat';s.runtime={...s.runtime,runtime:'python',requires:['python3'],home:'',entry:'',command:'',listen:'0.0.0.0'};
+  s.hooks=['onBoot','onFileUploadBefore','onFileUploadAfter','onRequestBefore','onShutdown'];
+  s.advanced={jsonrpc:true,lang:'python'};
+  s.pages=[];s.widgets=[];return s;},
+ blank:()=>{let s=blankState();s.meta={...s.meta,name:'my-plugin',title:'我的插件',description:'从零开始的最小可运行插件'};
+  s.dirLayout='flat';s.runtime={...s.runtime,runtime:'php',requires:['php>=7.4'],home:'in.php',listen:'0.0.0.0'};
+  // 空白工程也保留一个最小页面：开箱即可构建安装，用户可自行删除/扩展
+  s.pages=[{name:'home',title:'我的插件',home:'in.php',area:'main',role:'any',icon:'puzzle',embed:'iframe',order:10,public:false,url:''}];
+  s.widgets=[{t:'w-heading',text:'我的插件',sub:'从左侧拖入控件开始设计'}];return s;}
+};
+
+/* 生成的代码片段常量 */
+const PHP_STATS = `<?php
+$port = getenv('NB_PLUGIN_PORT') ?: '0';
+$name = getenv('NB_PLUGIN_NAME') ?: '';
+$site = getenv('NB_PLUGIN_SITE_URL') ?: '';
+?>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>数据统计</title>
+<style>body{font-family:system-ui,sans-serif;background:#0b1020;color:#e6ecff;padding:28px}h1{color:#22d3ee}table{border-collapse:collapse;width:100%;margin-top:16px}td,th{border:1px solid #2a3560;padding:8px 12px;text-align:left}code{color:#8d9cc4}</style></head>
+<body><h1>数据统计</h1><p>插件 <code><?= htmlspecialchars($name) ?></code> · 端口 <code><?= htmlspecialchars($port) ?></code></p>
+<table><tr><th>指标</th><th>值</th></tr><tr><td>站点</td><td><?= htmlspecialchars($site) ?></td></tr><tr><td>协议</td><td><?= htmlspecialchars(getenv('NB_PLUGIN_PROTOCOL') ?: '') ?></td></tr></table>
+</body></html>`;
+const THEME_CSS = `/* 插件主题样式：宿主会做注入过滤，只放行安全的 CSS 声明 */
+:root{
+  --nebula-primary: #3b82f6;
+  --nebula-accent:  #60a5fa;
+}
+.plugin-card{ border-radius: 14px; }`;
+const PY_SERVER = `#!/usr/bin/env python3
+# NebulaDrive 插件页面服务：端口由宿主通过环境变量下发。
+# 注意：宿主把 cmd.Dir 设成 co.BEGG 所在目录（BeggDir），页面文件就在这里，
+# 所以直接用当前工作目录即可。NB_PLUGIN_DIR 指向的是插件安装根目录，
+# 在 ASS/ 这类子目录布局下 chdir 过去会找不到 home 文件。
+import os
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+PORT = int(os.environ.get("NB_PLUGIN_PORT", "0"))
+HOST = os.environ.get("NB_PLUGIN_HOST", "127.0.0.1")
+ROOT = os.getcwd()  # = co.BEGG 所在目录
+
+class Handler(SimpleHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        pass  # 日志走 stderr，避免污染 JSON-RPC 的 stdout
+
+if __name__ == "__main__":
+    handler = partial(Handler, directory=ROOT)
+    print(f"[plugin] serving {ROOT} on {HOST}:{PORT}", flush=True)
+    ThreadingHTTPServer((HOST, PORT), handler).serve_forever()`;
+const JS_SERVER = `// NebulaDrive 插件页面服务：端口由宿主通过环境变量下发。
+// cmd.Dir = co.BEGG 所在目录，直接用 process.cwd() 作为文档根。
+// 不要用 NB_PLUGIN_DIR（那是插件安装根目录，子目录布局下会 404）。
+const http = require('http'), fs = require('fs'), path = require('path');
+const port = parseInt(process.env.NB_PLUGIN_PORT || '0', 10);
+const host = process.env.NB_PLUGIN_HOST || '127.0.0.1';
+const dir  = process.cwd();
+http.createServer((req, res) => {
+  let p = decodeURIComponent(req.url.split('?')[0]);
+  if (p === '/' ) p = '/index.html';
+  const f = path.join(dir, p);
+  if (!f.startsWith(dir)) { res.writeHead(403); return res.end('forbidden'); }
+  fs.readFile(f, (e, data) => {
+    if (e) { res.writeHead(404); return res.end('not found'); }
+    const ext = path.extname(f);
+    const mime = {'.html':'text/html; charset=utf-8','.css':'text/css','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml'}[ext] || 'application/octet-stream';
+    res.writeHead(200, {'Content-Type': mime}); res.end(data);
+  });
+}).listen(port, host, () => console.log('[plugin] listening on ' + host + ':' + port));`;
+const PY_RPC = `#!/usr/bin/env python3
+# NebulaDrive 插件 JSON-RPC 2.0 over stdio 骨架
+# 宿主每行发一个 JSON 请求，插件每行回一个 JSON 响应；日志必须走 stderr。
+import sys, json
+
+HOOKS = /*__PY_HOOKS__*/[]
+
+def log(msg):
+    print('[plugin] ' + msg, file=sys.stderr, flush=True)
+
+def handle(req):
+    m = req.get('method')
+    if m == 'init':
+        return {'ok': True, 'name': /*__PY_NAME__*/'', 'version': '1.0.0', 'hooks': HOOKS}
+    if m == 'ping':
+        return {'ok': True}
+    if m == 'shutdown':
+        sys.exit(0)
+    if m == 'fire':
+        p = req.get('params', {})
+        hook, ctx = p.get('hook'), p.get('ctx', {})
+        # ===== 在这里写你的业务逻辑 =====
+        # 决策型：拦截上传
+        if hook == 'onFileUploadBefore' and str(ctx.get('fileName','')).endswith('.exe'):
+            return {'decision': 'deny', 'reason': '不允许上传可执行文件'}
+        # 变换型：改写 ctx（顶层键覆盖）
+        # return {'ctxPatch': {'maxStorage': 999999}}
+        # 通知型：只记日志
+        log('fire ' + str(hook))
+        return {}
+    return {'error': 'method not found'}
+
+def main():
+    for line in sys.stdin:
+        line = line.strip()
+        if not line: continue
+        try: req = json.loads(line)
+        except Exception as e:
+            log('bad json: ' + str(e)); continue
+        rid = req.get('id', 0)
+        try: result = handle(req)
+        except Exception as e:
+            sys.stdout.write(json.dumps({'jsonrpc':'2.0','id':rid,'error':{'code':-32603,'message':str(e)}})+'\\n'); sys.stdout.flush(); continue
+        if rid:
+            sys.stdout.write(json.dumps({'jsonrpc':'2.0','id':rid,'result':result}, ensure_ascii=False)+'\\n'); sys.stdout.flush()
+
+if __name__ == '__main__':
+    main()`;
+const JS_RPC = `#!/usr/bin/env node
+// NebulaDrive 插件 JSON-RPC 2.0 over stdio 骨架（日志走 stderr）
+const readline = require('readline');
+const HOOKS = /*__JS_HOOKS__*/[];
+const NAME = /*__JS_NAME__*/'';
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+const log = m => console.error('[plugin] ' + m);
+function handle(req){
+  const m = req.method;
+  if (m === 'init') return {ok:true, name:NAME, version:'1.0.0', hooks:HOOKS};
+  if (m === 'ping') return {ok:true};
+  if (m === 'shutdown') process.exit(0);
+  if (m === 'fire'){
+    const p = req.params || {}, hook = p.hook, ctx = p.ctx || {};
+    if (hook === 'onFileUploadBefore' && String(ctx.fileName||'').endsWith('.exe'))
+      return {decision:'deny', reason:'不允许上传可执行文件'};
+    log('fire ' + hook);
+    return {};
+  }
+  return {error:'method not found'};
+}
+rl.on('line', line => {
+  if (!line.trim()) return;
+  let req; try { req = JSON.parse(line); } catch(e){ return log('bad json'); }
+  const rid = req.id || 0;
+  let result; try { result = handle(req); } catch(e){
+    process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rid,error:{code:-32603,message:String(e)}})+'\\n'); return;
+  }
+  if (rid) process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rid,result})+'\\n');
+});`;
+
+/* ==================== 工具函数 ==================== */
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const clone = o => JSON.parse(JSON.stringify(o));
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2200)}
+function uid(){return Math.random().toString(36).slice(2,9)}
+function download(name, blob){const a=document.createElement('a'),u=URL.createObjectURL(blob);a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),3000)}
+
+/* ==================== 生成三文件 ==================== */
+function jStr(s){return JSON.stringify(String(s||''))}
+function genRegisterGo(){
+  const m=S.meta,r=S.runtime;
+  const arr=a=>'[]string{'+a.map(x=>jStr(x)).join(', ')+'}';
+  const lines=[
+    'package p_'+S.meta.name.replace(/[^a-z0-9_]/g,'_'),
+    '',
+    '// register.go —— 纯声明文件：宿主只用 go/parser 读语法树，不编译、不执行。',
+    '// 下面这个类型可以根本不存在；部署机不需要安装 Go。',
+    '// 由 NebulaDrive 插件制作器生成，请勿手工改动后又在「设计」里编辑（会被覆盖）。',
+    'var Spec = PluginSpec{',
+    '    Name:            '+jStr(m.name)+',',
+    '    Title:           '+jStr(m.title)+',',
+    '    Version:         '+jStr(m.version)+',',
+    '    Author:          '+jStr(m.author)+',',
+    '    Description:     '+jStr(m.description)+',',
+    '    ProtocolVersion: '+m.protocolVersion+',',
+    '    Hooks:           '+arr(S.hooks)+',',
+    '    Provides:        '+arr(S.providers.map(p=>p.kind+':'+p.name))+',',
+    '    Install:         '+arr(installList())+',',
+    '    Runtime:         '+jStr(r.runtime)+',',
+    '    Home:            '+jStr(r.home)+',',
+    '}'
+  ];
+  return lines.join('\n')+'\n';
+}
+function installList(){
+  const s=new Set(['plugin.json','register.go','co.BEGG']);
+  if(S.runtime.home)s.add(S.runtime.home);
+  if(S.runtime.entry)s.add(S.runtime.entry);
+  S.pages.forEach(p=>{if(p.home)s.add(p.home)});
+  S.customFiles.forEach(f=>s.add(f.path));
+  if(S.theme&&S.theme.css)s.add(S.theme.css);
+  if(S.advanced.jsonrpc)s.add(rpcEntryName());
+  return [...s];
+}
+function rpcEntryName(){return S.advanced.lang==='node'?'plugin.js':'plugin.py'}
+function pageDecls(){return S.pages.map(p=>{const o={name:p.name,area:p.area,title:p.title,home:p.home};['icon','role','embed','order','public','url'].forEach(k=>{if(p[k]!==''&&p[k]!==undefined&&p[k]!==false)o[k]=p[k]});return o})}
+function providerDecls(){return S.providers.map(p=>{const o={kind:p.kind,name:p.name};if(p.label)o.label=p.label;if(p.hook&&p.hook!==PROVIDER_DEFAULT_HOOK[p.kind])o.hook=p.hook;return o})}
+function genPluginJSON(){
+  const m=S.meta;
+  const o={name:m.name,title:m.title,version:m.version,author:m.author,description:m.description,protocolVersion:m.protocolVersion};
+  const needEntry = S.hooks.length>0 || S.advanced.jsonrpc;
+  if(needEntry)o.entry=rpcEntryName();
+  if(S.hooks.length)o.hooks=clone(S.hooks);
+  if(S.pages.length)o.pages=pageDecls();
+  if(S.providers.length)o.providers=providerDecls();
+  if(m.license)o.license=m.license;
+  if(m.homepage)o.homepage=m.homepage;
+  if(m.minHostVersion)o.minHostVersion=m.minHostVersion;
+  if(m.permissions&&m.permissions.length)o.permissions=m.permissions;
+  return JSON.stringify(o,null,2)+'\n';
+}
+function genBegg(){
+  const r=S.runtime;
+  const o={runtime:r.runtime};
+  if(r.requires&&r.requires.length)o.requires=r.requires;
+  if(r.entry)o.entry=r.entry;
+  if(r.home)o.home=r.home;
+  if(r.static)o.static=r.static;
+  if(r.listen)o.listen=r.listen;
+  if(r.port)o.port=r.port;
+  if(r.command)o.command=r.command;
+  if(r.env&&Object.keys(r.env).length)o.env=r.env;
+  if(S.pages.length)o.pages=pageDecls();
+  const ui={};
+  if(S.sidebar.length)ui.sidebar=S.sidebar.map(x=>{const q={page:x.page};['title','icon','area','role','order'].forEach(k=>{if(x[k]!==''&&x[k]!==undefined)q[k]=x[k]});return q});
+  if(S.theme){const t={name:S.theme.name};['label','css','preview'].forEach(k=>{if(S.theme[k])t[k]=S.theme[k]});if(S.theme.variables&&Object.keys(S.theme.variables).length)t.variables=S.theme.variables;ui.theme=t}
+  if(S.settings.length)ui.settings=S.settings.map(x=>{const q={key:x.key,label:x.label,type:x.type};['default','options','help'].forEach(k=>{if(x[k])q[k]=x[k]});return q});
+  if(Object.keys(ui).length)o.ui=ui;
+  if(S.providers.length)o.providers=providerDecls();
+  return JSON.stringify(o,null,2)+'\n';
+}
+function widgetHTML(w){
+  const t=w.text||'',s=w.sub||'';
+  switch(w.t){
+    case 'w-heading':return `<div class="widget"><h2 style="font-size:20px">${esc(t)}</h2>${s?`<div style="color:var(--muted);font-size:12px">${esc(s)}</div>`:''}</div>`;
+    case 'w-text':return `<div class="widget" style="font-size:13px;color:#c8d4f5">${esc(t)}</div>`;
+    case 'w-card':return `<div class="widget pv-card"><b style="font-size:13px">${esc(t)}</b><div style="color:var(--muted);font-size:12px;margin-top:5px">${esc(s)}</div></div>`;
+    case 'w-stat':return `<div class="widget"><div class="pv-stat">${esc(t)}</div><div style="color:var(--muted);font-size:11.5px">${esc(s)}</div></div>`;
+    case 'w-button':return `<div class="widget"><span class="pv-btn">${esc(t)}</span></div>`;
+    case 'w-input':return `<div class="widget"><label style="display:block;font-size:11.5px;color:var(--muted);margin-bottom:4px">${esc(s||t)}</label><input class="pv-input" placeholder="${esc(t)}"></div>`;
+    case 'w-table':return `<div class="widget"><b style="font-size:12.5px">${esc(t)}</b><table class="pv-table" style="margin-top:8px"><tr><th>项目</th><th>值</th><th>状态</th></tr><tr><td>示例 A</td><td>128</td><td>正常</td></tr><tr><td>示例 B</td><td>64</td><td>正常</td></tr></table></div>`;
+    case 'w-alert':return `<div class="widget pv-alert">${esc(t)}</div>`;
+    case 'w-divider':return `<div class="pv-divider"></div>`;
+    case 'w-html':return `<div class="widget">${t}</div>`;
+  }
+  return '';
+}
+function genPageHTML(){
+  const w=S.widgets.map(widgetHTML).join('\n      ');
+  const settingsNote=S.settings.length?`<p style="color:var(--muted);font-size:11.5px;margin-top:18px">插件设置项：${esc(S.settings.map(x=>x.label).join(' / '))}</p>`:'';
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(S.meta.title||S.meta.name)}</title>
+<style>
+  :root{--nebula-primary:#22d3ee;--nebula-accent:#0ea5e9;--line:#2a3560;--muted:#8d9cc4}
+  *{box-sizing:border-box}
+  body{margin:0;padding:22px 24px;background:#0f1630;color:#e6ecff;font:14px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif}
+  h1,h2,h3{margin:0 0 8px}
+  .widget{margin-bottom:12px}
+  .pv-card{border:1px solid var(--line);border-radius:12px;padding:14px;background:#141d3c}
+  .pv-stat{font-size:26px;font-weight:700;color:var(--nebula-primary)}
+  .pv-btn{display:inline-block;padding:8px 16px;border-radius:9px;background:linear-gradient(135deg,var(--nebula-accent),#6366f1);color:#fff;font-size:12.5px;cursor:pointer;border:none}
+  .pv-input{display:block;width:100%;max-width:300px;background:#0b1020;border:1px solid var(--line);border-radius:8px;padding:8px 11px;color:#e6ecff;font-size:12.5px}
+  .pv-table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .pv-table td,.pv-table th{border:1px solid var(--line);padding:7px 10px;text-align:left}
+  .pv-table th{color:var(--muted);background:#141d3c}
+  .pv-alert{padding:10px 14px;border-radius:9px;background:#fbbf2415;border:1px solid #fbbf2455;color:#fbbf24;font-size:12.5px}
+  .pv-divider{height:1px;background:var(--line);margin:14px 0}
+</style>
+</head>
+<body>
+      ${w}
+      ${settingsNote}
+</body>
+</html>`;
+}
+function genPagePHP(){
+  const body=genPageHTML();
+  // 把 HTML 塞进 PHP 文件，顶部读取宿主环境变量（展示用）
+  return `<?php
+// 由 NebulaDrive 插件制作器生成。宿主下发的环境变量：
+//   NB_PLUGIN_NAME / NB_PLUGIN_DIR / NB_PLUGIN_HOME / NB_PLUGIN_SITE_URL
+//   NB_PLUGIN_PORT / NB_PLUGIN_HOST / NB_PLUGIN_PROTOCOL
+// 注意：宿主对 /ext/* 完全透传鉴权，请在本文件里自己做权限校验。
+$plugin = getenv('NB_PLUGIN_NAME') ?: '${S.meta.name.replace(/'/g,"\\'")}';
+$site   = getenv('NB_PLUGIN_SITE_URL') ?: '';
+?>
+${body}`;
+}
+function genRpcFile(){
+  const lang=S.advanced.lang;
+  if(lang==='node')return JS_RPC.replace('/*__JS_HOOKS__*/[]',JSON.stringify(S.hooks)).replace('/*__JS_NAME__*/'+`''`,JSON.stringify(S.meta.name));
+  return PY_RPC.replace('/*__PY_HOOKS__*/[]',JSON.stringify(S.hooks)).replace('/*__PY_NAME__*/'+`''`,JSON.stringify(S.meta.name));
+}
+function buildFiles(){
+  const f={};
+  const sub=S.dirLayout==='ass'?'ASS/':'';
+  const put=(p,c)=>{f[p]=c};
+  const root=S.meta.name||'plugin';
+  // 三文件位置：plugin.json 永远在插件根目录（= Contract.Dir / ManifestDir），
+  // ASS/ 布局把 register.go + co.BEGG + 页面文件放进子目录（= BeggDir）。
+  // 这正是用户举例的目录形态：根目录一个 plugin.json，ASS/ 里一堆 .php + 一个注册型 .go。
+  put('plugin.json', genPluginJSON());
+  put(sub+'register.go', genRegisterGo());
+  put(sub+'co.BEGG', genBegg());
+  const r=S.runtime;
+  // 页面文件（home 相对 co.BEGG 所在目录）
+  if(r.home && r.runtime!=='external'){
+    const target=sub+r.home;
+    if(!f[target]){
+      const isPHP=/\.php$/i.test(r.home);
+      put(target, isPHP?genPagePHP():genPageHTML());
+    }
+  }
+  // 其它页面 home 文件
+  S.pages.forEach(p=>{if(p.home && !p.url){const t=sub+p.home;if(!f[t])put(t,/\.php$/i.test(p.home)?genPagePHP():genPageHTML())}});
+  // 静态服务入口
+  if(r.entry){const t=sub+r.entry;if(!f[t])put(t,r.runtime==='node'?JS_SERVER:PY_SERVER)}
+  // 自定义文件
+  S.customFiles.forEach(c=>{if(c.path)put(sub+c.path,c.content)});
+  // 主题 CSS
+  if(S.theme&&S.theme.css){const t=sub+S.theme.css;if(!f[t])put(t,THEME_CSS)}
+  // RPC 主体：entry 相对插件安装根目录（Contract.Dir），不放进 ASS/ 子目录。
+  // 条件必须与 genPluginJSON 的 needEntry 完全一致，否则会「声明了 entry 却没文件」。
+  if(S.advanced.jsonrpc||S.hooks.length>0)put(rpcEntryName(),genRpcFile());
+  // README
+  put('README.md', genReadme(root,sub));
+  return f;
+}
+function genReadme(root,sub){
+  const r=S.runtime;
+  return `# ${S.meta.title||S.meta.name}\n\n${S.meta.description||''}\n\n`+
+`- 插件名：\`${S.meta.name}\`\n- 版本：\`${S.meta.version}\`\n- 协议：v${S.meta.protocolVersion}\n- 运行时：\`${r.runtime}\`${r.requires&&r.requires.length?'（要求 '+r.requires.join(', ')+'）':''}\n`+
+`- 目录布局：${sub?'\`plugin.json\` 与 \`README.md\` 在插件根目录；\`register.go\` / \`co.BEGG\` / 页面文件在 \`'+sub+'\` 子目录（宿主递归定位，深度 ≤ 5）':'扁平（三文件与页面都在插件根目录）'}\n\n`+
+`## 安装\n\n1. 把整个目录解压到 \`plugins/${S.meta.name}/\`。\n2. 后台 → 插件 → 开启**全局总开关**（需勾选风险确认）。\n3. 启用 \`${S.meta.name}\`。\n\n`+
+`> 插件默认关闭，这是刻意设计。\n\n`+
+(S.hooks.length?`## 钩子\n\n订阅：${S.hooks.map(h=>'`'+h+'`').join('、')}\n\n`+
+ `有钩子订阅时宿主会拉起 \`${rpcEntryName()}\` 做 JSON-RPC over stdio。\n`+
+ `**部署注意**：\`entry\` 相对插件安装**根目录**解析，宿主用 \`exec\` 直接执行它。\n`+
+ `Linux/macOS 需保留 shebang 并 \`chmod +x ${rpcEntryName()}\`；Windows 请改成 \`plugin.exe\`\n`+
+ `并同步修改 \`plugin.json\` 的 \`entry\`。\n\n`:'')+
+`## 页面\n\n${S.pages.length?S.pages.map(p=>`- \`${p.name}\`（${p.area}）→ ${p.url||p.home||'/'} ${p.public?'· public（宿主不鉴权）':''}`).join('\n'):'（无页面）'}\n\n`+
+`> \`home\` 一律相对 **co.BEGG 所在目录**，不要写成 \`${sub}in.php\` 这种带子目录前缀的路径。\n\n`+
+`## 安全提醒\n\n宿主对 \`/ext/*\` **完全透传鉴权**：不校验登录态、不注入 token、不设 iframe sandbox。\n插件页面必须自己做权限校验。开启插件等同于把服务器执行权限交给插件作者。\n`;
+}
+
+/* ==================== 校验 ==================== */
+function validate(){
+  const r=[],add=(ok,name,detail,warn)=>r.push({ok:!!ok,name,detail,warn:!!warn});
+  const m=S.meta,rt=S.runtime;
+  const nameRe=/^[a-z0-9-_]+$/;
+  add(m.name && m.name.length>=2 && m.name.length<=64 && nameRe.test(m.name) && !/^[-_]/.test(m.name),
+    'plugin.json · name','2–64 字符，仅 [a-z0-9-_]，不能以 - 或 _ 开头。当前：'+(m.name||'(空)'));
+  add(!m.version || /^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$/.test(m.version),'plugin.json · version','语义化 x.y.z；可留空。当前：'+(m.version||'(空)'));
+  add([1,2].includes(Number(m.protocolVersion)),'plugin.json · protocolVersion','宿主支持 1~2。当前：'+m.protocolVersion);
+  add(S.hooks.length>0||S.pages.length>0||S.providers.length>0,'三者不可皆空','hooks / pages / providers 至少声明一个，否则插件什么都不做。');
+  add(S.hooks.length<=64,'hooks 数量上限',`当前 ${S.hooks.length} 个，上限 64。`);
+  const badHooks=S.hooks.filter(h=>!HOOK_NAMES.includes(h));
+  add(badHooks.length===0,'hooks 合法性',badHooks.length?'未知钩子：'+badHooks.join(', '):`${S.hooks.length} 个钩子全部在宿主 108 个钩子表内。`);
+  add(new Set(S.hooks).size===S.hooks.length,'hooks 不重复','重复声明会被 ParseManifest 拒绝。');
+  const badPages=S.pages.filter(p=>!/^[a-z0-9-_]+$/.test(p.name||'')||!AREAS.includes(p.area));
+  add(badPages.length===0,'pages 合法性',badPages.length?'name/area 非法：'+badPages.map(p=>p.name).join(', '):`${S.pages.length} 个页面，name/area/role/embed 合法。`);
+  const badRoles=S.pages.filter(p=>p.role&&!ROLES.includes(p.role)),badEmb=S.pages.filter(p=>p.embed&&!EMBEDS.includes(p.embed));
+  add(badRoles.length===0&&badEmb.length===0,'pages · role / embed','role 只能是 admin|user|any；embed 只能是 iframe|newtab。');
+  const badProv=S.providers.filter(p=>!PROVIDER_KINDS.includes(p.kind)||!p.name);
+  add(badProv.length===0,'providers 合法性',badProv.length?'kind/name 非法：'+JSON.stringify(badProv):`${S.providers.length} 个注册型能力，kind 均合法。`);
+  add(Object.keys(RUNTIMES).includes(rt.runtime),'co.BEGG · runtime','可选 php|python|node|go|binary|external。当前：'+rt.runtime);
+  add(rt.port>=0&&rt.port<=65535,'co.BEGG · port','0 表示宿主动态分配；范围 0–65535。当前：'+rt.port);
+  const reqRe=/^[a-zA-Z0-9_.-]+\s*(>=|>|==)?\s*([0-9][0-9.]*)?$/;
+  const badReq=(rt.requires||[]).filter(x=>!reqRe.test(x));
+  add(badReq.length===0,'co.BEGG · requires','格式示例 php>=8.1 / python3 / node>=18。'+(badReq.length?' 非法：'+badReq.join(', '):''));
+  const paths=[rt.home,rt.static].filter(Boolean);
+  const badPath=paths.filter(p=>p.startsWith('/')||p.includes('..'));
+  add(badPath.length===0,'co.BEGG · 路径不越界','home/static 必须是 co.BEGG 所在目录内的相对路径，不能含 .. 或绝对路径。'+(badPath.length?' 问题：'+badPath.join(', '):''));
+  const files=buildFiles(),sub=S.dirLayout==='ass'?'ASS/':'';
+  const homeMissing=[...new Set([rt.home,...S.pages.map(p=>p.home)].filter(Boolean))].filter(h=>!(sub+h in files));
+  add(homeMissing.length===0,'home 文件真实存在','ValidateFiles 会检查 home/static 指向的文件。'+(homeMissing.length?' 缺失：'+homeMissing.join(', '):` 已生成 ${[...new Set([rt.home,...S.pages.map(p=>p.home)].filter(Boolean))].length} 个页面文件。`));
+  const needEntry=S.hooks.length>0||S.advanced.jsonrpc;
+  add(!needEntry || rpcEntryName() in files,'plugin.json · entry','订阅钩子时需要可执行 entry 文件（单个文件名、非空）。'+(needEntry?'已生成 '+rpcEntryName():'纯页面插件可省略 entry。'));
+  add(!(rt.runtime==='external')||S.pages.some(p=>p.url),'external 页面','runtime=external 时必须在 pages 里声明带 url 的页面。');
+  // crossCheck 模拟
+  const declHooks=(()=>{try{const g=files[sub+'register.go']||'';const mm=g.match(/Hooks:\s*\[\]string\{([^}]*)\}/);if(!mm)return[];return (mm[1].match(/"[^"]*"/g)||[]).map(x=>x.slice(1,-1))}catch(e){return[]}})();
+  const manHooks=(()=>{try{return (JSON.parse(files['plugin.json']||'{}').hooks)||[]}catch(e){return['!PARSE']}})();
+  const sorted=a=>clone(a).sort().join(',');
+  add(sorted(declHooks)===sorted(manHooks)&&!manHooks.includes('!PARSE'),'crossCheck · Hooks 一致','register.go 与 plugin.json 的钩子集合必须完全一致。');
+  const declName=(()=>{const g=files[sub+'register.go']||'';const mm=g.match(/Name:\s*"([^"]*)"/);return mm?mm[1]:''})();
+  const declRt=(()=>{const g=files[sub+'register.go']||'';const mm=g.match(/Runtime:\s*"([^"]*)"/);return mm?mm[1]:''})();
+  const declHome=(()=>{const g=files[sub+'register.go']||'';const mm=g.match(/Home:\s*"([^"]*)"/);return mm?mm[1]:''})();
+  add(declName===m.name,'crossCheck · Name 一致',`register.go Name=${declName||'(空)'}，plugin.json name=${m.name}`);
+  add(declRt===rt.runtime,'crossCheck · Runtime 一致',`register.go Runtime=${declRt}，co.BEGG runtime=${rt.runtime}`);
+  add(!declHome||!rt.home||declHome===rt.home,'crossCheck · Home 一致',`register.go Home=${declHome||'(空)'}，co.BEGG home=${rt.home||'(空)'}`);
+  // JSON 严格性（代码覆盖时可能被改坏）
+  let jsonOK=true,jsonMsg='两个 JSON 文件均可解析。';
+  try{const x=JSON.parse(files['plugin.json']);if(!x.name)jsonMsg='plugin.json 缺 name';}catch(e){jsonOK=false;jsonMsg='plugin.json 解析失败：'+e.message}
+  try{if(jsonOK)JSON.parse(files[sub+'co.BEGG'])}catch(e){jsonOK=false;jsonMsg='co.BEGG 解析失败：'+e.message}
+  add(jsonOK,'JSON 语法',jsonMsg);
+  // 代码覆盖提示
+  const ov=Object.keys(S.codeOverride).filter(k=>S.codeOverride[k]!=null);
+  if(ov.length)add(true,'手工代码覆盖',`以下文件由「代码」页手工编辑，不参与结构同步：${ov.join(', ')}。请自行确认其合法性。`,true);
+  return r;
+}
+
+/* ==================== ZIP（store 模式，纯 JS） ==================== */
+function crc32(buf){
+  if(!crc32.t){crc32.t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;crc32.t[n]=c>>>0}}
+  let c=0xFFFFFFFF;for(let i=0;i<buf.length;i++)c=(c>>>8)^crc32.t[(c^buf[i])&0xFF];return (c^0xFFFFFFFF)>>>0;
+}
+function zipStore(files,rootName){
+  const enc=new TextEncoder(),chunks=[],central=[];let offset=0;
+  const d=new Date(),dosTime=(d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1),dosDate=((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate();
+  Object.keys(files).forEach(p=>{
+    const full=rootName?rootName+'/'+p:p;
+    const nameB=enc.encode(full),data=typeof files[p]==='string'?enc.encode(files[p]):files[p];
+    const crc=crc32(data),isExec=/\.(py|js|sh)$/.test(p)||p==='plugin-bin';
+    const lh=new Uint8Array(30+nameB.length),lv=new DataView(lh.buffer);
+    lv.setUint32(0,0x04034b50,true);lv.setUint16(4,20,true);lv.setUint16(6,0x0800,true);lv.setUint16(8,0,true);
+    lv.setUint16(10,dosTime,true);lv.setUint16(12,dosDate,true);lv.setUint32(14,crc,true);
+    lv.setUint32(18,data.length,true);lv.setUint32(22,data.length,true);lv.setUint16(26,nameB.length,true);lv.setUint16(28,0,true);
+    lh.set(nameB,30);chunks.push(lh,data);
+    const ch=new Uint8Array(46+nameB.length),cv=new DataView(ch.buffer);
+    cv.setUint32(0,0x02014b50,true);cv.setUint16(4,0x031E,true);cv.setUint16(6,20,true);cv.setUint16(8,0x0800,true);cv.setUint16(10,0,true);
+    cv.setUint16(12,dosTime,true);cv.setUint16(14,dosDate,true);cv.setUint32(16,crc,true);
+    cv.setUint32(20,data.length,true);cv.setUint32(24,data.length,true);cv.setUint16(28,nameB.length,true);
+    cv.setUint16(30,0,true);cv.setUint16(32,0,true);cv.setUint16(34,0,true);cv.setUint16(36,0,true);
+    cv.setUint32(38,isExec?0o100755<<16:0o100644<<16,true);cv.setUint32(42,offset,true);ch.set(nameB,46);
+    central.push(ch);offset+=lh.length+data.length;
+  });
+  const cdSize=central.reduce((a,b)=>a+b.length,0);
+  const eo=new Uint8Array(22),ev=new DataView(eo.buffer);
+  ev.setUint32(0,0x06054b50,true);ev.setUint16(8,central.length,true);ev.setUint16(10,central.length,true);
+  ev.setUint32(12,cdSize,true);ev.setUint32(16,offset,true);
+  return new Blob([...chunks,...central,eo],{type:'application/zip'});
+}
+function finalFiles(){const f=buildFiles();Object.keys(S.codeOverride).forEach(k=>{if(S.codeOverride[k]!=null)f[k]=S.codeOverride[k]});return f}
+function buildZip(){
+  const r=validate(),bad=r.filter(x=>!x.ok&&!x.warn);
+  if(bad.length){switchView('check');renderCheck();toast('有 '+bad.length+' 项校验未通过，请先修正');return}
+  const f=finalFiles();download((S.meta.name||'plugin')+'.zip',zipStore(f,S.meta.name||'plugin'));
+  toast('已导出 '+(S.meta.name||'plugin')+'.zip（'+Object.keys(f).length+' 个文件）');
+}
+
+/* ==================== 渲染 ==================== */
+function switchView(v){
+  document.querySelectorAll('.view').forEach(e=>e.classList.toggle('on',e.id==='v-'+v));
+  document.querySelectorAll('.tab[data-v]').forEach(e=>e.classList.toggle('on',e.dataset.v===v));
+  if(v==='check')renderCheck();
+  if(v==='build')renderBuild();
+  if(v==='code')renderCode();
+}
+function renderPalette(){
+  const struct=S.cv==='struct';
+  const list=struct?STRUCT_CONTROLS:WIDGET_CONTROLS;
+  const groups=struct?[
+    {label:'身份与运行',items:[]},
+    {label:'页面与 UI',items:list.slice(0,4)},
+    {label:'能力与钩子',items:list.slice(4,6)},
+    {label:'文件',items:list.slice(6)}
+  ]:[{label:'页面控件',items:list}];
+  let h='';
+  if(struct)h+=`<div class="pgroup"><h4>基础信息（固定）</h4>
+    <div class="pitem" onclick="selectItem('meta')"><span class="ic">◆</span>插件身份<span class="sub">编辑 →</span></div>
+    <div class="pitem" onclick="selectItem('runtime')"><span class="ic">◇</span>运行时 / 解释器<span class="sub">编辑 →</span></div>
+    <div class="pitem" onclick="selectItem('layout')"><span class="ic">▧</span>目录布局<span class="sub">编辑 →</span></div></div>`;
+  groups.forEach(g=>{if(!g.items.length)return;h+=`<div class="pgroup"><h4>${g.label}</h4>`+g.items.map(c=>
+    `<div class="pitem" draggable="true" data-ctl="${c.t}" onclick="addControl('${c.t}')"><span class="ic">${c.ic}</span>${c.name}<span class="sub">${c.sub||'＋'}</span></div>`).join('')+'</div>'});
+  if(!struct)h+=`<div class="pgroup"><h4>提示</h4><div style="font-size:11px;color:var(--muted);line-height:1.7;padding:4px 2px">页面控件会渲染成插件主页的 HTML/PHP，可在「代码」页继续改写。也可直接拖「自定义 HTML」写 PHP。</div></div>`;
+  $('palette').innerHTML=h;
+  $('palette').querySelectorAll('[draggable]').forEach(el=>{
+    el.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain',el.dataset.ctl);e.dataTransfer.effectAllowed='copy'});
+  });
+}
+function switchCanvas(c){
+  S.cv=c;S.sel=null;
+  $('cvStruct').classList.toggle('on',c==='struct');$('cvPage').classList.toggle('on',c==='page');
+  $('canvasHint').textContent=c==='struct'?'拖动控件到此处，或点击左侧「+」添加':'拖动页面控件设计插件主页，下方实时预览';
+  renderPalette();renderCanvas();renderInspect();
+}
+function itemList(){
+  if(S.cv==='page')return S.widgets.map((w,i)=>({key:'w'+i,type:w.t,obj:w,idx:i}));
+  const a=[];
+  S.pages.forEach((p,i)=>a.push({key:'p'+i,type:'page',obj:p,idx:i}));
+  S.sidebar.forEach((p,i)=>a.push({key:'s'+i,type:'sidebar',obj:p,idx:i}));
+  S.settings.forEach((p,i)=>a.push({key:'t'+i,type:'setting',obj:p,idx:i}));
+  if(S.theme)a.push({key:'theme',type:'theme',obj:S.theme,idx:-1});
+  S.providers.forEach((p,i)=>a.push({key:'r'+i,type:'provider',obj:p,idx:i}));
+  if(S.hooks.length)a.push({key:'hooks',type:'hookgroup',obj:{n:S.hooks.length},idx:-1});
+  S.customFiles.forEach((p,i)=>a.push({key:'f'+i,type:'customfile',obj:p,idx:i}));
+  return a;
+}
+const TYPE_LABEL={page:'页面',sidebar:'侧边栏项',setting:'设置字段',theme:'主题',provider:'注册型能力',hookgroup:'钩子订阅',customfile:'自定义文件',
+ 'w-heading':'标题','w-text':'段落','w-card':'卡片','w-stat':'统计数字','w-button':'按钮','w-input':'输入框','w-table':'表格','w-alert':'提示条','w-divider':'分隔线','w-html':'自定义 HTML'};
+function cardInfo(it){
+  const o=it.obj;
+  switch(it.type){
+    case 'page':return {title:o.title||o.name,desc:`${o.area} · ${o.home||o.url||'/'} · ${o.embed||'iframe'}`,chip:'Page',cls:''};
+    case 'sidebar':return {title:o.title||o.page,desc:`覆盖页面 ${o.page} · ${o.area||'main'} · order ${o.order||0}`,chip:'UI',cls:'p'};
+    case 'setting':return {title:o.label||o.key,desc:`${o.type} · key=${o.key}${o.default?' · 默认 '+o.default:''}`,chip:'UI',cls:'p'};
+    case 'theme':return {title:o.label||o.name,desc:`${Object.keys(o.variables||{}).length} 个 CSS 变量${o.css?' · '+o.css:''}`,chip:'主题',cls:'y'};
+    case 'provider':return {title:o.kind+':'+o.name,desc:o.label||PROVIDER_DEFAULT_HOOK[o.kind]||'',chip:'Provider',cls:'g'};
+    case 'hookgroup':return {title:`已订阅 ${o.n} 个钩子`,desc:S.hooks.slice(0,5).join(', ')+(o.n>5?' …':''),chip:'Hook',cls:'y'};
+    case 'customfile':return {title:o.path||'(未命名)',desc:(o.content||'').split('\n')[0].slice(0,60),chip:'文件',cls:''};
+    default:return {title:TYPE_LABEL[it.type]||it.type,desc:o.text||o.sub||'',chip:'控件',cls:''};
+  }
+}
+function renderCanvas(){
+  const list=itemList(),dz=$('dropzone');
+  if(!list.length){dz.innerHTML=`<div class="empty"><span class="big">◈</span>${S.cv==='struct'?'从左侧拖入「页面」「设置字段」「钩子订阅」等控件<br>或点击控件直接添加':'拖入「标题」「卡片」「统计数字」等页面控件<br>下方预览会实时更新'}</div>`}
+  else dz.innerHTML=list.map(it=>{const c=cardInfo(it);return `<div class="card ${S.sel===it.key?'sel':''}" draggable="true" data-key="${it.key}" onclick="selectItem('${it.key}')">
+    <span class="grip">⠿</span><div class="body"><div class="t"><span class="chip ${c.cls}">${c.chip}</span>${esc(c.title)}</div><div class="d">${esc(c.desc)}</div></div>
+    <div class="ops"><button class="iconbtn" onclick="event.stopPropagation();moveItem('${it.key}',-1)" title="上移">↑</button><button class="iconbtn" onclick="event.stopPropagation();moveItem('${it.key}',1)" title="下移">↓</button><button class="iconbtn del" onclick="event.stopPropagation();delItem('${it.key}')" title="删除">✕</button></div></div>`}).join('');
+  // 拖放
+  dz.ondragover=e=>{e.preventDefault();dz.classList.add('over')};
+  dz.ondragleave=e=>{if(!dz.contains(e.relatedTarget))dz.classList.remove('over')};
+  dz.ondrop=e=>{e.preventDefault();dz.classList.remove('over');const t=e.dataTransfer.getData('text/plain');if(t)addControl(t)};
+  dz.querySelectorAll('.card').forEach(el=>{
+    el.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain','');e.dataTransfer.setData('application/x-nb',el.dataset.key);el.classList.add('drag');e.stopPropagation()});
+    el.addEventListener('dragend',()=>el.classList.remove('drag'));
+  });
+  renderPreview();
+}
+function addControl(t){
+  if(t==='hook'){openHookPicker();return}
+  const mk=(t)=>{
+    if(t==='page')return {name:'page'+uid().slice(0,4),title:'新页面',home:'page'+uid().slice(0,3)+'.php',area:'main',role:'any',icon:'puzzle',embed:'iframe',order:10,public:false,url:''};
+    if(t==='sidebar')return {page:S.pages[0]?S.pages[0].name:'home',title:'',icon:'',area:'main',role:'any',order:10};
+    if(t==='setting')return {key:'field'+uid().slice(0,4),label:'新设置',type:'text',default:'',options:'',help:''};
+    if(t==='theme')return {name:'theme-'+uid().slice(0,4),label:'我的主题',css:'theme.css',preview:'',variables:{'--nebula-primary':'#22d3ee'}};
+    if(t==='provider')return {kind:'storage',name:'myprovider',label:'',hook:''};
+    if(t==='customfile')return {path:'extra.php',content:'<?php\n// 自定义文件\n'};
+    if(t.startsWith('w-'))return {t,text:t==='w-stat'?'1,024':t==='w-alert'?'提示信息':'标题文字',sub:'说明文字'};
+  };
+  const o=mk(t);if(!o)return;
+  if(t==='page')S.pages.push(o);
+  else if(t==='sidebar')S.sidebar.push(o);
+  else if(t==='setting')S.settings.push(o);
+  else if(t==='theme'){if(S.theme){toast('主题是单例，已替换原有主题')}S.theme=o}
+  else if(t==='provider')S.providers.push(o);
+  else if(t==='customfile')S.customFiles.push(o);
+  else if(t.startsWith('w-'))S.widgets.push(o);
+  save();renderCanvas();
+  const arr=t.startsWith('w-')?S.widgets:null;
+  S.sel = arr?('w'+(S.widgets.length-1)):null;
+  if(!arr)S.sel=itemList().slice(-1)[0]?.key||null;
+  renderCanvas();renderInspect();renderPalette();
+}
+function selectItem(key){S.sel=key;renderCanvas();renderInspect()}
+function findItem(key){return itemList().find(x=>x.key===key)}
+function delItem(key){
+  const it=findItem(key);if(!it)return;
+  if(it.type==='theme')S.theme=null;
+  else if(it.type==='hookgroup')S.hooks=[];
+  else{const arr=it.type.startsWith('w-')?S.widgets:({page:S.pages,sidebar:S.sidebar,setting:S.settings,provider:S.providers,customfile:S.customFiles})[it.type];if(arr&&it.idx>=0)arr.splice(it.idx,1)}
+  S.sel=null;save();renderCanvas();renderInspect();
+}
+function moveItem(key,dir){
+  const list=itemList(),i=list.findIndex(x=>x.key===key);if(i<0)return;
+  const it=list[i],j=i+dir;if(j<0||j>=list.length)return;
+  // 只在同类型数组内移动
+  const getArr=t=>t.startsWith('w-')?S.widgets:({page:S.pages,sidebar:S.sidebar,setting:S.settings,provider:S.providers,customfile:S.customFiles})[t];
+  const a=getArr(it.type),b=getArr(list[j].type);
+  if(!a||a!==b||it.idx<0)return;
+  const tmp=a[it.idx];a[it.idx]=a[list[j].idx];a[list[j].idx]=tmp;
+  save();renderCanvas();
+}
+function renderInspect(){
+  const box=$('inspect');
+  if(!S.sel){box.innerHTML='<div class="none">点击左侧控件或画布中的卡片<br>在这里编辑属性</div>';$('selName').textContent='未选中';return}
+  if(['meta','runtime','layout'].includes(S.sel)){renderFixedInspect(S.sel);return}
+  const it=findItem(S.sel);if(!it){box.innerHTML='<div class="none">该项已不存在</div>';return}
+  $('selName').textContent=TYPE_LABEL[it.type]||it.type;
+  box.innerHTML=renderItemFields(it)+`<div style="margin-top:14px"><button class="btn sm" onclick="delItem('${it.key}')">删除此项</button></div>`;
+  bindFields(box,it.obj);
+}
+function fInput(label,key,val,help,type){return `<div class="field"><label>${label}</label><input type="${type||'text'}" data-k="${key}" value="${esc(val)}">${help?`<div class="help">${help}</div>`:''}</div>`}
+function fSelect(label,key,val,opts,help){return `<div class="field"><label>${label}</label><select data-k="${key}">${opts.map(o=>`<option value="${esc(o)}" ${o===val?'selected':''}>${esc(o)}</option>`).join('')}</select>${help?`<div class="help">${help}</div>`:''}</div>`}
+function fText(label,key,val,help){return `<div class="field"><label>${label}</label><textarea data-k="${key}">${esc(val)}</textarea>${help?`<div class="help">${help}</div>`:''}</div>`}
+function renderItemFields(it){
+  const o=it.obj,T=it.type;
+  if(T==='page')return `<div class="section-box"><h5>页面声明 PageDecl</h5>`+
+    fInput('页面标识 name <b>*</b>','name',o.name,'只允许 [a-z0-9-_]，URL 末段')+
+    fInput('侧边栏标题 title','title',o.title)+
+    fInput('主页文件 home','home',o.home,'相对 co.BEGG 所在目录，如 in.php。文件会被自动生成')+
+    fSelect('区域 area','area',o.area,AREAS,'main 主界面 / admin 后台 / public 公开')+
+    fSelect('可见角色 role','role',o.role,ROLES)+
+    fSelect('嵌入方式 embed','embed',o.embed,EMBEDS)+
+    fInput('图标 icon','icon',o.icon,'lucide 图标名，如 layout-dashboard')+
+    fInput('排序 order','order',o.order,'', 'number')+
+    fInput('外部 URL url','url',o.url,'填了就不反代，前端 iframe 直连（可 https://）')+
+    `<div class="field"><label><input type="checkbox" data-k="public" ${o.public?'checked':''} style="width:auto"> public（宿主不鉴权，插件自负责）</label></div></div>`;
+  if(T==='sidebar')return `<div class="section-box"><h5>侧边栏覆盖</h5>`+
+    fSelect('对应页面 page','page',o.page,S.pages.map(p=>p.name).length?S.pages.map(p=>p.name):['home'],'按页面 name 找到项后覆盖标题/图标/排序')+
+    fInput('标题 title','title',o.title)+fInput('图标 icon','icon',o.icon)+
+    fSelect('区域 area','area',o.area||'main',AREAS)+fSelect('角色 role','role',o.role||'any',ROLES)+
+    fInput('排序 order','order',o.order,'', 'number')+`</div>`;
+  if(T==='setting')return `<div class="section-box"><h5>设置字段 SettingField</h5>`+
+    fInput('键 key <b>*</b>','key',o.key)+fInput('显示名 label','label',o.label)+
+    fSelect('类型 type','type',o.type,SETTING_TYPES)+
+    fInput('默认值 default','default',o.default)+
+    fInput('选项 options','options',o.options,'type=select 时，逗号分隔')+
+    fInput('帮助文字 help','help',o.help)+`</div>`;
+  if(T==='theme')return `<div class="section-box"><h5>主题（单例）</h5>`+
+    fInput('标识 name','name',o.name)+fInput('显示名 label','label',o.label)+
+    fInput('CSS 文件 css','css',o.css,'相对 co.BEGG 目录，会自动生成一份示例')+
+    fInput('预览 preview','preview',o.preview)+`</div><div class="section-box"><h5>CSS 变量</h5><div id="varBox"></div><button class="btn sm" onclick="addVar()">＋ 添加变量</button><div class="help" style="margin-top:6px">常用：--nebula-primary / --nebula-accent / --nebula-bg</div></div>`;
+  if(T==='provider')return `<div class="section-box"><h5>注册型能力 Registration</h5>`+
+    fSelect('类别 kind','kind',o.kind,PROVIDER_KINDS)+
+    fInput('能力名 name <b>*</b>','name',o.name,'宿主点名调用时使用')+
+    fInput('显示名 label','label',o.label)+
+    fInput('覆盖钩子 hook','hook',o.hook,'留空用默认：'+PROVIDER_DEFAULT_HOOK[o.kind])+
+    `<div class="help">默认钩子会随 kind 变化，切换类别后请留意。</div></div>`;
+  if(T==='hookgroup')return `<div class="section-box"><h5>钩子订阅</h5><p style="font-size:12px;color:var(--muted);margin:0 0 10px">已订阅 ${S.hooks.length} 个。订阅钩子后宿主会拉起 JSON-RPC 可执行文件，制作器会自动生成骨架。</p><button class="btn primary" onclick="openHookPicker()">打开 99 钩子选择器</button></div>`;
+  if(T==='customfile')return `<div class="section-box"><h5>自定义文件</h5>`+
+    fInput('路径 path','path',o.path,'相对 co.BEGG 所在目录，如 lib.php / assets/app.js')+
+    fText('内容 content','content',o.content,'可写 PHP / HTML / CSS / JS。自定义 HTML 控件也能写片段。')+`</div>`;
+  if(T.startsWith('w-'))return `<div class="section-box"><h5>${TYPE_LABEL[T]}</h5>`+
+    (T==='w-divider'?`<div class="help">分隔线无需配置</div>`:
+     (T==='w-html'?fText('HTML / PHP 片段','text',o.text,'原样插入页面，可用 <?php ... ?> 输出动态内容')+
+      fInput('备注 sub','sub',o.sub):
+      fInput(T==='w-input'?'占位文字':'主文本 text','text',o.text)+
+      (T==='w-heading'||T==='w-card'||T==='w-stat'||T==='w-input'?fInput('副文本 sub','sub',o.sub):''))) +`</div>`;
+  return '';
+}
+function bindFields(box,obj){
+  box.querySelectorAll('[data-k]').forEach(el=>{
+    const k=el.dataset.k;
+    if(el.tagName==='SELECT'||el.tagName==='INPUT'||el.tagName==='TEXTAREA'){
+      const ev=el.type==='checkbox'?'change':'input';
+      el.addEventListener(ev,()=>{
+        obj[k]=el.type==='checkbox'?el.checked:(el.type==='number'?Number(el.value):el.value);
+        if(k==='kind'){PROVIDER_DEFAULT_HOOK[obj.kind]&&(document.querySelector('.help')&&0)}
+        save();renderCanvas();
+      });
+    }
+  });
+  if($('varBox'))renderVarBox(obj);
+}
+function renderVarBox(obj){
+  const vb=$('varBox');if(!vb)return;
+  const vs=obj.variables||{};
+  vb.innerHTML=Object.keys(vs).map((k,i)=>`<div class="kv"><input data-vk="${esc(k)}" value="${esc(k)}" placeholder="--nebula-primary"><input data-vv="${esc(k)}" value="${esc(vs[k])}" placeholder="#22d3ee"><button class="iconbtn del" onclick="delVar('${esc(k)}')">✕</button></div>`).join('')||'<div class="help">暂无变量</div>';
+  vb.querySelectorAll('input').forEach(inp=>inp.addEventListener('change',()=>{
+    const nk=vb.querySelector('input[data-vk]');
+    // 简化：改值即时写回，改键需失焦后重建
+    if(inp.dataset.vv!==undefined)obj.variables[inp.dataset.vv]=inp.value;
+    save();renderPreview();
+  }));
+}
+function addVar(){const it=findItem(S.sel);if(!it||!it.obj)return;it.obj.variables=it.obj.variables||{};it.obj.variables['--nebula-new-'+(Object.keys(it.obj.variables).length+1)]='#22d3ee';save();renderInspect();renderPreview()}
+function delVar(k){const it=findItem(S.sel);if(!it||!it.obj)return;delete it.obj.variables[k];save();renderInspect();renderPreview()}
+function renderFixedInspect(which){
+  const box=$('inspect');
+  $('selName').textContent=which==='meta'?'插件身份':which==='runtime'?'运行时':'目录布局';
+  if(which==='meta'){
+    const m=S.meta;
+    box.innerHTML=`<div class="section-box"><h5>身份信息</h5>`+
+      fInput('插件名 name <b>*</b>','name',m.name,'2–64 字符，[a-z0-9-_]，不能以 -/_ 开头。也是目录名')+
+      fInput('展示名 title','title',m.title)+fInput('版本 version','version',m.version,'语义化 x.y.z')+
+      fInput('作者 author','author',m.author)+fText('描述 description','description',m.description)+
+      fInput('协议 protocolVersion','protocolVersion',m.protocolVersion,'1 或 2（v1 不需要 register.go / co.BEGG）','number')+
+      fInput('许可证 license','license',m.license)+fInput('主页 homepage','homepage',m.homepage)+
+      fInput('最低宿主版本 minHostVersion','minHostVersion',m.minHostVersion)+
+      fInput('权限声明 permissions','permissions',(m.permissions||[]).join(','),'逗号分隔，仅作记录与展示')+`</div>`;
+    bindFields(box,m);return;
+  }
+  if(which==='runtime'){
+    const r=S.runtime;
+    box.innerHTML=`<div class="section-box"><h5>运行时（co.BEGG）</h5>`+
+      fSelect('runtime <b>*</b>','runtime',r.runtime,Object.keys(RUNTIMES))+
+      fInput('解释器要求 requires','requires',(r.requires||[]).join(','),'逗号分隔，如 php>=7.4 或 python3 或 node>=18')+
+      fInput('主页 home','home',r.home,'相对 co.BEGG 所在目录；文件会自动生成')+
+      fInput('入口脚本 entry','entry',r.entry,'python/node 的服务脚本；纯页面 PHP 可留空')+
+      fInput('静态根 static','static',r.static,'留空取 home 所在目录')+
+      fInput('监听 listen','listen',r.listen,'0.0.0.0 = 按后台绑定域名/IP 替换；也可直接写 https:// 外部地址')+
+      fInput('端口 port','port',r.port,'0 = 宿主动态分配','number')+
+      fInput('启动命令 command','command',r.command,'留空按 runtime 用默认命令；占位符 {port} {host} {dir} {entry} {home} {static}')+`</div>`+
+      `<div class="section-box"><h5>高级 · JSON-RPC 主体</h5><label style="font-size:12px;display:flex;gap:8px;align-items:center"><input type="checkbox" id="advRpc" ${S.advanced.jsonrpc?'checked':''} style="width:auto"> 生成钩子处理骨架文件</label>
+       <div class="field" style="margin-top:9px"><label>骨架语言</label><select id="advLang"><option value="python" ${S.advanced.lang==='python'?'selected':''}>Python</option><option value="node" ${S.advanced.lang==='node'?'selected':''}>Node.js</option></select></div>
+       <div class="help">订阅钩子时会自动开启。entry 相对插件根目录，Linux 需 chmod +x。</div></div>`;
+    bindFields(box,r);
+    $('advRpc').addEventListener('change',e=>{S.advanced.jsonrpc=e.target.checked;if(e.target.checked&&!S.hooks.length)S.hooks=['onBoot'];save();renderCanvas()});
+    $('advLang').addEventListener('change',e=>{S.advanced.lang=e.target.value;save()});
+    return;
+  }
+  box.innerHTML=`<div class="section-box"><h5>目录布局</h5>`+
+    `<div class="field"><label>三文件与页面放在哪</label><select data-k="dirLayout" id="layoutSel"><option value="flat" ${S.dirLayout==='flat'?'selected':''}>扁平（全部在插件根目录）</option><option value="ass" ${S.dirLayout==='ass'?'selected':''}>ASS/ 子目录（plugin.json 也在子目录，演示递归定位）</option></select><div class="help">宿主递归定位三文件（深度 ≤ 5），目录形式不限定。相对路径基准始终是 co.BEGG 所在目录。</div></div>`+
+    `<div class="note-box" style="margin-top:10px">用户举例的 <code>ASS/</code> 里放一堆 .php + register.go + co.BEGG 完全合法；<code>home</code> 写 <code>in.php</code> 而不是 <code>ASS/in.php</code>。</div></div>`;
+  $('layoutSel').addEventListener('change',e=>{S.dirLayout=e.target.value;save();renderBuild()});
+}
+
+/* ==================== 预览 ==================== */
+function togglePreview(){S.previewOn=!S.previewOn;$('previewPanel').style.display=S.previewOn?'flex':'none';$('pvBtn').textContent=S.previewOn?'隐藏预览':'显示预览'}
+function renderPreview(){
+  const shell=$('pvShell');if(!shell)return;
+  const main=S.pages.filter(p=>p.area==='main'),adm=S.pages.filter(p=>p.area==='admin');
+  const nav=(arr,label)=>arr.length?`<div class="ttl">${label}</div>`+arr.map(p=>`<div class="pv-nav plugin">◈ ${esc(p.title||p.name)}</div>`).join(''):'';
+  const themeVars=S.theme&&S.theme.variables?Object.entries(S.theme.variables).map(([k,v])=>`${k}:${v}`).join(';')+'':'';
+  const body=S.widgets.length?S.widgets.map(widgetHTML).join(''):`<div class="empty" style="padding:24px">插件主页预览<br><span style="font-size:11px">在「页面设计」里拖入控件</span></div>`;
+  shell.innerHTML=`<div class="pv-top"><span class="pv-dot" style="background:#f87171"></span><span class="pv-dot" style="background:#fbbf24"></span><span class="pv-dot" style="background:#34d399"></span><span style="margin-left:8px">NebulaDrive · 插件预览</span><span class="spacer" style="flex:1"></span><span style="color:var(--muted);font-size:11px">iframe /ext/${esc(S.meta.name)}/</span></div>
+  <div class="pv-main" style="${themeVars}"><div class="pv-side">
+   <div class="ttl">主界面</div><div class="pv-nav static">▤ 文件</div><div class="pv-nav static">▦ 分享</div>
+   ${nav(main,'插件 · 主界面')}
+   <div class="ttl" style="margin-top:12px">后台</div><div class="pv-nav static">⚙ 设置</div>
+   ${nav(adm,'插件 · 后台')}
+  </div><div class="pv-content">${body}
+   ${S.settings.length?`<div class="pv-divider"></div><div style="font-size:11px;color:var(--muted);margin-bottom:8px">插件设置面板预览</div>`+S.settings.map(s=>{
+     if(s.type==='bool')return `<div class="widget" style="font-size:12px">☐ ${esc(s.label)}</div>`;
+     if(s.type==='select')return `<div class="widget" style="font-size:12px">${esc(s.label)}：<select class="pv-input" style="display:inline-block;width:auto">${(s.options||'').split(',').map(o=>`<option>${esc(o)}</option>`).join('')}</select></div>`;
+     return `<div class="widget"><label style="font-size:11.5px;color:var(--muted)">${esc(s.label)}</label><input class="pv-input" value="${esc(s.default||'')}"></div>`;
+   }).join(''):''}
+  </div></div>`;
+  const tp=$('pvTheme');
+  if(tp)tp.innerHTML=S.theme?`主题：<span class="pv-theme-swatch" style="background:${esc((S.theme.variables||{})['--nebula-primary']||'#22d3ee')}"></span>${esc(S.theme.label||S.theme.name)}`:'';
+}
+
+/* ==================== 代码模式 ==================== */
+function codeFileNames(){const sub=S.dirLayout==='ass'?'ASS/':'';const f=buildFiles();return Object.keys(f)}
+function renderCode(){
+  const names=codeFileNames();
+  if(!names.includes(S.codeFile))S.codeFile=names[0]||'plugin.json';
+  $('filetabs').innerHTML=names.map(n=>`<button class="filetab ${n===S.codeFile?'on':''} ${S.codeOverride[n]!=null?'dirty':''}" onclick="openCodeFile('${n.replace(/'/g,"\\'")}')">${esc(n)}</button>`).join('');
+  const f=buildFiles();
+  $('editor').value=S.codeOverride[S.codeFile]!=null?S.codeOverride[S.codeFile]:(f[S.codeFile]||'');
+  $('codeStatus').textContent=S.codeOverride[S.codeFile]!=null?'手工编辑中 · 构建时将覆盖自动生成内容':'自动生成 · 与宿主 v2 契约一致';
+}
+function openCodeFile(n){S.codeFile=n;renderCode()}
+function onCodeEdit(){S.codeOverride[S.codeFile]=$('editor').value;save();$('codeStatus').textContent='手工编辑中 · 构建时将覆盖自动生成内容';document.querySelectorAll('.filetab').forEach(t=>{if(t.textContent.replace('●','').trim()===S.codeFile)t.classList.add('dirty')})}
+function resetCode(){delete S.codeOverride[S.codeFile];save();renderCode();toast('已重置为自动生成内容')}
+function syncCodeToModel(){
+  const sub=S.dirLayout==='ass'?'ASS/':'',v=S.codeOverride[S.codeFile];
+  if(v==null){toast('当前文件没有手工改动');return}
+  try{
+    if(S.codeFile==='plugin.json'){
+      const o=JSON.parse(v);const m=S.meta;
+      ['name','title','version','author','description','protocolVersion','license','homepage','minHostVersion','entry'].forEach(k=>{if(o[k]!==undefined)m[k]=o[k]});
+      if(o.hooks)S.hooks=o.hooks;if(o.pages)S.pages=o.pages.map(p=>({name:'',title:'',home:'',area:'main',role:'any',icon:'',embed:'iframe',order:0,public:false,url:'',...p}));
+      if(o.providers)S.providers=o.providers;if(o.permissions)m.permissions=o.permissions;
+      if(o.entry){S.advanced.jsonrpc=true;S.hooks=S.hooks.length?S.hooks:['onBoot']}
+      toast('plugin.json 已同步回设计');
+    }else if(S.codeFile===sub+'co.BEGG'){
+      const o=JSON.parse(v),r=S.runtime;
+      ['runtime','entry','home','static','listen','port','command'].forEach(k=>{if(o[k]!==undefined)r[k]=o[k]});
+      if(o.requires)r.requires=o.requires;if(o.env)r.env=o.env;
+      if(o.ui){S.sidebar=o.ui.sidebar||[];S.settings=o.ui.settings||[];S.theme=o.ui.theme||null}
+      if(o.pages&&!S.pages.length)S.pages=o.pages;
+      toast('co.BEGG 已同步回设计');
+    }else{toast('该文件的手工内容保留，不反向解析（避免破坏设计结构）');return}
+    delete S.codeOverride[S.codeFile];S.sel=null;save();renderAll();
+  }catch(e){toast('同步失败：'+e.message)}
+}
+
+/* ==================== 校验 / 构建视图 ==================== */
+function renderCheck(){
+  const r=validate(),bad=r.filter(x=>!x.ok&&!x.warn).length,warn=r.filter(x=>x.warn).length;
+  $('checkResult').innerHTML=`<div class="summary ${bad?'bad':'ok'}">${bad?'✕ 有 '+bad+' 项未通过，构建已阻止':'✓ 全部 '+(r.length-warn)+' 项核心校验通过'}${warn?' · '+warn+' 条提示':''}</div>`+
+    r.map(x=>`<div class="check ${x.warn?'warn':(x.ok?'ok':'bad')}"><span class="st">${x.warn?'!':(x.ok?'✓':'✕')}</span><div class="txt"><b>${esc(x.name)}</b><span>${esc(x.detail)}</span></div></div>`).join('');
+}
+let buildSel=null;
+function renderBuild(){
+  const f=finalFiles(),names=Object.keys(f),sub=S.dirLayout==='ass'?'ASS/':'';
+  // 目录树
+  const lines=[`<span class="dir">${esc(S.meta.name||'plugin')}/</span>`];
+  const draw=(pfx,items,keys,lastOfRoot)=>{items.forEach((p,i)=>{const last=lastOfRoot&&i===items.length-1;const k=keys?keys[i]:p;lines.push(`<span class="note">${pfx}${last?'└─':'├─'} </span><span class="file">${esc(p)}</span>  <span class="note">(${new Blob([f[k]]).size} B)</span>`)})};
+  if(sub){
+    const innerKeys=names.filter(n=>n.startsWith(sub));
+    const rootKeys=names.filter(n=>!n.startsWith(sub));
+    draw('',rootKeys,rootKeys,false);
+    lines.push(`<span class="note">└─ </span><span class="dir">ASS/</span>  <span class="note">(co.BEGG 所在目录 = 相对路径基准)</span>`);
+    draw('   ',innerKeys.map(n=>n.slice(sub.length)),innerKeys,true);
+  } else draw('',names,names,true);
+  $('tree').innerHTML=lines.join('\n');
+  $('filepills').innerHTML=names.map(n=>`<div class="filepill ${buildSel===n?'on':''}" onclick="showFile('${n.replace(/'/g,"\\'")}')">${esc(n)}</div>`).join('');
+  const notes=[];
+  if(S.hooks.length)notes.push(`⚠ 订阅了 <b>${S.hooks.length} 个钩子</b>：宿主会拉起 <code>${rpcEntryName()}</code> 做 JSON-RPC。<b>Linux/macOS 需 <code>chmod +x ${rpcEntryName()}</code></b>；Windows 需改为 <code>.exe</code> 并同步改 <code>plugin.json</code> 的 <code>entry</code>。`);
+  if(S.runtime.runtime==='external')notes.push('⚠ 外部页面不经过宿主反代，前端 iframe 直连 <code>url</code>；请确认目标站允许被 iframe 嵌入（X-Frame-Options / CSP）。');
+  notes.push('⚠ 宿主对 <code>/ext/*</code> <b>完全透传鉴权</b>：不校验登录态、不注入 token、不设 iframe sandbox。插件页面必须自己做权限校验。');
+  notes.push('ℹ 插件默认关闭：后台需先开启<b>全局总开关</b>（勾选风险确认），再启用单个插件。');
+  notes.push(`ℹ <code>home</code> 一律相对 <b>co.BEGG 所在目录</b>（当前 ${sub||'插件根目录'}），不要写成 <code>${sub}in.php</code>。`);
+  $('buildNotes').innerHTML=notes.join('<br><br>');
+  if(buildSel&&f[buildSel]!==undefined)$('filebox').textContent=f[buildSel];
+  else $('filebox').textContent='点击上方文件名查看内容';
+}
+function showFile(n){buildSel=n;renderBuild()}
+function copyAll(){navigator.clipboard.writeText(JSON.stringify(finalFiles(),null,2)).then(()=>toast('已复制全部文件内容（JSON）')).catch(()=>toast('复制失败，请用「下载 ZIP」'))}
+
+/* ==================== 钩子选择器 ==================== */
+function openHookPicker(){
+  const bg=$('modalBg');
+  bg.innerHTML=`<div class="modal"><h3>钩子订阅 · 共 ${HOOKS.length} 个</h3>
+   <div style="color:var(--muted);font-size:12px;margin-bottom:10px">勾选后自动写入 plugin.json 与 register.go（两边集合保持一致）。同步=可拦截/变换决策点，异步=纯通知。</div>
+   <input class="hooksearch" id="hookQ" placeholder="搜索钩子名或说明…" oninput="filterHooks()">
+   <div class="hooklist" id="hookList"></div>
+   <div class="row"><button class="btn" onclick="closeModal()">取消</button><button class="btn primary" onclick="saveHooks()">保存（<span id="hkCount">${S.hooks.length}</span>）</button></div></div>`;
+  bg.classList.add('show');renderHookList('');
+  bg.onclick=e=>{if(e.target===bg)closeModal()};
+}
+function closeModal(){$('modalBg').classList.remove('show')}
+function renderHookList(q){
+  const box=$('hookList');if(!box)return;
+  q=(q||'').toLowerCase();let h='';
+  Object.keys(GROUPS).forEach(g=>{
+    const items=GROUPS[g].items.filter(x=>!q||x.name.toLowerCase().includes(q)||x.doc.toLowerCase().includes(q)||GROUPS[g].label.includes(q));
+    if(!items.length)return;
+    h+=`<div class="hgroup">${esc(GROUPS[g].label)} · ${items.length}</div>`+items.map(x=>`<label class="hrow"><input type="checkbox" value="${x.name}" ${S.hooks.includes(x.name)?'checked':''} onchange="toggleHook('${x.name}',this.checked)"><span class="hn">${x.name}</span><span class="hd">${esc(x.doc)}</span><span class="badges">${x.mode==='sync'?'<span class="badge s">同步</span>':''}${x.blockable?'<span class="badge b">可拦截</span>':''}${x.mutatable?'<span class="badge m">可变换</span>':''}${x.since===1?'<span class="badge">v1</span>':''}</span></label>`).join('');
+  });
+  box.innerHTML=h||'<div style="padding:20px;text-align:center;color:var(--muted)">无匹配结果</div>';
+  const c=$('hkCount');if(c)c.textContent=S.hooks.length;
+}
+function filterHooks(){renderHookList($('hookQ')?$('hookQ').value:'')}
+function toggleHook(n,on){if(on){if(!S.hooks.includes(n))S.hooks.push(n)}else S.hooks=S.hooks.filter(x=>x!==n);const c=$('hkCount');if(c)c.textContent=S.hooks.length}
+function saveHooks(){if(S.hooks.length&&!S.advanced.jsonrpc)S.advanced.jsonrpc=true;closeModal();save();renderAll();toast('已保存 '+S.hooks.length+' 个钩子')}
+
+/* ==================== 模板 / 导入导出 ==================== */
+function applyTemplate(k){if(!TEMPLATES[k])return;S=TEMPLATES[k]();S.codeFile='plugin.json';buildSel=null;save();renderAll();toast('已加载模板：'+$('tplSel').selectedOptions[0].textContent)}
+function exportProject(){download((S.meta.name||'plugin')+'.pluginproj.json',new Blob([JSON.stringify({version:1,state:S},null,2)],{type:'application/json'}));toast('工程文件已导出，可随时导入继续编辑')}
+function importProject(){$('fileInput').click()}
+function onImportFile(e){const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const o=JSON.parse(rd.result);if(!o.state)throw new Error('不是有效的工程文件');S=Object.assign(blankState(),o.state);S.codeOverride=S.codeOverride||{};save();renderAll();toast('工程已导入')}catch(err){toast('导入失败：'+err.message)}};rd.readAsText(f);e.target.value=''}
+function save(){try{localStorage.setItem('nb-plugin-builder-v2',JSON.stringify(S))}catch(e){}}
+function load(){try{const x=localStorage.getItem('nb-plugin-builder-v2');if(x){const o=JSON.parse(x);S=Object.assign(blankState(),o);S.codeOverride=S.codeOverride||{};return true}}catch(e){}return false}
+function renderAll(){renderPalette();renderCanvas();renderInspect();renderPreview();renderCode();renderBuild();
+  $('cvStruct').classList.toggle('on',S.cv==='struct');$('cvPage').classList.toggle('on',S.cv==='page');
+  $('previewPanel').style.display=S.previewOn?'flex':'none';$('pvBtn').textContent=S.previewOn?'隐藏预览':'显示预览';
+  $('canvasHint').textContent=S.cv==='struct'?'拖动控件到此处，或点击左侧「+」添加':'拖动页面控件设计插件主页，下方实时预览';
+}
+
+/* ==================== 启动 ==================== */
+(function init(){
+  if(!load()){S=TEMPLATES.php();save()}
+  S.codeFile=S.codeFile||'plugin.json';
+  $('tplSel').value='php';
+  renderAll();
+})();
+</script>
+</body>
+</html>

@@ -29,6 +29,7 @@ const (
 	GroupPlugin  HookGroup = "plugin"  // 插件自身生命周期
 	GroupLimit   HookGroup = "limit"   // 限流
 	GroupUI      HookGroup = "ui"      // UI 扩展点（侧边栏/主题/设置页）
+	GroupAI      HookGroup = "ai"      // AI 智能（补全/推荐/摘要/问答/网关）
 )
 
 // GroupDocs 分组中文名。
@@ -39,7 +40,7 @@ var GroupDocs = map[HookGroup]string{
 	GroupStorage: "存储与策略", GroupCollab: "协作编辑", GroupNotify: "通知与邮件",
 	GroupBilling: "套餐与付费", GroupAudit: "审计与统计", GroupBackup: "备份与恢复",
 	GroupAPI: "开放 API 与 CLI", GroupPlugin: "插件生命周期", GroupLimit: "限流",
-	GroupUI: "UI 扩展点",
+	GroupUI: "UI 扩展点", GroupAI: "AI 智能",
 }
 
 // ---- v1 冻结钩子（名字与语义不得变更） ----
@@ -180,6 +181,17 @@ const (
 	HookUIThemeApply   HookName = "onUIThemeApply"
 	HookUISettingsSave HookName = "onUISettingsSave"
 	HookUIPageRegister HookName = "onUIPageRegister"
+
+	// AI 智能（v2 增量，协议版本不变；v1 插件无感）
+	HookAIRequest         HookName = "onAIRequest"
+	HookAIResponse        HookName = "onAIResponse"
+	HookAIProviderResolve HookName = "onAIProviderResolve"
+	HookAIComplete        HookName = "onAIComplete"
+	HookAIRecommend       HookName = "onAIRecommend"
+	HookAISearch          HookName = "onAISearch"
+	HookAISummary         HookName = "onAISummary"
+	HookAIAsk             HookName = "onAIAsk"
+	HookAIConfigChange    HookName = "onAIConfigChange"
 )
 
 // ---- 钩子元信息表 ----
@@ -377,6 +389,17 @@ var Hooks = func() []HookMeta {
 		{HookUIThemeApply, syncM(GroupUI, false, true, "前端应用插件主题时触发。写 ctx.variables 可动态覆盖 CSS 变量。")},
 		{HookUISettingsSave, syncM(GroupUI, true, true, "插件设置面板保存时触发。可拦截校验；写 ctx.values 覆盖落库值。")},
 		{HookUIPageRegister, syncM(GroupUI, false, true, "宿主聚合 /api/plugins/ui 时触发。插件可写 ctx.sidebar/ctx.theme/ctx.settings 动态注入 UI 点。")},
+
+		// ---------------- AI 智能 ----------------
+		{HookAIRequest, syncM(GroupAI, true, true, "AI 网关向模型发起请求前触发。可拦截（决策 deny 即本次不外发）；可写 ctx.model/ctx.prompt 改写请求。ctx={userId,scene,provider,model,promptChars,codeSpace}")},
+		{HookAIResponse, sm(GroupAI, "AI 请求结束后触发（成功或失败都发）。ctx={userId,scene,provider,model,success,latencyMs,promptTokens,completionTokens,error}")},
+		{HookAIProviderResolve, syncM(GroupAI, false, true, "注册型(ai)：宿主点名调用 AI 能力提供方时触发。插件写 ctx.handled=true 并写 ctx.result 即可完全接管模型调用。ctx={userId,scene,prompt,maxTokens}")},
+		{HookAIComplete, syncM(GroupAI, false, true, "代码空间请求补全时触发（AI 网关之前）。插件写 ctx.completion 可直接提供结果，宿主不再调模型。ctx={userId,fileId,fileName,language,prefix,suffix,maxTokens}")},
+		{HookAIRecommend, syncM(GroupAI, false, true, "搜索联想/近期常用/热门推荐生成时触发。插件可写 ctx.suggestions 或 ctx.fileIds 覆盖内置结果。ctx={userId,q,limit}")},
+		{HookAISearch, syncM(GroupAI, true, true, "自然语言搜文件时触发。插件可写 ctx.filters 覆盖解析出的检索条件、写 ctx.answer 直接作答；可拦截。ctx={userId,query,scope}")},
+		{HookAISummary, syncM(GroupAI, false, true, "生成文件摘要与自动标签时触发。插件可写 ctx.summary / ctx.tags 接管。ctx={userId,fileId,fileName,mimeType,size,textChars}")},
+		{HookAIAsk, syncM(GroupAI, true, true, "AI 助手问答时触发。插件可写 ctx.answer 直接回答；可拦截。ctx={userId,question,historyChars}")},
+		{HookAIConfigChange, sm(GroupAI, "后台保存 AI 配置后触发。ctx={operatorId,operatorName,enabled,provider,model,changed}")},
 
 		// ---------------- 限流 ----------------
 		{HookRateLimit, v1(GroupLimit, ModeAsync, false, false, "【v1 兼容】高频操作前触发。整体异步仅通知；限流中间件这一处通过 RateLimitGate 强制同步读取拦截决策。")},

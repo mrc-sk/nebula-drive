@@ -207,6 +207,12 @@ func Setup() *gin.Engine {
 			admin.DELETE("/policies/:id", controllers.DeletePolicy)
 			admin.GET("/settings", controllers.GetSettings)
 			admin.POST("/settings", controllers.SaveSettings)
+			// 智能时代：AI 网关配置 / 连通性测试 / 用量与日志
+			admin.GET("/ai/config", controllers.GetAIConfig)
+			admin.POST("/ai/config", controllers.SaveAIConfig)
+			admin.POST("/ai/test", controllers.TestAIConfig)
+			admin.GET("/ai/usage", controllers.AIUsage)
+			admin.GET("/ai/logs", controllers.AILogs)
 			admin.GET("/dashboard", controllers.Dashboard)
 			admin.POST("/upload-cert", controllers.UploadCert)
 			admin.GET("/ip-bans", controllers.ListIPBans)
@@ -240,6 +246,11 @@ func Setup() *gin.Engine {
 			files.GET("/search-history", controllers.ListSearchHistory)
 			files.POST("/search-history", controllers.SaveSearchHistory)
 			files.DELETE("/search-history", controllers.ClearSearchHistory)
+			// 智能推荐 / 近期常用 / 热门 / 隐私清理
+			files.GET("/suggest", controllers.SuggestFiles)
+			files.GET("/recent", controllers.RecentFiles)
+			files.GET("/hot", controllers.HotFiles)
+			files.DELETE("/access", controllers.ClearMyAccess)
 			files.GET("/breadcrumb/:id", controllers.Breadcrumb)
 			files.POST("/mkdir", controllers.Mkdir)
 			files.POST("/rapid", controllers.Rapid)
@@ -268,6 +279,19 @@ func Setup() *gin.Engine {
 			// 协作编辑
 			files.GET("/:id/collab", controllers.CollabOpen)
 			files.POST("/:id/collab/save", controllers.CollabSave)
+			// 代码空间（后台开关默认关，关闭时接口 404）
+			files.GET("/:id/content", controllers.GetFileContent)
+			files.PUT("/:id/content", controllers.SaveFileContent)
+		}
+
+		// 智能时代：AI 场景（登录即可用；未配模型时自动降级为本地算法）
+		aiGroup := api.Group("/ai", middleware.Auth(true))
+		{
+			aiGroup.GET("/status", controllers.AIStatus)
+			aiGroup.POST("/search", controllers.AISearch)
+			aiGroup.POST("/ask", controllers.AIAsk)
+			aiGroup.POST("/complete", controllers.AIComplete)
+			aiGroup.POST("/summary/:id", controllers.AISummaryFile)
 		}
 
 		// Yjs CRDT 同步 WebSocket

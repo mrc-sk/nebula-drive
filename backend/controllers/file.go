@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/nebula-drive/nebula/internal/ai"
 	"github.com/nebula-drive/nebula/internal/hooks"
 	"io"
 	"mime"
@@ -441,6 +442,8 @@ func Download(c *gin.Context) {
 		return
 	}
 	u := middleware.CurrentUser(c)
+	// 智能推荐埋点：下载过的文件进入「近期常用 / 热门」。
+	ai.RecordAccess(u.ID, f.ID, "download")
 	dctx := map[string]any{
 		"userId":   u.ID,
 		"userName": u.UserName,

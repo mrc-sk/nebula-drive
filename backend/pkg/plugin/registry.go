@@ -32,6 +32,7 @@ const (
 	ProviderSearch      ProviderKind = "search"
 	ProviderTheme       ProviderKind = "theme"
 	ProviderPage        ProviderKind = "page"
+	ProviderAI          ProviderKind = "ai"
 )
 
 // DefaultProviderHook 未显式指定 Hook 时，宿主用这个钩子调用该能力。
@@ -48,6 +49,7 @@ var DefaultProviderHook = map[ProviderKind]HookName{
 	ProviderSearch:      HookStatsCollect,
 	ProviderTheme:       HookUIThemeApply,
 	ProviderPage:        HookUIPageOpen,
+	ProviderAI:          HookAIProviderResolve,
 }
 
 // ValidProviderKinds 允许的类别（manifest/co.BEGG 校验用）。

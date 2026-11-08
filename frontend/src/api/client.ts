@@ -357,6 +357,65 @@ export interface TaskItem {
   updatedAt: string
 }
 
+// ---- 智能时代相关类型 ----
+
+export interface AIFileBrief {
+  id: number
+  name: string
+  extension: string
+  size: number
+  mimeType: string
+  updatedAt: string
+  accessCount: number
+  lastAccessed: string
+}
+
+export interface SuggestResult {
+  suggestions: string[]
+  history: string[]
+  recent: AIFileBrief[]
+  hot: AIFileBrief[]
+  mode: string
+}
+
+export interface AIStatus {
+  enabled: boolean
+  available: boolean
+  mode: 'local' | 'gateway' | 'plugin'
+  codeSpaceEnabled: boolean
+  scenes: Record<string, boolean>
+  autoSummary: boolean
+  autoTag: boolean
+  model: string
+}
+
+export interface AIConfig {
+  enabled: boolean
+  baseUrl: string
+  apiKey: string
+  apiKeySet: boolean
+  model: string
+  timeoutSec: number
+  maxTokens: number
+  temperature: number
+  provider: string
+  codeSpaceEnabled: boolean
+  autoSummary: boolean
+  autoTag: boolean
+  rateLimit: number
+  scenes: Record<string, boolean>
+  available: boolean
+  mode: string
+  providers: string[]
+}
+
+export interface CompletionItem {
+  label: string
+  kind: string
+  detail: string
+  insertText: string
+}
+
 export async function request<T = any>(
   url: string,
   options: RequestInit = {},
@@ -609,6 +668,43 @@ export const api = {
       }),
     downloadVersionURL: (fileId: number, versionId: number) =>
       `/api/files/${fileId}/versions/${versionId}/download`,
+    /** 全局搜索：后端 10 维检索 */
+    search: (params: Record<string, string | number | undefined>) => {
+      const q = new URLSearchParams()
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== '') q.set(k, String(v))
+      })
+      return request<ApiResult<{ total: number; list: FileItem[]; page: number; size: number }>>(
+        `/api/files/search?${q.toString()}`, { headers: authHeaders() },
+      )
+    },
+    saveSearchHistory: (keyword: string, filters = '') =>
+      request<ApiResult>('/api/files/search-history', {
+        method: 'POST', body: JSON.stringify({ keyword, filters }), headers: authHeaders(),
+      }),
+    clearSearchHistory: () =>
+      request<ApiResult>('/api/files/search-history', { method: 'DELETE', headers: authHeaders() }),
+    /** 智能联想 + 近期常用 + 热门，一次拿齐 */
+    suggest: (q: string, limit = 8) =>
+      request<ApiResult<SuggestResult>>(`/api/files/suggest?q=${encodeURIComponent(q)}&limit=${limit}`,
+        { headers: authHeaders() }),
+    recent: (limit = 10) =>
+      request<ApiResult<AIFileBrief[]>>(`/api/files/recent?limit=${limit}`, { headers: authHeaders() }),
+    hot: (limit = 10) =>
+      request<ApiResult<AIFileBrief[]>>(`/api/files/hot?limit=${limit}`, { headers: authHeaders() }),
+    clearAccess: () =>
+      request<ApiResult>('/api/files/access', { method: 'DELETE', headers: authHeaders() }),
+    /** 代码空间：读/写纯文本文件内容 */
+    getContent: (id: number) =>
+      request<ApiResult<{
+        id: number; name: string; content: string; language: string
+        size: number; updatedAt: string; version: number
+      }>>(`/api/files/${id}/content`, { headers: authHeaders() }),
+    saveContent: (id: number, content: string) =>
+      request<ApiResult<{ size: number; version: number; updatedAt: string }>>(
+        `/api/files/${id}/content`, {
+          method: 'PUT', body: JSON.stringify({ content }), headers: authHeaders(),
+        }),
   },
 
   shares: {
@@ -827,6 +923,54 @@ export const api = {
       }),
     revoke: (id: number | string) =>
       request<ApiResult>(`/api/tokens/${id}`, { method: 'DELETE', headers: authHeaders() }),
+  },
+
+  /** 智能时代：AI 场景 + 后台配置 */
+  ai: {
+    status: () => request<ApiResult<AIStatus>>('/api/ai/status', { headers: authHeaders() }),
+    search: (query: string, limit = 20) =>
+      request<ApiResult<{
+        answer: string
+        filters: Record<string, any>
+        list: FileItem[]
+        mode: string
+      }>>('/api/ai/search', {
+        method: 'POST', body: JSON.stringify({ query, limit }), headers: authHeaders(),
+      }),
+    ask: (question: string, history: string[] = []) =>
+      request<ApiResult<{ answer: string; mode: string; refs: FileItem[] }>>('/api/ai/ask', {
+        method: 'POST', body: JSON.stringify({ question, history }), headers: authHeaders(),
+      }),
+    complete: (payload: {
+      fileId?: number; fileName?: string; language?: string
+      prefix?: string; suffix?: string; doc?: string; maxTokens?: number
+    }) =>
+      request<ApiResult<{ items: CompletionItem[]; text: string; mode: string; hint: string }>>(
+        '/api/ai/complete', {
+          method: 'POST', body: JSON.stringify(payload), headers: authHeaders(),
+        }),
+    summary: (id: number) =>
+      request<ApiResult<{
+        summary: string; tags: string[]; provider: string; cached: boolean; updatedAt: string
+      }>>(`/api/ai/summary/${id}`, { method: 'POST', headers: authHeaders() }),
+    getConfig: () =>
+      request<ApiResult<AIConfig>>('/api/admin/ai/config', { headers: authHeaders() }),
+    saveConfig: (cfg: Partial<AIConfig>) =>
+      request<ApiResult<AIConfig>>('/api/admin/ai/config', {
+        method: 'POST', body: JSON.stringify(cfg), headers: authHeaders(),
+      }),
+    testConfig: (cfg: Partial<AIConfig>) =>
+      request<ApiResult<{ reply: string }>>('/api/admin/ai/test', {
+        method: 'POST', body: JSON.stringify(cfg), headers: authHeaders(),
+      }),
+    usage: () =>
+      request<ApiResult<{
+        total: number; success: number; failed: number; tokens: number
+        avgLatencyMs: number; last7Days: number
+        byScene: Record<string, number>; byProvider: Record<string, number>
+      }>>('/api/admin/ai/usage', { headers: authHeaders() }),
+    logs: (limit = 50) =>
+      request<ApiResult<any[]>>(`/api/admin/ai/logs?limit=${limit}`, { headers: authHeaders() }),
   },
 }
 

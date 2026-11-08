@@ -323,6 +323,49 @@ type SearchHistory struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// ---- 智能时代新增模型 ----
+
+// FileAccess 文件访问埋点。用于「近期常用」「热门」与智能排序。
+// 只记元数据，不记文件内容；同用户同文件短时间内重复访问会做去重。
+type FileAccess struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	UserID    uint      `gorm:"index:idx_access_user_time;not null" json:"userId"`
+	FileID    uint      `gorm:"index;not null" json:"fileId"`
+	Action    string    `gorm:"size:16;not null" json:"action"` // open/preview/download/edit
+	CreatedAt time.Time `gorm:"index:idx_access_user_time" json:"createdAt"`
+}
+
+// AIAuditLog AI 调用基础日志。只记长度/统计/耗时，不落 prompt 正文，
+// 避免文件内容随审计表扩散。
+type AIAuditLog struct {
+	ID               uint      `gorm:"primarykey" json:"id"`
+	UserID           uint      `gorm:"index;not null" json:"userId"`
+	Scene            string    `gorm:"size:24;index" json:"scene"`
+	Provider         string    `gorm:"size:64" json:"provider"`
+	Model            string    `gorm:"size:128" json:"model"`
+	PromptChars      int       `json:"promptChars"`
+	PromptTokens     int       `json:"promptTokens"`
+	CompletionTokens int       `json:"completionTokens"`
+	LatencyMs        int64     `json:"latencyMs"`
+	Success          bool      `json:"success"`
+	Error            string    `gorm:"size:512" json:"error"`
+	CreatedAt        time.Time `gorm:"index" json:"createdAt"`
+}
+
+// AISummary 文件摘要与自动标签缓存，避免每次打开重复调模型。
+// FileHash 用文件 size+updatedAt 派生，文件一变缓存自动失效。
+type AISummary struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	FileID    uint      `gorm:"uniqueIndex;not null" json:"fileId"`
+	OwnerID   uint      `gorm:"index;not null" json:"ownerId"`
+	FileHash  string    `gorm:"size:64" json:"fileHash"`
+	Summary   string    `gorm:"type:text" json:"summary"`
+	Tags      string    `gorm:"type:text" json:"tags"` // JSON []string
+	Provider  string    `gorm:"size:64" json:"provider"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 // AutoMigrate 自动建表
 func AutoMigrate() error {
 	if db.DB == nil {
@@ -335,6 +378,7 @@ func AutoMigrate() error {
 		&IPBan{},
 		&Plan{}, &RedemptionCode{}, &Subscription{}, &RedemptionLog{},
 		&SearchHistory{},
+		&FileAccess{}, &AIAuditLog{}, &AISummary{},
 	); err != nil {
 		return err
 	}

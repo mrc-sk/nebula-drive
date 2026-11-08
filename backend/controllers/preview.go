@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"github.com/nebula-drive/nebula/internal/ai"
 	"github.com/nebula-drive/nebula/internal/hooks"
 	"github.com/nebula-drive/nebula/pkg/plugin"
 	"io"
@@ -48,6 +49,8 @@ func Preview(c *gin.Context) {
 		return
 	}
 	defer rc.Close()
+	// 智能推荐埋点：预览过的文件进入「近期常用 / 热门」。异步写入，不阻塞流。
+	ai.RecordAccess(u.ID, f.ID, "preview")
 	ct := f.MimeType
 	if ct == "" {
 		ct = "application/octet-stream"

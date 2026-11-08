@@ -29,6 +29,11 @@ const TasksOffline = lazy(() => import('./pages/TasksOffline'))
 const Trash = lazy(() => import('./pages/Trash'))
 // 插件页面容器：侧边栏点开插件页面后走这里，iframe 指向 /ext/<plugin>/*
 const PluginPage = lazy(() => import('./pages/PluginPage'))
+// 智能时代：全部 lazy —— 代码空间含 CodeMirror，关掉开关时这部分 chunk 根本不会加载。
+const SearchResults = lazy(() => import('./pages/SearchResults'))
+const AIAssistant = lazy(() => import('./pages/AIAssistant'))
+const CodeSpace = lazy(() => import('./pages/CodeSpace'))
+const AISettings = lazy(() => import('./pages/admin/AI'))
 
 /**
  * 已安装 + 已登录 才能访问的页面的统一守卫。
@@ -328,6 +333,10 @@ export default function App() {
         {/* 插件页面容器：URL 里只放插件名/页面名，真实地址从 /api/plugins/ui 查，
             避免把可能含 127.0.0.1 的后端地址直接暴露在地址栏。 */}
         <Route path="/ext-page/:plugin/:page" element={<GuardedPage installed={installed} authBusy={authBusy} user={user}><PluginPage /></GuardedPage>} />
+        {/* 智能时代：搜索结果 / AI 助手 / 代码空间 */}
+        <Route path="/search" element={<GuardedPage installed={installed} authBusy={authBusy} user={user}><SearchResults /></GuardedPage>} />
+        <Route path="/ai" element={<GuardedPage installed={installed} authBusy={authBusy} user={user}><AIAssistant /></GuardedPage>} />
+        <Route path="/code" element={<GuardedPage installed={installed} authBusy={authBusy} user={user}><CodeSpace /></GuardedPage>} />
         <Route
           path="/share/:id"
           element={
@@ -366,6 +375,7 @@ export default function App() {
           <Route path="settings" element={<Settings />} />
           <Route path="tasks" element={<Tasks />} />
           <Route path="plugins" element={<Plugins />} />
+          <Route path="ai" element={<AISettings />} />
           <Route path="about" element={<About />} />
           <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
         </Route>
