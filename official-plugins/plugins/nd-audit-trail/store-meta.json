@@ -1,0 +1,11 @@
+{
+  "title": "关键操作审计",
+  "description": "把登录、上传、删除、分享等关键事件以 JSONL 追加写入独立审计日志。",
+  "tags": [
+    "审计",
+    "运维",
+    "日志"
+  ],
+  "author": "NebulaDrive Official",
+  "license": "AGPL-3.0-only"
+}

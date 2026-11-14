@@ -1,0 +1,21 @@
+{
+  "name": "nd-audit-trail",
+  "title": "关键操作审计",
+  "version": "1.0.0",
+  "author": "NebulaDrive Official",
+  "description": "把登录、上传、删除、分享等关键事件以 JSONL 追加写入独立审计日志。",
+  "entry": "plugin.py",
+  "protocolVersion": 2,
+  "hooks": [
+    "onFileUploadAfter",
+    "onFileDelete",
+    "onAuthLoginSuccess",
+    "onShareCreateAfter",
+    "onUserDelete"
+  ],
+  "permissions": [
+    "audit:write"
+  ],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://cloud.berrywing.top/"
+}

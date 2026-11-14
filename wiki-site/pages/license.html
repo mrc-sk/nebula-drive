@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AGPL 许可通俗说明 · NebulaDrive Wiki</title>
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<aside id="sidebar">
+<div class="brand">NebulaDrive Wiki<small>项目文档 · 部署运维 · 插件开发</small></div>
+<input id="search" placeholder="搜索文档…" autocomplete="off">
+<div id="searchResults"></div>
+<div class="nav-group"><h4>▶ 入门</h4><a href="../pages/overview.html">项目概览 README</a><a class="active" href="../pages/license.html">AGPL 许可通俗说明</a></div><div class="nav-group"><h4>◈ 插件开发</h4><a href="../pages/plugin-manual.html">插件制作手册</a><a href="../pages/plugin-v2-guide.html">插件平台 v2 完全指南</a><a href="../pages/plugin-system-guide.html">插件系统完全指南</a><a href="../pages/pbclus-spec.html">PBClus 格式规范</a><a href="../pages/plugin-hotload.html">插件热加载：进度与接续</a><a href="../pages/plugin-builder.html">可视化插件制作器使用说明</a></div><div class="nav-group"><h4>▤ 版本与交付</h4><a href="../pages/changelog.html">CHANGELOG 变更记录</a><a href="../pages/ai-era-delivery.html">智能时代交付说明</a><a href="../pages/v2-delivery.html">插件平台 v2 交付说明</a></div><div class="nav-group"><h4>▣ 开发档案</h4><a href="../pages/audit.html">不足总结与改进建议</a><a href="../pages/code-review.html">CODE REVIEW 代码审查</a><a href="../pages/fixlog.html">FIXLOG 修复记录</a><a href="../pages/backlog.html">新功能占位清单</a></div><div class="nav-group"><h4>⚙ 运维</h4><a href="../pages/ops-manual.html">站点部署与运维手册</a><a href="../pages/ticket-desk.html">智能 AI 工单站使用说明</a><a href="../pages/plugin-store.html">官方插件市场与插件清单</a></div><div class="nav-group"><h4>· 首页</h4><a href="../index.html">Wiki 首页</a></div>
+</aside>
+<main id="main">
+<div class="crumb"><a href="../index.html">首页</a> / <span>入门</span> / AGPL 许可通俗说明</div>
+<article class="md"><p class="desc">开源协议怎么用、二次开发要注意什么</p><h1 id="agpl-30">AGPL-3.0 是什么？—— 说人话版</h1>
+<blockquote>
+<p>写给第一次听说 AGPL 的人。不涉及法条原文，只讲你真正需要知道的事。
+配套视频：《NebulaDrive 正式发布 | 还在用付费开源网盘？》</p>
+</blockquote>
+<hr />
+<h2 id="_1">一句话版本</h2>
+<p><strong>你拿去用，随便用。你改了代码之后又让别人用上（哪怕只是开个网站让别人访问），就必须把你改过的源码也公开出来。</strong></p>
+<p>就这一条。剩下的都是细节。</p>
+<hr />
+<h2 id="_2">打个比方：三家餐厅的配方</h2>
+<table>
+<thead>
+<tr>
+<th>协议</th>
+<th>相当于</th>
+<th>你要做什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>MIT</strong></td>
+<td>一张公开的配方纸</td>
+<td>拿去做成私房菜，配方怎么改都不用说，还能说这是你自己发明的</td>
+</tr>
+<tr>
+<td><strong>GPL</strong></td>
+<td>公开菜谱</td>
+<td>你<strong>摆摊卖</strong>这道菜，就得把你的改良版菜谱也贴出来；但你<strong>开餐厅让人进来吃</strong>，不用贴</td>
+</tr>
+<tr>
+<td><strong>AGPL</strong></td>
+<td>公开菜谱 + 餐厅也算</td>
+<td>摆摊要贴，<strong>开餐厅让人进来吃也要贴</strong></td>
+</tr>
+</tbody>
+</table>
+<p>AGPL 和 GPL 唯一的区别，就是最后那半句：<strong>"开餐厅"也算</strong>。</p>
+<p>技术上讲：GPL 的义务只在"把软件<strong>发给</strong>别人"时触发；AGPL 加了一条——<strong>通过网络让用户使用你改过的程序，也算"发给"了</strong>。这就是常说的"网络传染性"或"SaaS 条款"。</p>
+<hr />
+<h2 id="_3">四行对照表</h2>
+<table>
+<thead>
+<tr>
+<th>你在做什么</th>
+<th style="text-align: center;">MIT</th>
+<th style="text-align: center;">GPL-3.0</th>
+<th style="text-align: center;">AGPL-3.0</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>下载、安装、自己用，不改代码</td>
+<td style="text-align: center;">✅ 随便</td>
+<td style="text-align: center;">✅ 随便</td>
+<td style="text-align: center;">✅ 随便</td>
+</tr>
+<tr>
+<td>改了代码，<strong>只给自己用</strong></td>
+<td style="text-align: center;">✅ 不用公开</td>
+<td style="text-align: center;">✅ 不用公开</td>
+<td style="text-align: center;">✅ 不用公开</td>
+</tr>
+<tr>
+<td>改了代码，<strong>把软件发给别人</strong>（卖/送/打包）</td>
+<td style="text-align: center;">✅ 不用公开</td>
+<td style="text-align: center;">⚠️ 必须公开源码</td>
+<td style="text-align: center;">⚠️ 必须公开源码</td>
+</tr>
+<tr>
+<td>改了代码，<strong>只开网站让别人用</strong>（不分发）</td>
+<td style="text-align: center;">✅ 不用公开</td>
+<td style="text-align: center;">✅ 不用公开</td>
+<td style="text-align: center;">⚠️ <strong>必须公开源码</strong></td>
+</tr>
+</tbody>
+</table>
+<p>最后一行，就是 AGPL 全部的"加码"。除此之外它对普通人没有额外要求。</p>
+<hr />
+<h2 id="5">你最可能想问的 5 个问题</h2>
+<p><strong>Q：我只想在自己电脑 / 自己服务器上装个网盘，要做什么？</strong>
+A：什么都不用做。下载、安装、使用、改配置，全部免费、无限制、无义务。AGPL 不要求你公开任何东西，也不用通知作者。</p>
+<p><strong>Q：我给家人、同事、公司内部用呢？</strong>
+A：同样什么都不用做。只要服务运行在你自己控制的范围里，AGPL 的义务不触发。</p>
+<p><strong>Q：那我要不要公开我的文件、密码、数据？</strong>
+A：<strong>完全不用。</strong> AGPL 管的是<strong>程序源码</strong>，不是你存在网盘里的数据。你的文件永远是你的，协议不给你加任何披露义务。这是最常见的误解。</p>
+<p><strong>Q：我改了代码，但只自己用，要公开吗？</strong>
+A：不用。AGPL 的义务只在"让网络上的用户与之交互"时才触发。自己改自己用，是纯粹的自由。</p>
+<p><strong>Q：我要按 AGPL 二次开发并对外服务，具体要做什么？</strong>
+A：三件事：
+1. 保留原作者的版权声明和 AGPL 许可说明；
+2. 在你改过的文件里标注改动说明；
+3. 在你的服务上找个显眼的地方，给出<strong>完整对应源码</strong>的获取方式（比如界面上一个"获取源码"链接）。</p>
+<hr />
+<h2 id="nebuladrive-agpl">NebulaDrive 为什么选 AGPL？</h2>
+<p>因为：<strong>开源，不等于免费。</strong></p>
+<p>市面上不少"开源网盘"的实际形态是——<strong>开源一个核心，闭源一堆利润项</strong>。WebDAV 挂载、版本历史、多用户、SSO、审计日志，被一个个拆出来放进"专业版 / 企业版"。核心代码确实是开源的，但你想用的功能全在墙的另一边。</p>
+<p>AGPL 让这件事做不成：</p>
+<ul>
+<li>任何人都可以 fork 本项目，免费、合法、无需打招呼；</li>
+<li>但谁要是 fork 出去、改一改、做成<strong>闭源的收费产品</strong>，就必须公开全部源码——等于没法把 NebulaDrive 的功能变成私有的付费墙；</li>
+<li>所以我们敢承诺：<strong>不设功能墙、没有 Pro 版、不做"社区版 / 企业版"双轨</strong>。已实现的功能，全部在 AGPL-3.0 下开放，且不会被任何人收回去。</li>
+</ul>
+<p>代价我们也认：AGPL 对企业"拿去闭源再分发"很不友好。这是<strong>故意选的</strong>，不是疏忽。</p>
+<hr />
+<h2 id="_4">⚠️ 诚实说明：这些功能目前还没实现</h2>
+<p>我们不想让你看完宣传片、装完才发现"咦，这个按钮点了没反应"。以下项目在界面或文档中能看到痕迹，但<strong>代码层面尚未接通</strong>，现状如实列出：</p>
+<p><strong>1. 协作编辑（多人同时编辑文档）</strong>
+- 后端已有实现：<code>backend/controllers/collab.go</code>（含 <code>CollabOpen</code> / <code>CollabSave</code> / <code>CollabWS</code>）
+- 前端<strong>没有任何调用入口</strong>，仅在多语言词条文件中留有文字
+- 现状：<strong>打不开，不能用</strong></p>
+<p><strong>2. 数据统计图表（流量折线 / 文件类型分布 / 活跃热力图）</strong>
+- 前端在调用 <code>/api/admin/stats/traffic</code>、<code>/api/admin/stats/file-types</code>、<code>/api/admin/stats/activity</code>
+- 后端<strong>这三条路由并未注册</strong>（<code>backend/routers/router.go</code> 中查不到任何 <code>stats</code> 路由）
+- 现状：<strong>图表区域加载失败或空白</strong></p>
+<p><strong>3. 侧边栏「分享列表 / 离线下载 / 回收站」三个入口</strong>
+- <code>MainLayout.tsx</code> 中定义了这三个入口，指向 <code>/share-list</code>、<code>/tasks</code>、<code>/trash</code>
+- 但 <code>App.tsx</code> 只注册了 <code>/install</code>、<code>/login</code>、<code>/files</code>、<code>/share/:id</code>、<code>/oauth/authorize</code>、<code>/admin/*</code>，<strong>这三个路径没有注册</strong>
+- 现状：<strong>点击无响应（会被重定向）</strong>
+- 补充：
+  - 回收站功能<strong>实际可用</strong>，但要从<strong>文件页顶栏</strong>进入（文件页内部的 <code>trashMode</code> 模式切换），不是侧边栏那个入口；
+  - 离线下载任务页<strong>实际存在</strong>，但在管理后台 <code>/admin/tasks</code> 下，不是侧边栏那个 <code>/tasks</code></p>
+<p><strong>4. 管理后台仪表盘的部分 KPI 数字是演示数据</strong>
+- 因为上面第 2 条的统计接口根本不存在，仪表盘上的部分指标并非真实统计结果</p>
+<p>我们会在此后版本中<strong>补齐，或从界面上移除</strong>。README 或界面中出现了但本清单列出为未实现的，<strong>以本清单为准</strong>；宣传物料不承诺这些功能。</p>
+<hr />
+<h2 id="_5">完整法律文本在哪</h2>
+<ul>
+<li>仓库根目录 <code>LICENSE</code> 文件 —— 英文原文（AGPL-3.0，35KB），这是法律上唯一有效的版本。</li>
+<li>中文社区有非官方译本，可以帮助理解，但<strong>不具备法律效力</strong>，一切以英文原文为准。</li>
+</ul>
+<blockquote>
+<p>本文是通俗解释，不是法律意见，也不构成对 LICENSE 条款的修改或补充。</p>
+</blockquote>
+<hr />
+<h2 id="_6">想二次开发或商用？</h2>
+<ul>
+<li><strong>自用 / 公司内网部署</strong>：随便用，无义务，无需联系我们。</li>
+<li><strong>对外提供 SaaS 服务</strong>：按 AGPL 要求公开你改过的源码即可。</li>
+<li><strong>想闭源集成、不想开源</strong>：本项目目前是<strong>单一 AGPL 许可，不提供商用闭源授权</strong>。如有特殊需求，请在仓库提 issue 说明场景。</li>
+</ul>
+<hr />
+<h2 id="120">附：可直接复制到发布页的精简版（约 120 字）</h2>
+<blockquote>
+<p><strong>AGPL-3.0 是什么？</strong> 简单说：你拿去用，随便用；你改了代码之后又让别人用上（哪怕只是开网站），就必须把改过的源码公开。和 MIT 的区别就这一条——它堵住了"拿开源代码改一改、做成闭源收费产品"这条路。对个人自用、公司内网部署<strong>没有任何额外义务</strong>，也不用公开你的文件和数据。</p>
+<p><strong>说明</strong>：协作编辑、统计图表、侧边栏"分享列表 / 离线下载 / 回收站"三个入口目前尚未接通（详情见仓库 <code>AGPL_通俗说明.md</code>），宣传中不承诺这些功能。</p>
+</blockquote></article>
+<div class="foot">NebulaDrive Wiki · 由项目文档自动构建 · 最后生成 2026-11-14</div>
+</main>
+<script src="../assets/app.js"></script></body></html>

@@ -1,0 +1,154 @@
+{
+  "plugins": [
+    {
+      "author": "NebulaDrive Official",
+      "description": "把登录、上传、删除、分享等关键事件以 JSONL 追加写入独立审计日志。",
+      "homepage": "https://cloud.berrywing.top/",
+      "license": "AGPL-3.0-only",
+      "name": "nd-audit-trail",
+      "tags": [
+        "审计",
+        "运维",
+        "日志"
+      ],
+      "title": "关键操作审计",
+      "url": "http://127.0.0.1:8084/nd-audit-trail.pbclus",
+      "version": "1.0.0"
+    },
+    {
+      "author": "NebulaDrive Official",
+      "description": "自动清洗上传与重命名时的非法字符、路径片段与过长文件名。",
+      "homepage": "https://cloud.berrywing.top/",
+      "license": "AGPL-3.0-only",
+      "name": "nd-filename-clean",
+      "tags": [
+        "文件",
+        "规范化",
+        "安全"
+      ],
+      "title": "文件名规范化",
+      "url": "http://127.0.0.1:8084/nd-filename-clean.pbclus",
+      "version": "1.0.0"
+    },
+    {
+      "author": "NebulaDrive Official",
+      "description": "为开放注册补上注册码校验：未填或填错注册码一律拒绝，码表由管理员维护。",
+      "homepage": "https://cloud.berrywing.top/",
+      "license": "AGPL-3.0-only",
+      "name": "nd-invite-code",
+      "tags": [
+        "注册",
+        "安全",
+        "准入"
+      ],
+      "title": "注册邀请码",
+      "url": "http://127.0.0.1:8084/nd-invite-code.pbclus",
+      "version": "1.0.0"
+    },
+    {
+      "author": "NebulaDrive Official",
+      "description": "同一 IP / 账号短时间连续登录失败后临时锁定，抑制暴力破解。",
+      "homepage": "https://cloud.berrywing.top/",
+      "license": "AGPL-3.0-only",
+      "name": "nd-login-brake",
+      "tags": [
+        "登录",
+        "安全",
+        "限流"
+      ],
+      "title": "登录爆破抑制",
+      "url": "http://127.0.0.1:8084/nd-login-brake.pbclus",
+      "version": "1.0.0"
+    },
+    {
+      "author": "NebulaDrive Official",
+      "description": "放置标志文件即进入维护模式（管理员仍可进），并可向页面注入公告。",
+      "homepage": "https://cloud.berrywing.top/",
+      "license": "AGPL-3.0-only",
+      "name": "nd-maintenance",
+      "tags": [
+        "运维",
+        "公告",
+        "维护"
+      ],
+      "title": "维护模式与站点公告",
+      "url": "http://127.0.0.1:8084/nd-maintenance.pbclus",
+      "version": "1.0.0"
+    },
+    {
+      "author": "NebulaDrive Official",
+      "description": "当用户存储用量接近配额上限时写入预警信息，便于提前扩容或提醒。",
+      "homepage": "https://cloud.berrywing.top/",
+      "license": "AGPL-3.0-only",
+      "name": "nd-quota-watch",
+      "tags": [
+        "配额",
+        "运维",
+        "通知"
+      ],
+      "title": "配额用量预警",
+      "url": "http://127.0.0.1:8084/nd-quota-watch.pbclus",
+      "version": "1.0.0"
+    },
+    {
+      "author": "NebulaDrive Official",
+      "description": "按关键词扫描文件名，命中后自动打上「需复核」标签，不拦截上传。",
+      "homepage": "https://cloud.berrywing.top/",
+      "license": "AGPL-3.0-only",
+      "name": "nd-sensitive-tag",
+      "tags": [
+        "内容",
+        "合规",
+        "标记"
+      ],
+      "title": "敏感文件标记",
+      "url": "http://127.0.0.1:8084/nd-sensitive-tag.pbclus",
+      "version": "1.0.0"
+    },
+    {
+      "author": "NebulaDrive Official",
+      "description": "强制分享链接设置密码与有效期，禁止无保护的永久公开链接。",
+      "homepage": "https://cloud.berrywing.top/",
+      "license": "AGPL-3.0-only",
+      "name": "nd-share-policy",
+      "tags": [
+        "分享",
+        "安全",
+        "策略"
+      ],
+      "title": "分享链接策略",
+      "url": "http://127.0.0.1:8084/nd-share-policy.pbclus",
+      "version": "1.0.0"
+    },
+    {
+      "author": "NebulaDrive Official",
+      "description": "拦截可执行文件、脚本与路径穿越文件名，并可限制单文件大小。",
+      "homepage": "https://cloud.berrywing.top/",
+      "license": "AGPL-3.0-only",
+      "name": "nd-upload-guard",
+      "tags": [
+        "上传",
+        "安全",
+        "文件"
+      ],
+      "title": "上传安全守卫",
+      "url": "http://127.0.0.1:8084/nd-upload-guard.pbclus",
+      "version": "1.0.0"
+    },
+    {
+      "author": "NebulaDrive Official",
+      "description": "按需把 WebDAV 切成只读，或保护指定目录不被 WebDAV 写入/删除。",
+      "homepage": "https://cloud.berrywing.top/",
+      "license": "AGPL-3.0-only",
+      "name": "nd-webdav-guard",
+      "tags": [
+        "WebDAV",
+        "安全",
+        "策略"
+      ],
+      "title": "WebDAV 写保护",
+      "url": "http://127.0.0.1:8084/nd-webdav-guard.pbclus",
+      "version": "1.0.0"
+    }
+  ]
+}

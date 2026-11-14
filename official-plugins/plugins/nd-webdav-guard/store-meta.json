@@ -1,0 +1,11 @@
+{
+  "title": "WebDAV 写保护",
+  "description": "按需把 WebDAV 切成只读，或保护指定目录不被 WebDAV 写入/删除。",
+  "tags": [
+    "WebDAV",
+    "安全",
+    "策略"
+  ],
+  "author": "NebulaDrive Official",
+  "license": "AGPL-3.0-only"
+}

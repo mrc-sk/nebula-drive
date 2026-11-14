@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>站点部署与运维手册 · NebulaDrive Wiki</title>
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<aside id="sidebar">
+<div class="brand">NebulaDrive Wiki<small>项目文档 · 部署运维 · 插件开发</small></div>
+<input id="search" placeholder="搜索文档…" autocomplete="off">
+<div id="searchResults"></div>
+<div class="nav-group"><h4>▶ 入门</h4><a href="../pages/overview.html">项目概览 README</a><a href="../pages/license.html">AGPL 许可通俗说明</a></div><div class="nav-group"><h4>◈ 插件开发</h4><a href="../pages/plugin-manual.html">插件制作手册</a><a href="../pages/plugin-v2-guide.html">插件平台 v2 完全指南</a><a href="../pages/plugin-system-guide.html">插件系统完全指南</a><a href="../pages/pbclus-spec.html">PBClus 格式规范</a><a href="../pages/plugin-hotload.html">插件热加载：进度与接续</a><a href="../pages/plugin-builder.html">可视化插件制作器使用说明</a></div><div class="nav-group"><h4>▤ 版本与交付</h4><a href="../pages/changelog.html">CHANGELOG 变更记录</a><a href="../pages/ai-era-delivery.html">智能时代交付说明</a><a href="../pages/v2-delivery.html">插件平台 v2 交付说明</a></div><div class="nav-group"><h4>▣ 开发档案</h4><a href="../pages/audit.html">不足总结与改进建议</a><a href="../pages/code-review.html">CODE REVIEW 代码审查</a><a href="../pages/fixlog.html">FIXLOG 修复记录</a><a href="../pages/backlog.html">新功能占位清单</a></div><div class="nav-group"><h4>⚙ 运维</h4><a class="active" href="../pages/ops-manual.html">站点部署与运维手册</a><a href="../pages/ticket-desk.html">智能 AI 工单站使用说明</a><a href="../pages/plugin-store.html">官方插件市场与插件清单</a></div><div class="nav-group"><h4>· 首页</h4><a href="../index.html">Wiki 首页</a></div>
+</aside>
+<main id="main">
+<div class="crumb"><a href="../index.html">首页</a> / <span>运维</span> / 站点部署与运维手册</div>
+<article class="md"><p class="desc">六个服务、域名 HTTPS、本地模型、插件市场、备份与加固</p><h1 id="_1">站点部署与运维手册</h1>
+<blockquote>
+<p>本文记录 2026-11-08 起在 Debian 11 服务器上的实战部署结果，并同步后续域名、本地模型、插件市场三项演进，供后续维护参考。
+<strong>出于安全考虑，本文不包含任何密码、令牌明文；凭据统一存放在服务器本地文件中。</strong></p>
+</blockquote>
+<h2 id="_2">一、站点与服务一览</h2>
+<table>
+<thead>
+<tr>
+<th>站点</th>
+<th>端口</th>
+<th>监听范围</th>
+<th>用途</th>
+<th>服务</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NebulaDrive 网盘</td>
+<td><code>80</code></td>
+<td><code>0.0.0.0</code></td>
+<td>主站，文件存储与分享</td>
+<td><code>nebuladrive.service</code></td>
+</tr>
+<tr>
+<td>源站 TLS 终止</td>
+<td><code>443</code></td>
+<td><code>0.0.0.0</code></td>
+<td>Cloudflare Full 回源</td>
+<td><code>nebula-tls.service</code></td>
+</tr>
+<tr>
+<td>智能 AI 工单站</td>
+<td><code>8081</code></td>
+<td><code>0.0.0.0</code></td>
+<td>提交问题、智能答复、跟进</td>
+<td><code>ai-desk.service</code></td>
+</tr>
+<tr>
+<td>项目 Wiki</td>
+<td><code>8082</code></td>
+<td><code>0.0.0.0</code></td>
+<td>文档、手册、变更记录</td>
+<td><code>wiki.service</code></td>
+</tr>
+<tr>
+<td>本地模型网关</td>
+<td><code>8083</code></td>
+<td><strong>仅 <code>127.0.0.1</code></strong></td>
+<td>OpenAI 兼容 <code>/v1/chat/completions</code></td>
+<td><code>llm-local.service</code></td>
+</tr>
+<tr>
+<td>官方插件商店源</td>
+<td><code>8084</code></td>
+<td><strong>仅 <code>127.0.0.1</code></strong></td>
+<td><code>com.json</code> + <code>.pbclus</code> 静态源</td>
+<td><code>plugin-store.service</code></td>
+</tr>
+</tbody>
+</table>
+<p>六个服务均已设置<strong>开机自启</strong>（<code>systemctl enable</code>），失败自动重启。</p>
+<blockquote>
+<p>8083 / 8084 只绑回环，是刻意的：模型网关与插件包只允许本机进程访问，不对外开门。</p>
+</blockquote>
+<p>数据目录：网盘 <code>/var/lib/nebuladrive</code>、工单站 <code>/opt/ai-desk/data</code>、Wiki <code>/opt/wiki</code>、模型 <code>/opt/llm</code>、插件商店 <code>/opt/plugin-store</code>。</p>
+<p>服务器环境：Debian 11 / 2 核 / 1.9 GiB 内存 / 40 GiB 磁盘。</p>
+<h2 id="_3">二、常用运维命令</h2>
+<pre><code class="language-bash"># 全部服务状态
+systemctl status nebuladrive nebula-tls ai-desk wiki llm-local plugin-store --no-pager
+
+# 重启
+systemctl restart nebuladrive
+systemctl restart llm-local
+
+# 日志
+journalctl -u nebuladrive -f
+journalctl -u ai-desk -n 100 --no-pager
+journalctl -u llm-local -n 50 --no-pager
+
+# 健康检查
+curl -s http://127.0.0.1/api/install/status        # 网盘
+curl -s http://127.0.0.1:8081/health                # 工单站
+curl -s http://127.0.0.1:8083/health                # 本地模型网关
+curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8082/   # Wiki
+curl -s http://127.0.0.1:8084/com.json | head -c 120 # 插件商店清单
+</code></pre>
+<h2 id="_4">三、管理员账号与凭据</h2>
+<table>
+<thead>
+<tr>
+<th>凭据</th>
+<th>存放位置</th>
+<th>权限</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>网盘 <code>admin</code> 初始密码</td>
+<td><code>/var/lib/nebuladrive/ADMIN_PASSWORD.txt</code></td>
+<td><code>600</code></td>
+</tr>
+<tr>
+<td>工单站管理令牌 / 隐藏路径</td>
+<td><code>/opt/ai-desk/config.json</code></td>
+<td><code>600</code></td>
+</tr>
+<tr>
+<td>官方插件签名<strong>私钥</strong></td>
+<td>本地构建机 <code>/workspace/official-plugins/official-signing-key.json</code></td>
+<td><code>600</code></td>
+</tr>
+<tr>
+<td>官方插件<strong>公钥信任库</strong></td>
+<td>服务器 <code>/var/lib/nebuladrive/plugin-trust.json</code></td>
+<td><code>600</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>网盘管理员用户名：<code>admin</code>，<strong>上线后请立即登录并修改密码</strong>，随后删除该文件或改为密钥保管。</li>
+<li>工单站管理地址用 <code>python3 /opt/ai-desk/deskctl.py url</code> 查看（含令牌），<strong>不要</strong>写进文档或聊天。</li>
+<li>官方签名私钥<strong>绝不能</strong>放到服务器上；服务器只需要公钥信任库。</li>
+</ul>
+<h2 id="_5">四、当前已生效的核心设置</h2>
+<h3 id="1-1-gb">1. 每用户 1 GB 空间</h3>
+<p>配额落在 <strong><code>default</code> 用户组</strong>（<code>max_storage = 1073741824</code> 字节）。新用户默认归属该组且 <code>plan_id = 0</code>，因此有效额度为 1 GB。</p>
+<blockquote>
+<p>安装时系统会自动创建三档付费套餐（Ultra / Pro / Pro Max），套餐额度<strong>优先于</strong>用户组额度。若日后分配套餐，1 GB 会被覆盖。</p>
+</blockquote>
+<p>修改方式：后台 <strong>管理 → 用户组 → default → 最大存储</strong>，或 API：</p>
+<pre><code class="language-bash">TOKEN=&lt;管理员登录后取得的 JWT&gt;
+curl -X PUT http://127.0.0.1/api/admin/groups/1 \
+  -H &quot;Authorization: Bearer $TOKEN&quot; -H 'Content-Type: application/json' \
+  -d '{&quot;name&quot;:&quot;default&quot;,&quot;maxStorage&quot;:1073741824,&quot;shareEnabled&quot;:true,&quot;webdavEnabled&quot;:true,&quot;speedLimit&quot;:0}'
+</code></pre>
+<h3 id="2">2. 邮箱注册（待配置）</h3>
+<p><strong>当前状态：未启用，等你提供邮箱信息后再填。</strong> 待填字段：SMTP 主机/端口、发信账号与授权码（<strong>不是登录密码</strong>）、发件人、<code>mail.enabled = true</code>。配置入口：后台 <strong>管理 → 设置 → 邮件</strong>。启用后可用于找回密码、注册验证、通知邮件。</p>
+<h3 id="3">3. 注册限制：只允许登录</h3>
+<p><strong>当前状态：公开注册已关闭</strong>，<code>security.allow_register = false</code>。未登录调用注册接口返回 <code>403 {"message":"未开放注册"}</code>，登录接口正常。代码依据：<code>controllers/auth.go</code> 的 <code>getSettingBool("security.allow_register", false)</code>，默认即拒绝。</p>
+<pre><code class="language-bash"># 关闭注册（当前配置）
+curl -X POST http://127.0.0.1/api/admin/settings \
+  -H &quot;Authorization: Bearer $TOKEN&quot; -H 'Content-Type: application/json' \
+  -d '{&quot;security.allow_register&quot;:&quot;false&quot;}'
+</code></pre>
+<h4 id="_6">注册码能力：已由官方插件提供</h4>
+<p>项目本体没有内置注册码，但官方插件 <strong><code>nd-invite-code</code></strong> 已上架（见《官方插件市场与插件清单》），订阅 <code>onAuthRegisterBefore</code> 决策钩子：</p>
+<ol>
+<li>在后台插件商店安装并启用该插件；</li>
+<li>在插件配置里填 <code>{"codes": ["BERRY-2026"]}</code>，或在插件数据目录放 <code>codes.txt</code>（一行一个码）；</li>
+<li>把 <code>security.allow_register</code> 临时改为 <code>true</code>，由插件把关；</li>
+<li>未填或填错注册码一律被拒绝。</li>
+</ol>
+<p><strong>未配置任何码时插件自动放行</strong>，不会一装上就锁死注册。此增强默认未启用。</p>
+<h2 id="https">五、域名与 HTTPS</h2>
+<p>域名 <code>cloud.berrywing.top</code> 已接入 <strong>Cloudflare</strong>，回源模式为 <strong>Full</strong>。当前链路：</p>
+<pre><code>浏览器 --HTTPS--&gt; Cloudflare --HTTPS(443)--&gt; nebula-tls.service(socat,自签证书)
+                                              └--HTTP--&gt; 127.0.0.1:80 --&gt; NebulaDrive
+</code></pre>
+<ul>
+<li><code>/var/lib/nebuladrive/conf.ini</code>：<code>domain = cloud.berrywing.top</code>、<code>protocol = https</code>、<code>listen = 0.0.0.0:80</code>、<code>tlsMode = off</code></li>
+<li>源站 443 由 <code>nebula-tls.service</code> 用 <code>socat</code> + 自签证书终止 TLS，再转发到本机 80</li>
+<li>自签证书：<code>/var/lib/nebuladrive/ssl/cert.pem</code>、<code>key.pem</code></li>
+</ul>
+<blockquote>
+<p><strong>为什么用自签</strong>：Cloudflare Full 模式只要求源站有 HTTPS，不校验源站证书链，因此自签即可工作，且不需要在源站开放 80 挑战端口。<strong>建议后续换成 Cloudflare Origin CA 证书</strong>（15 年有效期，Cloudflare 可信任），替换两个 pem 后 <code>systemctl restart nebula-tls</code> 即可。</p>
+<p>若改用项目内置 ACME：把 <code>tlsMode</code> 设为 <code>auto</code>、停掉 <code>nebula-tls.service</code>，让程序自己申请证书。</p>
+</blockquote>
+<p><strong>关于 8081 / 8082 端口</strong>：这两个站点目前仍走 <code>http://&lt;IP&gt;:8081</code> / <code>:8082</code>。如需统一到域名，可在 Cloudflare 加子域名并用 Nginx 反代，或直接把它们收敛到回环 + SSH 隧道访问。</p>
+<h2 id="ai">六、本地模型与 AI 工单站</h2>
+<h3 id="_7">运行时</h3>
+<p>服务器上没有可用的预编译 <code>llama.cpp</code> 二进制，且 GitHub Release 直连与多个镜像均失败。最终方案是<strong>从 PyPI 拉 <code>llama-cpp-python</code> 的 sdist（65 MB，内含完整 <code>vendor/llama.cpp</code> 源码），在服务器本地用 gcc/g++/cmake 编译</strong>：</p>
+<pre><code class="language-bash"># 关键前置：Debian 11 需要 git（CMake 用它生成 build-info）
+apt-get install -y git
+pip3 install --no-binary :all: llama-cpp-python==0.3.9   # 源码编译
+</code></pre>
+<p>产物是 glibc 版 <code>llama_cpp_python-0.3.9-cp39-cp39-linux_x86_64.whl</code>。此前尝试的 0.3.19 预编译 wheel 是 musl 构建，在 Debian glibc 上会报 <code>libc.musl-x86_64.so.1: cannot open shared object file</code>，已弃用。</p>
+<h3 id="_8">模型与网关</h3>
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th>值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>模型文件</td>
+<td><code>/opt/llm/model.gguf</code>（Qwen2.5-0.5B-Instruct Q4_K_M，约 469 MB）</td>
+</tr>
+<tr>
+<td>网关源码</td>
+<td><code>/opt/llm/llm_server.py</code>（Python 标准库 + llama_cpp）</td>
+</tr>
+<tr>
+<td>监听</td>
+<td>仅 <code>127.0.0.1:8083</code>，<code>MemoryMax=900M</code></td>
+</tr>
+<tr>
+<td>接口</td>
+<td><code>POST /v1/chat/completions</code>、<code>GET /v1/models</code>、<code>GET /health</code></td>
+</tr>
+</tbody>
+</table>
+<p>网关把模型常驻内存、用锁串行化推理（2 核小机更稳），并截断超长输入与限制 <code>max_tokens</code>。工单站通过 <code>deskctl.py</code> 配置为 <code>base_url = http://127.0.0.1:8083/v1</code>、<code>enabled = true</code>。详见《智能 AI 工单站使用说明》。</p>
+<h2 id="_9">七、官方插件市场</h2>
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th>值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>商店地址设置</td>
+<td><code>plugin.store.url = http://127.0.0.1:8084/</code></td>
+</tr>
+<tr>
+<td>静态源目录</td>
+<td><code>/opt/plugin-store</code>（<code>com.json</code> + 10 个 <code>.pbclus</code>）</td>
+</tr>
+<tr>
+<td>官方密钥 keyId</td>
+<td>记录在 <code>/var/lib/nebuladrive/plugin-trust.json</code>（构建时生成）</td>
+</tr>
+<tr>
+<td>签名策略</td>
+<td>默认 <code>warn</code>；官方包签名 <code>present/valid/trusted</code> 均为 true</td>
+</tr>
+</tbody>
+</table>
+<p>10 个官方插件已上架并在后台商店可见、可安装；签名密钥已加入信任库，安装后数据库 <code>trusted = 1</code>。详细说明见《官方插件市场与插件清单》。</p>
+<blockquote>
+<p>商店源只绑回环：后台商店列表与安装动作都由网盘<strong>后端</strong>去拉取，前端不直接访问 8084，因此公网无需开放该端口。</p>
+</blockquote>
+<h2 id="_10">八、数据备份</h2>
+<pre><code class="language-bash">mkdir -p /root/backup
+tar czf /root/backup/nebula-$(date +%F).tar.gz \
+  /var/lib/nebuladrive \
+  /opt/ai-desk/data /opt/ai-desk/config.json \
+  /opt/plugin-store /opt/wiki
+</code></pre>
+<ul>
+<li><code>secret.key</code> 必须一起备份，否则加密配置无法解密</li>
+<li>上传文件位于 <code>/var/lib/nebuladrive/uploads</code>，数据量大时单独做增量同步</li>
+<li>模型文件 <code>/opt/llm/model.gguf</code> 可随时重新下载，不必每日备份</li>
+<li>官方签名私钥在<strong>构建机</strong>上离线保管，单独备份，绝不放进服务器归档</li>
+<li>恢复时先停服务，解压覆盖，再启动</li>
+</ul>
+<h2 id="_11">九、安全加固清单</h2>
+<ul>
+<li>[x] 关闭公开注册，只允许登录</li>
+<li>[x] 域名接入 Cloudflare + 源站 HTTPS（Full）</li>
+<li>[x] 工单站下线公开管理/配置页，配置改为本机 CLI</li>
+<li>[x] 模型网关与插件商店源只绑 <code>127.0.0.1</code></li>
+<li>[x] 官方插件签名 + 信任库</li>
+<li>[ ] 修改 root 登录密码，或改用 SSH 密钥并关闭密码登录</li>
+<li>[ ] 修改网盘 <code>admin</code> 初始密码</li>
+<li>[ ] 配置防火墙，只放行必要端口（22 / 80 / 443 / 8081 / 8082）</li>
+<li>[ ] 用 Cloudflare Origin CA 证书替换源站自签证书</li>
+<li>[ ] 为 8081 / 8082 增加域名与访问控制，或收敛到回环</li>
+<li>[ ] 定期 <code>apt update &amp;&amp; apt upgrade</code> 与数据备份</li>
+<li>[ ] 邮箱信息提供后配置邮件，<strong>在此之前不要开放注册</strong></li>
+</ul>
+<blockquote>
+<p>本次登录凭据曾在聊天中以明文传递，建议部署验收后<strong>立即轮换</strong>。</p>
+</blockquote>
+<h2 id="_12">十、故障排查速查</h2>
+<table>
+<thead>
+<tr>
+<th>现象</th>
+<th>排查方向</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>网盘打不开</td>
+<td><code>systemctl status nebuladrive</code> → <code>journalctl -u nebuladrive -n 100</code>；确认 80 端口未被占用</td>
+</tr>
+<tr>
+<td>域名 HTTPS 报 525 / 521</td>
+<td>检查 <code>nebula-tls.service</code> 是否在跑、443 是否监听、证书路径是否正确</td>
+</tr>
+<tr>
+<td>上传提示空间不足</td>
+<td>检查 <code>default</code> 组配额与用户已用量；确认是否被套餐覆盖</td>
+</tr>
+<tr>
+<td>无法注册</td>
+<td>属预期行为（已关闭注册）；需管理员创建用户，或启用 <code>nd-invite-code</code> 注册码插件后临时开放</td>
+</tr>
+<tr>
+<td>邮件发不出</td>
+<td>检查 SMTP 主机/端口/授权码；当前未配置属正常</td>
+</tr>
+<tr>
+<td>工单答复变成「本地模型暂不可用」</td>
+<td><code>systemctl status llm-local</code>、<code>curl 127.0.0.1:8083/health</code>；此时工单已自动回退知识库，不会丢单</td>
+</tr>
+<tr>
+<td>工单站看不到管理入口</td>
+<td>属预期行为；用 <code>deskctl.py url</code> 获取隐藏地址</td>
+</tr>
+<tr>
+<td>后台插件商店为空</td>
+<td>检查 <code>plugin.store.url</code> 设置、<code>plugin-store.service</code> 状态、<code>curl 127.0.0.1:8084/com.json</code></td>
+</tr>
+<tr>
+<td>插件启用报 <code>hooks</code> 类型错误</td>
+<td>插件 <code>init</code> 响应里 <code>hooks</code> 必须是 <strong>JSON 数组</strong>而不是字符串</td>
+</tr>
+<tr>
+<td>Wiki 页面 404</td>
+<td>确认 <code>wiki.service</code> 运行、<code>/opt/wiki</code> 下存在 <code>index.html</code></td>
+</tr>
+</tbody>
+</table></article>
+<div class="foot">NebulaDrive Wiki · 由项目文档自动构建 · 最后生成 2026-11-14</div>
+</main>
+<script src="../assets/app.js"></script></body></html>

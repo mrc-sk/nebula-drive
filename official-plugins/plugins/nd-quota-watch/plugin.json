@@ -1,0 +1,18 @@
+{
+  "name": "nd-quota-watch",
+  "title": "配额用量预警",
+  "version": "1.0.0",
+  "author": "NebulaDrive Official",
+  "description": "当用户存储用量接近配额上限时写入预警信息，便于提前扩容或提醒。",
+  "entry": "plugin.py",
+  "protocolVersion": 2,
+  "hooks": [
+    "onFileUploadAfter",
+    "onUserQuotaChange"
+  ],
+  "permissions": [
+    "storage:read"
+  ],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://cloud.berrywing.top/"
+}

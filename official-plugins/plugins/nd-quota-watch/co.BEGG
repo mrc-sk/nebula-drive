@@ -1,0 +1,6 @@
+{
+  "runtime": "python",
+  "requires": [
+    "python3"
+  ]
+}

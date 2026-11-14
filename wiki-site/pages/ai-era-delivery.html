@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>智能时代交付说明 · NebulaDrive Wiki</title>
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<aside id="sidebar">
+<div class="brand">NebulaDrive Wiki<small>项目文档 · 部署运维 · 插件开发</small></div>
+<input id="search" placeholder="搜索文档…" autocomplete="off">
+<div id="searchResults"></div>
+<div class="nav-group"><h4>▶ 入门</h4><a href="../pages/overview.html">项目概览 README</a><a href="../pages/license.html">AGPL 许可通俗说明</a></div><div class="nav-group"><h4>◈ 插件开发</h4><a href="../pages/plugin-manual.html">插件制作手册</a><a href="../pages/plugin-v2-guide.html">插件平台 v2 完全指南</a><a href="../pages/plugin-system-guide.html">插件系统完全指南</a><a href="../pages/pbclus-spec.html">PBClus 格式规范</a><a href="../pages/plugin-hotload.html">插件热加载：进度与接续</a><a href="../pages/plugin-builder.html">可视化插件制作器使用说明</a></div><div class="nav-group"><h4>▤ 版本与交付</h4><a href="../pages/changelog.html">CHANGELOG 变更记录</a><a class="active" href="../pages/ai-era-delivery.html">智能时代交付说明</a><a href="../pages/v2-delivery.html">插件平台 v2 交付说明</a></div><div class="nav-group"><h4>▣ 开发档案</h4><a href="../pages/audit.html">不足总结与改进建议</a><a href="../pages/code-review.html">CODE REVIEW 代码审查</a><a href="../pages/fixlog.html">FIXLOG 修复记录</a><a href="../pages/backlog.html">新功能占位清单</a></div><div class="nav-group"><h4>⚙ 运维</h4><a href="../pages/ops-manual.html">站点部署与运维手册</a><a href="../pages/ticket-desk.html">智能 AI 工单站使用说明</a><a href="../pages/plugin-store.html">官方插件市场与插件清单</a></div><div class="nav-group"><h4>· 首页</h4><a href="../index.html">Wiki 首页</a></div>
+</aside>
+<main id="main">
+<div class="crumb"><a href="../index.html">首页</a> / <span>版本与交付</span> / 智能时代交付说明</div>
+<article class="md"><p class="desc">AI 钩子、智能搜索、代码空间与网关设计</p><h1 id="nebuladrive">NebulaDrive「智能时代」交付说明</h1>
+<blockquote>
+<p>2026-11-08 · 智能时代 V26-11.0
+<strong>已推送</strong> GitHub <code>main</code>（<code>1d1a2a6</code>），并<strong>发布 Release</strong> <a href="https://github.com/mrc-sk/nebula-drive/releases/tag/V26-11.0">V26-11.0</a>。
+推送时发现远端 <code>main</code> 已领先 12 个提交（PBClus v2 / 签名信任库 / 备份恢复 / plugin-wiki 等），已 rebase 合并并完整保留远端历史。</p>
+</blockquote>
+<hr />
+<h2 id="_1">一、结论：可以进，而且底子比预想的好</h2>
+<p>v2 插件平台（钩子 / 注册型扩展点 / UI 扩展点 / 后台 Setting KV / 免责确认）本来就是为「大功能可插拔」准备的，AI 只需接一层，不用动骨架。</p>
+<p>但巡检发现一个必须先补的缺口：</p>
+<blockquote>
+<p><strong>后端早就有完整的 10 维搜索 <code>GET /api/files/search</code> 和搜索历史三接口，但前端文件页根本没有搜索框，也从未调用过它们。</strong></p>
+</blockquote>
+<p>所以「搜索框智能推荐」这次是<strong>先补入口、再叠智能</strong>，不是只加个推荐算法。</p>
+<h2 id="_2">二、你拍板的四件事</h2>
+<table>
+<thead>
+<tr>
+<th>决策</th>
+<th>选择</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AI 能力怎么接</td>
+<td><strong>三档全做</strong>：本地算法兜底 + 可配 LLM 网关 + 插件可换模型</td>
+</tr>
+<tr>
+<td>本轮范围</td>
+<td><strong>全做</strong>：智能推荐/近期常用、代码空间、AI 钩子+ai Provider、AI 增强场景</td>
+</tr>
+<tr>
+<td>数据出域</td>
+<td><strong>允许出域，配置即用</strong>（不额外弹免责确认，仅基础日志）</td>
+</tr>
+<tr>
+<td>编辑器形态</td>
+<td><strong>内置 CodeMirror 6</strong>（独立 lazy chunk，开关关闭时不加载）</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_3">三、三档降级</h2>
+<pre><code>插件接管（订阅 onAIProviderResolve / 注册 kind=ai）
+        ↓ 没接管
+AI 网关（后台配 OpenAI 兼容端点：OpenAI / 智谱 / DeepSeek / Ollama / 自建）
+        ↓ 没配 key 或调用失败
+L0 本地算法（联想 / 近期常用 / 热门 / 词法补全 / 提取式摘要）  ← 永远可用
+</code></pre>
+<p>没填 key 时功能<strong>不会报错</strong>，只是「不那么聪明」。这是三档设计的主要目的。</p>
+<h2 id="_4">四、落地清单</h2>
+<h3 id="v2-protocolversion-2">协议层（v2 内增量，<code>ProtocolVersion</code> 仍是 2）</h3>
+<ul>
+<li>新增 <code>GroupAI</code> 分组与 <strong>9 个 AI 钩子</strong>：<code>onAIRequest</code>（可拦截外发/改写 prompt）、<code>onAIResponse</code>、<code>onAIProviderResolve</code>、<code>onAIComplete</code>、<code>onAIRecommend</code>、<code>onAISearch</code>、<code>onAISummary</code>、<code>onAIAsk</code>、<code>onAIConfigChange</code>。</li>
+<li>新增第 <strong>13 类</strong>注册型能力 <code>ai</code>，默认钩子 <code>onAIProviderResolve</code>。</li>
+<li>钩子总数 <strong>99 → 108</strong>，全部 <code>Wired=true</code>，静态扫描 <strong>0 个缺调用点</strong>；v1 插件零改动继续跑。</li>
+</ul>
+<h3 id="_5">后端</h3>
+<table>
+<thead>
+<tr>
+<th>模块</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>internal/ai/gateway.go</code></td>
+<td>OpenAI 兼容 HTTP 客户端、超时/温度/Token/按用户限流、审计、连通性测试；无第三方 SDK</td>
+</tr>
+<tr>
+<td><code>internal/ai/local.go</code></td>
+<td>L0：联想加权、自然语言问句→检索条件、标识符/关键字补全、提取式摘要与标签</td>
+</tr>
+<tr>
+<td><code>internal/ai/access.go</code></td>
+<td>文件访问埋点（异步、60 秒去重、90 天保留）、近期常用/热门聚合、隐私清理</td>
+</tr>
+<tr>
+<td><code>internal/ai/config.go</code></td>
+<td>后台配置读写（3 秒缓存）、密钥脱敏、场景开关、档位判定</td>
+</tr>
+<tr>
+<td><code>controllers/ai_ext.go</code></td>
+<td>智能联想、近期常用/热门、自然语言搜文件、摘要与自动标签、AI 助手、后台配置/测试/用量/日志</td>
+</tr>
+<tr>
+<td><code>controllers/codespace.go</code></td>
+<td>代码空间读写（≤2MB UTF-8、类型白名单、事务化版本归档）、代码补全</td>
+</tr>
+<tr>
+<td><code>models/models.go</code></td>
+<td>新增 <code>FileAccess</code> / <code>AIAuditLog</code> / <code>AISummary</code> 三表并加入 AutoMigrate</td>
+</tr>
+<tr>
+<td>埋点</td>
+<td><code>Preview</code> / <code>Download</code> 接入访问埋点；<code>FileVersionCreate</code> 钩子在代码空间保存时触发</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_6">前端</h3>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>components/GlobalSearch.tsx</code></td>
+<td>顶栏全局搜索框（此前完全没有）：联想词 / 历史 / 近期常用 / 热门下拉，<code>Ctrl/⌘+K</code> 聚焦</td>
+</tr>
+<tr>
+<td><code>pages/SearchResults.tsx</code></td>
+<td>搜索结果页，关键词与自然语言双模式、AI 回答与解析条件、摘要弹卡</td>
+</tr>
+<tr>
+<td><code>pages/AIAssistant.tsx</code></td>
+<td>AI 助手侧边栏页，快捷问题、引用文件、模式提示</td>
+</tr>
+<tr>
+<td><code>pages/CodeSpace.tsx</code></td>
+<td>CodeMirror 6 编辑器，14 种语言、<code>Ctrl/⌘+S</code> 保存、<code>Alt+/</code> 补全、摘要侧栏</td>
+</tr>
+<tr>
+<td><code>pages/admin/AI.tsx</code></td>
+<td>后台 AI 设置：总开关、代码空间、模型参数、5 个场景开关、连通性测试、用量与日志</td>
+</tr>
+<tr>
+<td><code>App.tsx</code> / <code>MainLayout.tsx</code></td>
+<td>4 条 lazy 路由、动态侧边栏（按开关显隐）、后台「AI 设置」菜单</td>
+</tr>
+<tr>
+<td><code>api/client.ts</code> / i18n</td>
+<td>新接口类型与方法、中英文词条（其余语言回退中文）</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_7">五、验证结果</h2>
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>go build ./...</code> / <code>go vet ./...</code></td>
+<td>通过</td>
+</tr>
+<tr>
+<td><code>go test ./... -count=1</code></td>
+<td>全绿（controllers / models / routers / middleware / plugin…）</td>
+</tr>
+<tr>
+<td>新增 AI 网关单测</td>
+<td>10/10（L0 解析/补全/联想/摘要、配置归一化、无模型降级、httptest 网关成功与失败、协议一致性）</td>
+</tr>
+<tr>
+<td>新增控制器端到端测试</td>
+<td>6/6（默认关闭、空库安全、本地兜底、补全候选、密钥脱敏、代码空间门禁）</td>
+</tr>
+<tr>
+<td>钩子接线静态扫描</td>
+<td><strong>108 个常量 / 0 个缺调用点</strong>，9 个 AI 钩子全接线</td>
+</tr>
+<tr>
+<td><code>npx tsc -b</code> / <code>npx vite build</code></td>
+<td>通过；CodeMirror 为独立 1.08 MB lazy chunk，开关关闭时不加载</td>
+</tr>
+<tr>
+<td>制作器 <code>--selftest</code></td>
+<td>21 套模板全绿，钩子表同步到 <strong>108</strong> 条、<code>PROVIDER_KINDS</code> 13 类</td>
+</tr>
+<tr>
+<td>HTML 制作器</td>
+<td>钩子数据同步为 108 条（含 AI 9 条）</td>
+</tr>
+</tbody>
+</table>
+<p>顺带修掉：保存 AI 配置时 GORM 每个 key 打一条 <code>record not found</code> 日志的噪音。</p>
+<h2 id="3">六、怎么启用（3 步）</h2>
+<ol>
+<li><strong>先不配置也能用</strong>：升级后顶栏直接出现搜索框，联想词、搜索历史、近期常用、热门、本地补全是开箱可用的（L0）。</li>
+<li><strong>开启 AI</strong>：后台 → <strong>AI 设置</strong> → 打开「启用 AI 能力」→ 填 baseURL / API Key / 模型 →「测试连通性」→「保存」。之后主界面出现 <strong>AI 助手</strong> 入口，自然语言搜索、摘要、助手问答、生成式补全自动增强。</li>
+<li><strong>开启代码空间</strong>：同一页打开「启用代码空间」。主界面出现 <strong>代码空间</strong> 入口，选择文本文件即可在线编辑；保存会自动归档为新版本，可在文件版本里回滚。</li>
+</ol>
+<blockquote>
+<p>也可以用插件完全接管模型：订阅 <code>onAIProviderResolve</code> 写 <code>handled=true</code> + <code>result</code>，或在 <code>co.BEGG</code> 注册 <code>kind=ai</code>，后台下拉里点名选择。写法见《插件制作手册》第 13 章。</p>
+</blockquote>
+<h2 id="_8">七、必须知道的两个默认值</h2>
+<ul>
+<li><strong>AI 总开关与代码空间开关都默认关闭</strong>，且互不依赖：只开代码空间也能用本地词法补全；只开 AI 也能用搜索/助手/摘要。</li>
+<li>按你选的「配置即用」：<strong>填了 key 之后，文件名与代码片段会发给所选模型服务商</strong>，宿主不额外弹免责确认、不强制脱敏。审计日志只记调用长度、耗时、Token、成功/失败，<strong>不记 prompt 正文</strong>。想做出域管控，用 <code>onAIRequest</code> 改写 <code>ctx.prompt</code> 或直接 <code>deny</code> 拦截；想完全不出域，就别填 key，装一个本地模型插件。</li>
+</ul>
+<h2 id="_9">八、交付文件</h2>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>智能时代-源码补丁.patch</code></td>
+<td>12793 行、42 个源码文件（<strong>不含</strong> <code>backend/frontend_dist</code>；基线为远端 <code>f9e3423</code>，可直接 <code>git apply</code>）</td>
+</tr>
+<tr>
+<td><code>nebula-drive-plugin-v2/</code></td>
+<td>合并后的完整源码副本（381 个源码文件，含 77 个前端产物、<code>tools/</code> <code>docs/</code> <code>examples/</code>）</td>
+</tr>
+<tr>
+<td><code>插件制作手册.md</code></td>
+<td>第 13 章「AI 智能扩展」，全篇钩子数 99→108、Provider 12→13 类</td>
+</tr>
+<tr>
+<td><code>插件平台v2-完全指南.md</code></td>
+<td>第 14 章「智能时代」，分组清单与 Provider 表同步</td>
+</tr>
+<tr>
+<td><code>插件制作器.py</code> / <code>插件制作器.html</code></td>
+<td>钩子表同步到 108 条，Provider 13 类；21 套模板自检全绿</td>
+</tr>
+<tr>
+<td><code>示例插件-ai-provider.zip</code></td>
+<td>本轮新增：订阅 <code>onAIProviderResolve</code> / <code>onAIComplete</code> 的本地 AI Provider 示例，经宿主 <code>InstallFromZip</code> 验证</td>
+</tr>
+<tr>
+<td><code>CHANGELOG.md</code> / <code>README.md</code></td>
+<td>新增 V26-11.0 条目与智能时代特性说明</td>
+</tr>
+</tbody>
+</table>
+<p>后端 <code>frontend_dist</code> 由合并后的前端源码重新 <code>vite build</code> 全量重写（旧 hash 文件删除、新 hash 文件生成）。</p>
+<h2 id="_10">九、发布记录</h2>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>远端 <code>main</code></td>
+<td><code>1d1a2a6</code>（<code>f9e3423..1d1a2a6</code>，130 文件 / +10847 −2218）</td>
+</tr>
+<tr>
+<td>Tag</td>
+<td><code>V26-11.0</code> → <code>1d1a2a617f4b</code></td>
+</tr>
+<tr>
+<td>Release</td>
+<td><a href="https://github.com/mrc-sk/nebula-drive/releases/tag/V26-11.0">V26-11.0 — 智能时代</a>，8 个附件</td>
+</tr>
+<tr>
+<td>提交作者</td>
+<td><code>mrc-sk &lt;mr.c123456789@outlook.com&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>合并方式</strong>：远端在 <code>4bfd160</code> 之后另有 12 个提交（PBClus v2 插件包容器、Ed25519 签名与信任库、备份/恢复 API、4 个生产级示例插件、plugin-wiki、i18n 补齐、前端产物重建等，189 文件 / +28676 行）。未使用强推，而是把智能时代 rebase 到 <code>f9e3423</code> 之上；自动合并 5 个源码文件，手工合并 <code>README.md</code> 与 <code>MainLayout.tsx</code>（保留远端版本号与 PBClus 说明 + 本轮 AI 入口），<code>frontend_dist</code> 由合并后源码重建。</p>
+<p><strong>合并后验证</strong>：<code>go build ./...</code> / <code>go vet ./...</code> / <code>npx tsc -b</code> / <code>npx vite build</code> 全绿；<code>go test ./... -count=1</code> 除下述既有失败外全部通过；3 个示例包经合并后宿主 <code>InstallFromZip</code> 验证 3/3 通过；制作器 21 套模板自检全绿。</p>
+<h3 id="_11">已知事项（均非本轮引入）</h3>
+<ol>
+<li><code>TestInstallMultiPlatformPicksRightBinary/windows/amd64</code> 在 Linux 上失败（找 Windows 二进制 <code>mpdemo</code>），在<strong>纯远端 <code>f9e3423</code> 上同样复现</strong>。属于远端 PBClus v2 用例的跨平台问题，未擅自改动该条线的代码。</li>
+<li>远端新增的 <code>ja</code> / <code>ko</code> / <code>zh-TW</code> 语言文件没有 <code>ai</code> 命名空间，AI 界面在这三种语言下会按项目既有 <code>fallbackLng: 'zh-CN'</code> 回退显示中文（功能正常）。需要本地化时补对应词条即可。</li>
+<li>界面版本号默认值仍为远端设定的 <code>26-10.0-d</code>（后端 <code>brand.version</code> 同源），本轮未改。</li>
+<li>Release 附件使用 <strong>ASCII 文件名</strong>（本环境的出网链路会丢弃 URL 中的非 ASCII 字符，中文附件名会被破坏）；Release 正文里附有中英文对照表，仓库内文件仍是中文名。</li>
+<li>Release 正文与 CHANGELOG 的验证表述已按合并后的真实结果修正，未把那个既有失败写成「全绿」。</li>
+</ol>
+<blockquote>
+<p>提醒：对话里出现过的两个 GitHub PAT 建议尽快在 GitHub 设置里撤销（本轮复用了其中一个完成推送与发版）。</p>
+</blockquote></article>
+<div class="foot">NebulaDrive Wiki · 由项目文档自动构建 · 最后生成 2026-11-14</div>
+</main>
+<script src="../assets/app.js"></script></body></html>

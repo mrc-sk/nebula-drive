@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>插件系统完全指南 · NebulaDrive Wiki</title>
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<aside id="sidebar">
+<div class="brand">NebulaDrive Wiki<small>项目文档 · 部署运维 · 插件开发</small></div>
+<input id="search" placeholder="搜索文档…" autocomplete="off">
+<div id="searchResults"></div>
+<div class="nav-group"><h4>▶ 入门</h4><a href="../pages/overview.html">项目概览 README</a><a href="../pages/license.html">AGPL 许可通俗说明</a></div><div class="nav-group"><h4>◈ 插件开发</h4><a href="../pages/plugin-manual.html">插件制作手册</a><a href="../pages/plugin-v2-guide.html">插件平台 v2 完全指南</a><a class="active" href="../pages/plugin-system-guide.html">插件系统完全指南</a><a href="../pages/pbclus-spec.html">PBClus 格式规范</a><a href="../pages/plugin-hotload.html">插件热加载：进度与接续</a><a href="../pages/plugin-builder.html">可视化插件制作器使用说明</a></div><div class="nav-group"><h4>▤ 版本与交付</h4><a href="../pages/changelog.html">CHANGELOG 变更记录</a><a href="../pages/ai-era-delivery.html">智能时代交付说明</a><a href="../pages/v2-delivery.html">插件平台 v2 交付说明</a></div><div class="nav-group"><h4>▣ 开发档案</h4><a href="../pages/audit.html">不足总结与改进建议</a><a href="../pages/code-review.html">CODE REVIEW 代码审查</a><a href="../pages/fixlog.html">FIXLOG 修复记录</a><a href="../pages/backlog.html">新功能占位清单</a></div><div class="nav-group"><h4>⚙ 运维</h4><a href="../pages/ops-manual.html">站点部署与运维手册</a><a href="../pages/ticket-desk.html">智能 AI 工单站使用说明</a><a href="../pages/plugin-store.html">官方插件市场与插件清单</a></div><div class="nav-group"><h4>· 首页</h4><a href="../index.html">Wiki 首页</a></div>
+</aside>
+<main id="main">
+<div class="crumb"><a href="../index.html">首页</a> / <span>插件开发</span> / 插件系统完全指南</div>
+<article class="md"><p class="desc">插件运行时、进程外通信与生命周期</p><h1 id="nebuladrive-v2">NebulaDrive 插件系统完全指南（平台 v2）</h1>
+<blockquote>
+<p>对应代码：<code>backend/pkg/plugin/</code>（协议 + 契约 + 钩子表 + 注册表 + 宿主 + 安装器）、
+<code>backend/pkg/pluginset/</code>（启动接线）、<code>backend/controllers/plugin_ext.go</code>（扩展点控制器）、
+<code>backend/internal/pluginhttp/</code>（插件 HTTP 页面反代）
+本文所有结论均从源码逐行核对得出，不是设计文档。<strong>凡与代码不符之处，以代码为准。</strong></p>
+<p>插件制作向的手把手教程见 <code>docs/插件制作指南.html</code> 与 <code>docs/plugin-wiki/</code>；
+本文是<strong>架构与机制</strong>向的完整参考。</p>
+</blockquote>
+<hr />
+<h2 id="0-v2">0. 平台 v2 现状</h2>
+<p>插件以<strong>独立子进程</strong>运行，通过 stdin/stdout 上的 JSON-RPC 2.0 与宿主通信。
+<strong>启用 = 拉起进程，禁用 = 杀进程，主服务不重启。</strong></p>
+<table>
+<thead>
+<tr>
+<th>能力</th>
+<th>状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>协议版本</td>
+<td><strong>v2</strong>（<code>ProtocolVersion = 2</code>），兼容 v1 插件零改动</td>
+</tr>
+<tr>
+<td>钩子</td>
+<td><strong>99 个</strong>，分 18 组，全部真接线（<code>hooks_wiring</code> 由测试静态校验，无装饰性占位）</td>
+</tr>
+<tr>
+<td>三档能力</td>
+<td>通知（Emit）/ 决策（Decide、Gate）/ 变换（Mutate、CtxPatch）</td>
+</tr>
+<tr>
+<td>注册型扩展点</td>
+<td><strong>12 类</strong>：storage/auth/notify/preview/payment/contentScan/backup/restore/cli/search/theme/page</td>
+</tr>
+<tr>
+<td>多语言运行时</td>
+<td>php / python / node / go / binary / external（宿主只做 LookPath 探测，不内置解释器）</td>
+</tr>
+<tr>
+<td>插件自建 HTTP 页面</td>
+<td>宿主分配端口并反代 <code>/ext/&lt;plugin&gt;/*</code></td>
+</tr>
+<tr>
+<td>前端 UI 扩展</td>
+<td>动态侧边栏、iframe 插件页、主题 CSS 变量、插件设置面板</td>
+</tr>
+<tr>
+<td>双层默认关闭</td>
+<td><strong>全局总开关默认 false</strong> + 单插件安装后默认 disabled</td>
+</tr>
+<tr>
+<td>进程内 Go 插件</td>
+<td>✅ 仍支持（<code>plugin.Register</code>）</td>
+</tr>
+<tr>
+<td>WASM / <code>.so</code> 动态库</td>
+<td>❌ 有意不做（WASM 需 CGO；<code>plugin.Open</code> 在 Windows 编译不了）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_1">双层默认关闭（安全设计，不是没做完）</h3>
+<ol>
+<li><strong>全局总开关</strong>默认 <code>false</code>：后台开启时必须显式 <code>acknowledge=true</code> ——
+   插件可注册 HTTP 页面且 <code>/ext/*</code> 完全透传鉴权，等同交出服务器执行权限；</li>
+<li><strong>单插件</strong>安装后默认 <code>disabled</code>：必须显式启用（启用前还要过插件协议关卡）。</li>
+</ol>
+<p>冒烟脚本与 CI 都按这两层走（先开总开关再启用插件）。</p>
+<h3 id="pluginopen">为什么是子进程，而不是 <code>plugin.Open</code></h3>
+<p>Go 原生 <code>plugin.Open</code> 只支持 Linux/macOS 且需要 cgo——Windows 编译不了；
+即便可行，还要求工具链与依赖版本严格一致。WASM（wasmtime-go）需要 CGO。
+子进程方案：跨平台、语言无关、崩溃隔离、真正的热插拔。</p>
+<hr />
+<h2 id="1-v1-v2">1. 插件契约：v1 与 v2</h2>
+<h3 id="v1">v1 契约（继续完全支持）</h3>
+<pre><code>myplugin/
+├── plugin.json     ← 清单（name/entry/protocolVersion/hooks 必需）
+└── myplugin        ← 可执行文件（Windows 自动补 .exe）
+</code></pre>
+<p>v1 插件按 <code>protocolVersion: 1</code> 声明，宿主握手时按插件声明的版本呈现协议，
+<strong>零改动兼容</strong>。现有的 7 个示例插件全部是 v1 契约。</p>
+<h3 id="v2">v2 三文件契约</h3>
+<pre><code>myplugin/
+├── plugin.json     ← 元数据
+├── register.go     ← 纯声明（go/parser 只读 AST，不编译不执行）
+└── co.BEGG         ← JSON：runtime、解释器要求、主页、listen、UI 扩展点
+</code></pre>
+<ul>
+<li><code>register.go</code> 用 Go 语法<strong>声明</strong>版本、安装内容、hooks、providers——
+  但它<strong>不会被编译执行</strong>，只被解析。这让人能在一个文件里看清插件要什么；</li>
+<li><code>co.BEGG</code> 声明运行方式：<code>runtime</code> 可为 <code>php | python | node | go | binary | external</code>，
+  可要求解释器版本（如 <code>php&gt;=8.1</code>）；</li>
+<li><strong>解释器探测</strong>：缺运行时在<strong>装载阶段直接报错</strong>，宿主不静默降级——
+  装了一个 PHP 插件却没装 PHP，报错会说清楚，而不是插件莫名不工作；</li>
+<li>三个文件<strong>递归定位</strong>，<code>register.go</code>/<code>co.BEGG</code> 相对路径以自身所在目录为基准——
+  塞一层子目录也能识别。</li>
+<li>诊断：<code>GET /api/admin/plugins/contract/:name</code> 返回三文件缺失/解析结果，
+  后台"契约诊断"面板直接展示。</li>
+</ul>
+<p><strong>v2 与 v1 的清单一致性有校验</strong>：<code>register.go</code> 声明的 <code>ProtocolVersion</code>
+与 <code>plugin.json</code> 的 <code>protocolVersion</code> 不一致会被拒绝。</p>
+<hr />
+<h2 id="2-99-18">2. 钩子体系：99 个、18 组、三种能力</h2>
+<h3 id="v1_1">与 v1 的兼容承诺</h3>
+<p>v1 冻结的 10 个钩子名（<code>onEmail</code>/<code>onBackup</code>/<code>onRestore</code>/<code>onApiAuth</code>/
+<code>onDBMigrate</code>/<code>onRateLimit</code>/<code>onAntiLeech</code>/<code>onCLI</code>/<code>onCollabOpen</code>/<code>onCollabSave</code>）
+<strong>永久保留、语义不变</strong>，表中 <code>Since: 1</code>。存量插件不会因升级失效。</p>
+<h3 id="hookmeta-blockablemutatable">三档能力（<code>HookMeta</code> 的 <code>Blockable</code>/<code>Mutatable</code> 决定）</h3>
+<table>
+<thead>
+<tr>
+<th>档</th>
+<th>语义</th>
+<th>典型钩子</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>通知 Emit</strong></td>
+<td>派发即忘，结果不读</td>
+<td><code>onEmail</code>、<code>onBackup</code>、<code>onDBMigrate</code></td>
+</tr>
+<tr>
+<td><strong>决策 Decide/Gate</strong></td>
+<td>返回 blocked 即拦截</td>
+<td><code>onAntiLeech</code>、<code>onApiAuth</code>、<code>onShareDownloadBefore</code></td>
+</tr>
+<tr>
+<td><strong>变换 Mutate/CtxPatch</strong></td>
+<td>插件回写 ctx 改变业务行为（进程内外均生效）</td>
+<td><code>onCollabOpen</code>（写 <code>url</code> 则 302）</td>
+</tr>
+</tbody>
+</table>
+<p>业务侧统一经 <code>internal/hooks</code> 的 <code>Emit</code> / <code>Decide</code> / <code>Mutate</code> / <code>Gate</code> 调用；
+<code>FireIf</code> 在<strong>无订阅者时短路</strong>——没装插件的部署零派发成本。</p>
+<h3 id="18">分组（18 组，前端按组展示）</h3>
+<p>system / request / auth / user / file / content / share / task / webdav /
+storage / collab / notify / billing / audit / backup / api / plugin / limit。</p>
+<p>完整钩子表见 <code>pkg/plugin/hooks_table.go</code>（唯一事实来源），或管理端
+「插件 → 钩子」页（数据来自 <code>ListPluginHooks</code>，含真实 handler 计数）。</p>
+<h3 id="v1_2">v1 语义锚点（升级不破坏的守卫）</h3>
+<p><code>TestV1FrozenHooksPreserved</code> 静态守住：10 个冻结钩子名字/<code>Since=1</code>/Wired、
+<code>onAntiLeech</code> 与 <code>onApiAuth</code> 必须 sync+blockable、
+<code>onShareDownloadBefore</code>（v2 补上的分享下载闸）必须可拦截。</p>
+<hr />
+<h2 id="3-12-provider">3. 注册型扩展点（12 类 Provider）</h2>
+<p>钩子是<strong>事件</strong>，扩展点是<strong>能力替换</strong>——插件声明"我来提供 storage"，宿主
+就会把存储调用路由给它。</p>
+<pre><code class="language-go">// pkg/plugin/registry.go
+ProviderStorage / ProviderAuth / ProviderNotify / ProviderPreview /
+ProviderPayment / ProviderContentScan / ProviderBackup / ProviderRestore /
+ProviderCLI / ProviderSearch / ProviderTheme / ProviderPage
+</code></pre>
+<ul>
+<li>声明处：<code>register.go</code>（providers 列表）；</li>
+<li>调用处：<code>internal/hooks.Call(kind, name, ctx)</code>；</li>
+<li>管理端「UI 扩展点」面板可看每个插件声明了哪些能力。</li>
+</ul>
+<p>例：<code>POST /api/admin/backup</code> 触发注册型 backup 插件导出数据（<code>controllers.Backup</code>）；
+宿主<strong>自己</strong>的系统备份在 <code>/api/admin/system/backup</code>（生成 zip，见 §6）——
+两者是不同的东西，路径刻意分开。</p>
+<hr />
+<h2 id="4-http-ui">4. 插件 HTTP 页面与 UI 扩展</h2>
+<ul>
+<li>插件可自起 HTTP 服务，宿主<strong>分配端口</strong>并反代 <code>/ext/&lt;plugin&gt;/*</code>；</li>
+<li><code>/ext/*</code> 的鉴权<strong>完全透传给插件</strong>——插件自负责（这也是双层默认关闭的原因之一）；</li>
+<li>前端：动态侧边栏（主界面/后台/移动抽屉）、iframe 插件页容器、
+  主题 CSS 变量覆盖（<code>PluginThemePicker</code>）、插件设置面板（<code>PluginSettingsPanel</code>）；</li>
+<li><code>0.0.0.0</code> 归一：后台绑定域名用域名、绑定 IP 用 IP、都没绑默认 <code>127.0.0.1</code>。</li>
+</ul>
+<hr />
+<h2 id="5-zip-pbclus">5. 安装：zip / PBClus / 信任</h2>
+<p>安装器按<strong>魔术字</strong>识别包格式（不看扩展名）：</p>
+<table>
+<thead>
+<tr>
+<th>格式</th>
+<th>识别</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>zip</td>
+<td><code>PK\x03\x04</code></td>
+<td>历史格式，继续支持；zip slip/bomb 三重限额</td>
+</tr>
+<tr>
+<td><strong>PBClus</strong></td>
+<td><code>PBClus\x1a\x0a</code></td>
+<td>本项目的容器格式；把 zip 改名成 <code>.pbclus</code> 会被明确拒绝</td>
+</tr>
+</tbody>
+</table>
+<h3 id="pbclus-docspbclus-md">PBClus 要点（完整规范见 <code>docs/PBClus-格式规范.md</code>）</h3>
+<ul>
+<li><strong>多平台</strong>：条目带 <code>platform</code>（<code>goos/goarch</code>），清单声明 <code>platforms</code>；
+  解包只取「通用 + 当前平台」，其余跳过并如实计数；</li>
+<li><strong>Ed25519 签名</strong>：可选签名块；<strong>签名有效 ≠ 可信</strong>——公钥内嵌在包里，
+  任何人都能签出"有效"的包，安全决策只认<strong>信任库</strong>（keyId 白名单）；</li>
+<li>签名策略 <code>off / warn（默认）/ require</code>，配置值写错按 require（fail closed）；</li>
+<li>打包工具 <code>pbclus-pack</code>（pack/inspect/verify/unpack/keygen/trust）；</li>
+<li>管理端「签名与信任」页可加/移除公钥、改策略。</li>
+</ul>
+<h3 id="_2">安装安全（宿主替你做的）</h3>
+<p>zip slip 每条目前缀校验、解压总量 256MB/单文件 64MB/条目 2000 三重限额、
+拒绝符号链接、Windows 保留名拦截、entry 禁止路径分隔符、
+卸载需二次确认密码。</p>
+<hr />
+<h2 id="6">6. 系统备份 / 恢复（与插件备份扩展点并存）</h2>
+<table>
+<thead>
+<tr>
+<th>路由</th>
+<th>语义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /api/admin/system/backup</code></td>
+<td><strong>宿主自己</strong>生成 zip（SQLite 库 + manifest.json），触发 <code>onBackup</code> 钩子</td>
+</tr>
+<tr>
+<td><code>GET  /api/admin/system/backup/download</code></td>
+<td>下载备份包（双防线挡路径穿越）</td>
+</tr>
+<tr>
+<td><code>POST /api/admin/system/backup/restore</code></td>
+<td><strong>暂存制</strong>恢复：校验 SQLite 文件头 → <code>data/restore/</code> + PENDING，下次启动在 <code>db.Init</code> 之前应用（热替换运行中的库会损坏数据）</td>
+</tr>
+<tr>
+<td><code>POST /api/admin/backup</code></td>
+<td>v2 注册型 backup <strong>插件</strong>扩展点</td>
+</tr>
+</tbody>
+</table>
+<p>恢复提交时触发 <code>onRestore</code>（异步通知，拦不住——需要否决在权限层解决）。</p>
+<hr />
+<h2 id="7-oncli">7. 插件命令行（onCLI）</h2>
+<p><code>nebula plugin &lt;cmd&gt; [args...]</code>：初始化依赖 → 派发 <code>onCLI</code> → 退出，
+<strong>不启动 HTTP 服务</strong>。</p>
+<ul>
+<li>插件往 ctx 写 <code>cliOutput</code>（打印）与 <code>cliExitCode</code>；</li>
+<li>退出码约定：<code>0</code> 成功 / <code>1</code> 用法错误或被插件拒绝 / <code>2</code> 未安装；</li>
+<li>7 个示例插件都实现了同名自检命令。</li>
+</ul>
+<hr />
+<h2 id="8-api">8. 管理端 API 速查</h2>
+<p>插件页：<code>/api/admin/plugins*</code>（列表/钩子/商店/协议/日志/安装/启停/配置）
+—— 此前前端 <code>request()</code> 丢错误响应体导致 <code>needAgreement</code> 弹窗全为死代码，已修。</p>
+<table>
+<thead>
+<tr>
+<th>域</th>
+<th>路由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>签名与信任</td>
+<td><code>GET/POST /plugins/trust</code>、<code>DELETE /plugins/trust/:keyId</code>、<code>PUT /plugins/trust/mode</code></td>
+</tr>
+<tr>
+<td>全局开关</td>
+<td><code>GET/POST /plugins/global</code>（开启须 <code>acknowledge=true</code>）</td>
+</tr>
+<tr>
+<td>契约诊断</td>
+<td><code>GET /plugins/contract/:name</code></td>
+</tr>
+<tr>
+<td>UI 扩展</td>
+<td><code>GET /plugins/ui</code>、<code>POST /plugins/ui/settings/:plugin</code></td>
+</tr>
+<tr>
+<td>系统备份</td>
+<td><code>/system/backup*</code>（见 §6）</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9">9. 相关文件索引</h2>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pkg/plugin/hooks.go</code> / <code>hooks_table.go</code></td>
+<td>派发机制 / 99 钩子表（唯一事实来源）</td>
+</tr>
+<tr>
+<td><code>pkg/plugin/contract.go</code> / <code>godecl.go</code> / <code>begg.go</code></td>
+<td>v2 三文件契约（解析/AST/运行时）</td>
+</tr>
+<tr>
+<td><code>pkg/plugin/registry.go</code></td>
+<td>12 类注册型扩展点</td>
+</tr>
+<tr>
+<td><code>pkg/plugin/pbclus/</code></td>
+<td>PBClus 容器（多平台 + 签名 + 信任库）</td>
+</tr>
+<tr>
+<td><code>pkg/plugin/host/manager.go</code></td>
+<td>子进程生命周期、RPC、超时、重启、日志</td>
+</tr>
+<tr>
+<td><code>pkg/pluginset/pluginset.go</code></td>
+<td>启动接线 + 全局开关（双层默认关闭）</td>
+</tr>
+<tr>
+<td><code>internal/pluginhttp/server.go</code></td>
+<td>插件 HTTP 服务与端口分配</td>
+</tr>
+<tr>
+<td><code>internal/hooks/emit.go</code></td>
+<td>Emit/Decide/Mutate/Gate 统一入口</td>
+</tr>
+<tr>
+<td><code>controllers/plugin_ext.go</code></td>
+<td>扩展点控制器 + 全局开关 + 契约诊断</td>
+</tr>
+<tr>
+<td><code>controllers/backup.go</code> / <code>plugin_trust.go</code></td>
+<td>系统备份 / 信任管理 API</td>
+</tr>
+<tr>
+<td><code>cmd/pbclus-pack/</code></td>
+<td>打包/签名/信任 CLI</td>
+</tr>
+<tr>
+<td><code>examples/plugins/</code></td>
+<td>7 个可运行示例（见下）</td>
+</tr>
+<tr>
+<td><code>wire_hooks.py</code></td>
+<td>钩子接线生成脚本（v2 用）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="7">示例插件（7 个，全部可运行）</h3>
+<table>
+<thead>
+<tr>
+<th>插件</th>
+<th>钩子/能力</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>referer-guard</td>
+<td><code>onAntiLeech</code></td>
+<td>防盗链（v1 契约兼容样例）</td>
+</tr>
+<tr>
+<td>smtp-email</td>
+<td><code>onEmail</code></td>
+<td>邮件外发（邮件唯一入口）</td>
+</tr>
+<tr>
+<td>hmac-auth</td>
+<td><code>onApiAuth</code></td>
+<td>HMAC 签名鉴权（失败路径扩展鉴权）</td>
+</tr>
+<tr>
+<td>notify-webhook</td>
+<td><code>onEmail</code>+<code>onCLI</code></td>
+<td>通知转发 Slack/飞书/钉钉/Discord</td>
+</tr>
+<tr>
+<td>backup-mirror</td>
+<td><code>onBackup</code>/<code>onRestore</code>+<code>onCLI</code></td>
+<td>备份异地镜像+轮转+审计</td>
+</tr>
+<tr>
+<td>download-limiter</td>
+<td><code>onAntiLeech</code>+<code>onCLI</code></td>
+<td>按 IP 滑动窗口限流</td>
+</tr>
+<tr>
+<td>collab-redirect</td>
+<td><code>onCollabOpen</code>+<code>onCLI</code></td>
+<td>协作编辑 302 跳外部编辑器</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="10">10. 常见陷阱</h2>
+<p>进程内 handler 的坑（进程外插件由宿主隔离，panic 不炸宿主）：</p>
+<ol>
+<li><strong>handler panic 要自己 recover</strong>——<code>Fire</code> 不兜，炸的是整个请求；</li>
+<li><strong>ctx 数字经 JSON 往返是 float64</strong>——断言 <code>int</code>/<code>uint</code> 会静默失败
+   （写一个兼容 int/uint/int64/float64 的取值函数）；</li>
+<li><strong>不要在 handler 里 <code>Register</code></strong>——锁不可重入，死锁；</li>
+<li><strong>ctx 是同一个 map</strong>——后续 handler 能看见你的修改，也会被篡改；</li>
+<li><strong>拦截只认 <code>IsBlockedError</code></strong>（error 文本含小写 <code>blocked</code>）——
+   <code>ctxPatch:{"blocked":true}</code> 无效，判定语义只此一处；</li>
+<li><strong><code>onDBMigrate</code> 每次启动都触发</strong>——建表必须 <code>CREATE TABLE IF NOT EXISTS</code>；</li>
+<li><strong>插件系统默认双层关闭</strong>——总开关没开时一切 503，先看后台开关；</li>
+<li><strong>安装后要启用</strong>——安装不自动启用（协议关卡在后端强制）；</li>
+<li><strong>首次安装后要重启服务</strong>——bootstrap 只在启动时跑，不重启宿主为 nil；</li>
+<li><strong>配置改完要重启插件</strong>——配置在启用时下发；</li>
+<li><strong>失败路径的 onApiAuth 与成功路径语义不同</strong>——前者提供新凭据方式
+    （无 Authorization 的 HMAC），后者否决/补充有效令牌，别混用。</li>
+</ol>
+<hr />
+<h2 id="11">11. 写文档时的诚实边界</h2>
+<ul>
+<li><code>permissions</code> 声明<strong>不强制</strong>，只展示给管理员；</li>
+<li>商店条目的 version/author <strong>不可信</strong>，以安装后磁盘上的 <code>plugin.json</code> 为准；</li>
+<li><strong>签名有效 ≠ 可信</strong>（公钥内嵌，任何人可签；信任决策只看 TrustStore）；</li>
+<li>插件沙箱<strong>不存在</strong>——隔离靠进程边界 + 权限自觉；</li>
+<li><code>/ext/*</code> 鉴权完全透传给插件；</li>
+<li><code>openInNewWindow</code> 之类的前端诉求宿主做不到（固定 302）——不做假承诺。</li>
+</ul></article>
+<div class="foot">NebulaDrive Wiki · 由项目文档自动构建 · 最后生成 2026-11-14</div>
+</main>
+<script src="../assets/app.js"></script></body></html>

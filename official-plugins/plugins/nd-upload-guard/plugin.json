@@ -1,0 +1,17 @@
+{
+  "name": "nd-upload-guard",
+  "title": "上传安全守卫",
+  "version": "1.0.0",
+  "author": "NebulaDrive Official",
+  "description": "拦截可执行文件、脚本与路径穿越文件名，并可限制单文件大小。",
+  "entry": "plugin.py",
+  "protocolVersion": 2,
+  "hooks": [
+    "onFileUploadBefore"
+  ],
+  "permissions": [
+    "file:read"
+  ],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://cloud.berrywing.top/"
+}

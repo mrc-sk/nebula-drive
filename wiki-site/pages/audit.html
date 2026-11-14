@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>不足总结与改进建议 · NebulaDrive Wiki</title>
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<aside id="sidebar">
+<div class="brand">NebulaDrive Wiki<small>项目文档 · 部署运维 · 插件开发</small></div>
+<input id="search" placeholder="搜索文档…" autocomplete="off">
+<div id="searchResults"></div>
+<div class="nav-group"><h4>▶ 入门</h4><a href="../pages/overview.html">项目概览 README</a><a href="../pages/license.html">AGPL 许可通俗说明</a></div><div class="nav-group"><h4>◈ 插件开发</h4><a href="../pages/plugin-manual.html">插件制作手册</a><a href="../pages/plugin-v2-guide.html">插件平台 v2 完全指南</a><a href="../pages/plugin-system-guide.html">插件系统完全指南</a><a href="../pages/pbclus-spec.html">PBClus 格式规范</a><a href="../pages/plugin-hotload.html">插件热加载：进度与接续</a><a href="../pages/plugin-builder.html">可视化插件制作器使用说明</a></div><div class="nav-group"><h4>▤ 版本与交付</h4><a href="../pages/changelog.html">CHANGELOG 变更记录</a><a href="../pages/ai-era-delivery.html">智能时代交付说明</a><a href="../pages/v2-delivery.html">插件平台 v2 交付说明</a></div><div class="nav-group"><h4>▣ 开发档案</h4><a class="active" href="../pages/audit.html">不足总结与改进建议</a><a href="../pages/code-review.html">CODE REVIEW 代码审查</a><a href="../pages/fixlog.html">FIXLOG 修复记录</a><a href="../pages/backlog.html">新功能占位清单</a></div><div class="nav-group"><h4>⚙ 运维</h4><a href="../pages/ops-manual.html">站点部署与运维手册</a><a href="../pages/ticket-desk.html">智能 AI 工单站使用说明</a><a href="../pages/plugin-store.html">官方插件市场与插件清单</a></div><div class="nav-group"><h4>· 首页</h4><a href="../index.html">Wiki 首页</a></div>
+</aside>
+<main id="main">
+<div class="crumb"><a href="../index.html">首页</a> / <span>开发档案</span> / 不足总结与改进建议</div>
+<article class="md"><p class="desc">站长视角与架构视角的审计结论</p><h1 id="nebuladrive">NebulaDrive 不足总结与改进建议</h1>
+<blockquote>
+<p>评估对象：<code>github.com/mrc-sk/nebula-drive</code>，<code>main</code> @ <code>11d5621</code>（2026-10-05）
+评估时间：2026-11-04
+评估方式：完整克隆仓库 → 逐文件核查源码与自带文档 → 本地实跑 <code>go build</code> / <code>go vet</code> / <code>go test</code> → 比对 GitHub 元数据与前端依赖公开漏洞库
+视角：<strong>站长（运营/合规/成本）</strong> + <strong>技术评审（架构/安全/工程）</strong>
+标注说明：<code>【实测】</code>= 我本地跑出来的结果；<code>【代码核查】</code>= 逐行/全库搜索确认；<code>【文档自述】</code>= 项目自己的 CHANGELOG / CODE_REVIEW 已承认的问题</p>
+</blockquote>
+<hr />
+<h2 id="0">0. 一句话结论</h2>
+<p>这是一个<strong>工程能力明显在线、但产品化与运营化几乎为零</strong>的单人项目：存储抽象、引用计数、配置加密的设计水平高于同类国产自托管项目，作者还写了 743 行安全自审并真的修掉了大部分 P0；但它目前的完成度是「能跑起来的功能原型」，不是「可以承载真实用户数据的网盘服务」。</p>
+<ul>
+<li><strong>站长视角</strong>最致命的不是 bug，而是<strong>合规裸奔 + 无备份 + 无社区</strong>：公开分享、BT/磁力离线下载、举报/审核/日志留存全缺。</li>
+<li><strong>技术视角</strong>最刺眼的是<strong>「README 写了但代码没有」</strong>：三个统计图表接口后端根本不存在；<code>go test ./...</code> 在我这里并不全绿，而文档宣称全绿。</li>
+</ul>
+<p><strong>建议定位</strong>：自用 / 学习 / 内网试验可以上手；<strong>对外提供服务前必须完成第 4 节 P0 清单</strong>。</p>
+<hr />
+<h2 id="1">1. 事实核验基线</h2>
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th>实际值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>创建 / 最后推送</td>
+<td>2026-08-09 / 2026-10-05</td>
+<td>截至评估日<strong>停更约 30 天</strong></td>
+</tr>
+<tr>
+<td>Star / Fork / Issue</td>
+<td>3 / 0 / 0</td>
+<td>无外部用户验证、无外部反馈</td>
+</tr>
+<tr>
+<td>Release</td>
+<td>仅 1 个 <code>V26-10.0-d</code>（五平台 zip，各约 14–15 MB）</td>
+<td>无版本序列、无 LTS 概念</td>
+</tr>
+<tr>
+<td>贡献者</td>
+<td>1 人（mrc-sk，33 次提交）</td>
+<td>单点维护，巴士因子 = 1</td>
+</tr>
+<tr>
+<td>分支</td>
+<td><code>main</code>、<code>plugins</code></td>
+<td>社区插件库尚未有内容沉淀</td>
+</tr>
+<tr>
+<td>代码规模</td>
+<td>Go 103 文件 / 22,241 行；前端 43 个 TS/TSX / 13,222 行</td>
+<td>约 3.5 万行，单人项目里算大工程</td>
+</tr>
+<tr>
+<td>测试文件</td>
+<td>34 个 Go <code>_test.go</code></td>
+<td>但分布极不均衡（见 3.4）</td>
+</tr>
+<tr>
+<td>协议</td>
+<td>AGPL-3.0</td>
+<td>对站长有实质法律义务（见 2.2）</td>
+</tr>
+<tr>
+<td>技术栈</td>
+<td>Go 1.25 + Gin + GORM + React 18 + Vite + TS + Tailwind</td>
+<td>单二进制 <code>go:embed</code> 前端</td>
+</tr>
+</tbody>
+</table>
+<p><strong>【实测】本地构建与测试</strong>（Go 1.25.0 / linux-amd64）：</p>
+<pre><code>go build ./...   → 通过（无错误输出）
+go vet ./...     → 通过（无错误输出）
+go test ./...    → 1 个 FAIL
+  --- FAIL: TestLocalConfigJSONEscaping (0.00s)
+      fs_test.go:156: malformed config must return an error,
+                      not silently fall back to a relative dir
+  FAIL  github.com/nebula-drive/nebula/filesystem
+  其余包 ok（controllers 298s / middleware 65s / routers 66s / models 58s）
+</code></pre>
+<blockquote>
+<p>这个失败点与「畸形存储策略 JSON 不得静默回落到 <code>uploads/</code> 相对目录」有关，属于<strong>数据落盘正确性</strong>的安全断言。<code>filesystem.New</code> 在解析失败时会回退到 <code>confUploadPath()</code>，在测试环境下该函数返回了非空值，导致断言失败——无论根因是全局 conf 状态污染还是回退条件过宽，<strong>结论一致：当前 main 分支不是全绿</strong>。
+而 <code>CHANGELOG</code> V26-10.0-d 与 <code>CODE_REVIEW.md</code> §6 都白纸黑字写着「<code>go test ./...</code> 全包通过 / EXIT=0」。<strong>文档与实物不符，且发行门禁没有拦住它。</strong></p>
+</blockquote>
+<hr />
+<h2 id="2">2. 站长视角：不足与建议</h2>
+<h3 id="21">2.1 合规与法律风险 —— 最高优先级</h3>
+<p><code>【代码核查】</code> 全库搜索 <code>report / 举报 / 审核 / 敏感词 / moderation / hash 黑名单</code> <strong>零命中</strong>。也就是说：</p>
+<ul>
+<li>有<strong>公开分享</strong>（提取码 + 密码 + 5 分钟签名 URL）、有<strong>离线下载</strong>（HTTP / BT / 磁力）、有<strong>用户注册与套餐付费</strong>，但<strong>没有内容审核、没有举报入口、没有侵权投诉通道、没有操作日志留存策略</strong>。</li>
+<li>这正好构成典型的违规内容传播链路。国内运营涉及 ICP 备案与公安备案、《网络安全法》日志留存（≥6 个月）、《个人信息保护法》、以及著作权的「通知—删除」义务。<strong>BT/磁力下载尤其危险</strong>，站长很难主张自己只是技术中立。</li>
+</ul>
+<p><strong>建议（上线前必做）</strong>
+1. 后台加「举报/投诉」入口 + 工单处理流程 + 处理时限，分享页放免责声明与投诉邮箱。
+2. 访问/上传/分享/下载日志结构化落盘并保留 ≥6 个月，支持按文件与按用户追溯。
+3. <strong>默认关闭 BT/磁力离线下载</strong>，或仅限管理员 + 明确风险提示；HTTP 离线下载保留出站白名单（代码已有 <code>internal/service/outbound.go</code>，可复用）。
+4. 分享文件做哈希黑名单 + 可选接入内容安全 API；对公开分享设有效期、次数上限与下载限速。
+5. 若提供付费套餐/兑换码，补齐用户协议、隐私政策、退款与发票流程。</p>
+<h3 id="22-agpl-30">2.2 AGPL-3.0 是站长的真实义务，不是一句「开源协议」</h3>
+<p><code>【文档自述】</code> README 与 <code>AGPL_通俗说明.md</code> 已经写清楚：<strong>改过代码并部署到公网供他人使用，必须向这些使用者提供完整对应源码（§13）</strong>，二进制分发也要随附源码或书面要约。</p>
+<ul>
+<li>只要站长做过二开（换 Logo、接短信、改套餐逻辑都算），对外服务就要公开改动源码。</li>
+<li>想做<strong>闭源商业 SaaS</strong> 或给客户做闭源定制，需要双授权（当前单一版权人，操作上可行，但要提前决定）。</li>
+<li>插件分发同样受约束；仓库里已有「插件协议要求 AGPL 合规」的设计，方向是对的。</li>
+</ul>
+<p><strong>建议</strong>：现在就明确「自用 / 对外服务 / 商业化」三种定位各走哪条路；对外部署时准备一个可下载的对应源码包（含 commit hash 与构建脚本），别等被质疑才补。</p>
+<h3 id="23">2.3 数据安全与业务连续性</h3>
+<p><code>【代码核查】</code> 无内置备份/恢复实现（只有 <code>onBackup</code> / <code>onRestore</code> 插件钩子占位），无恢复演练文档，无 RPO/RTO 说明。</p>
+<ul>
+<li>默认 <strong>SQLite 单文件 + 加密密钥同在 <code>data/</code> 目录</strong>：一次误删、磁盘损坏或密钥丢失 = 全站数据没了。</li>
+<li>单实例设计（README 已诚实列出）：WebDAV 锁、登录失败计数、验证码阈值、限流、分片上传会话全在<strong>进程内存</strong>，重启即丢；分片断点续传状态至今仍在内存 map（<code>file.go</code> 的 <code>chunkUploads</code>），只加了 24h 清理，<code>【文档自述】</code> CHANGELOG 的已知 Bug #1「落盘到 <code>chunk_sessions</code> 表」仍未实现。</li>
+<li>回收站 30 天自动清理、版本只保留最近 10 版 —— 用户误删的兜底窗口比主流网盘短。</li>
+<li>迁移到 MySQL/PG 的能力有，但只有 1 个 release、CHANGELOG 自己承认有 4 个版本未补记条目，<strong>升级路径缺少可追溯的变更史</strong>。</li>
+</ul>
+<p><strong>建议</strong>：定时快照 + 异地备份 + 每季度一次<strong>真实恢复演练</strong>；把 <code>data/</code> 整体纳入备份并单独安全保管 <code>secret.key</code>；生产改用 MySQL/PG 并写清版本升级/回滚步骤；把「分片会话落盘」提到 P1。</p>
+<h3 id="24">2.4 可观测性与运维</h3>
+<p><code>【代码核查】</code> 无 <code>/healthz</code>、无 Prometheus metrics、无结构化日志（全库标准库 <code>log.Printf</code>）、无告警、无优雅关闭（<code>watchSignals</code> 只负责回收插件子进程）。<code>start.bat</code> 是前台运行、日志打控制台。</p>
+<p><strong>建议</strong>：补 <code>/healthz</code> + readiness、结构化日志（含 request id）、错误上报、磁盘水位/流量/登录失败告警；提供 systemd unit（仓库里有 <code>nebuladrive.service</code>，但缺 Docker 镜像，见 3.2）与容器化部署文档。</p>
+<h3 id="25">2.5 项目可持续性：单点维护风险</h3>
+<p>3 star / 0 fork / 0 issue / 单贡献者 / 停更 30 天 / 仅 1 个 release，且 <code>【代码核查】</code> <strong>没有 <code>SECURITY.md</code>、没有 <code>CONTRIBUTING.md</code>、没有行为准则、没有版本支持策略</strong>。</p>
+<ul>
+<li>漏洞往哪报？哪些版本会收安全补丁？作者停更后谁修？——三个问题目前都没有答案。</li>
+<li>0 issue 不代表没 bug，更可能是<strong>没有真实用户</strong>，所以所有问题都是作者自己发现的（<code>CODE_REVIEW.md</code> 是自审、<code>FIXLOG.md</code> 1310 行是自修记录、<code>.trae-html-share-packages/</code> 是 AI 编辑器产物且仍被提交进仓库）。</li>
+</ul>
+<p><strong>建议</strong>：补 <code>SECURITY.md</code>（私下报告邮箱 + 响应时限）、贡献指南、版本支持矩阵；站长自己保留一份可构建的 fork 与离线依赖缓存，避免上游消失后无法出安全补丁。</p>
+<h3 id="26">2.6 宣传与实物落差 —— 直接伤害用户信任</h3>
+<p><code>【代码核查】</code> 我在后端全库搜 <code>stats</code>，只找到 <code>migrate_sensitive.go</code> 里一个无关变量；路由表里只有 <code>/api/admin/dashboard</code>。而前端 <code>client.ts</code> 定义了 <code>trafficStats</code> / <code>fileTypeStats</code> / <code>activityStats</code> 三个接口，<code>Dashboard.tsx</code> 里甚至自己写了注释：</p>
+<pre><code class="language-ts">} catch {
+  // 后端无 API：空数组 → 图表空态
+}
+</code></pre>
+<p>也就是说 README 里「📊 数据统计：KPI 卡片 + <strong>流量趋势折线 + 文件类型饼图 + 用户活跃度热力图</strong>」中，<strong>后三个图表恒为空态</strong>（只有 KPI 卡片有真实数据）。<code>【文档自述】</code> CHANGELOG 早期版本曾记录「热力图走 mock 数据」——现在连假数据都没了，造假问题消失了，但功能依然没实现。</p>
+<p>同类落差还有：<code>【文档自述】</code> V26-10.0-d 亲口承认此前「插件启用/禁用开关是装饰品（<code>Enabled</code> 字段无任何生产代码读取）」「扩展点数量是 <code>Math.random()</code> 生成的随机数」「插件安装是 <code>alert()</code> 占位」「商店拉取失败一律返回空数组」。这些都在 10-05 修好了，但说明<strong>「页面看起来完整」和「功能真的可用」之间长期没有校验机制</strong>。</p>
+<p><strong>建议</strong>：README 加一张<strong>功能成熟度矩阵</strong>（✅ 可用 / 🟡 Beta / 🔵 规划中 / ⚪ 占位），把 CHANGELOG 里 18 条已知 Bug 分级（<code>Blocker</code> / <code>Major</code> / <code>Minor</code>）并置顶；把三个统计接口<strong>实现或删除</strong>（现在前端在请求 404）。</p>
+<hr />
+<h2 id="3">3. 技术评审视角：不足与建议</h2>
+<h3 id="31">3.1 先说做得好的（我独立复核过，不是照抄自评）</h3>
+<ul>
+<li><strong>引用计数 + <code>FileObject</code> 分离物理对象</strong>：UPSERT 自增、唯一键回退、旧数据 backfill，升级路径考虑得很周全，是全项目最扎实的一块。</li>
+<li><strong>存储抽象层 <code>filesystem.Handler</code></strong>：7 个方法的接口 + 工厂注册，Local/S3/OSS/COS/SFTP/远程 WebDAV 都接进来了，扩展性是真的。</li>
+<li><strong>安全自审并落地</strong>：<code>CODE_REVIEW.md</code> 743 行列出的 P0/P1，我逐条查了当前代码——CORS 已收紧为白名单（<code>routers/router.go</code> 的 <code>allowedOrigin</code>）、<code>filesystem/fs.go</code> 有 <code>ErrPathTraversal</code> 与 <code>safeJoin</code>、<code>internal/service/outbound.go</code> 有 loopback/私网 IP 校验、<code>cryptox.TokenHash</code> 让 PAT 只存哈希、<code>internal/service/{quota,outbound}.go</code> 把配额与上传校验收口、WebDAV 的 LOCK/COPY 有了真实实现、两个 CI 工作流都在。<strong>作者确实把「校验收口」这条建议做成了结构性修复，这点值得肯定。</strong></li>
+<li>单二进制 + <code>go:embed</code> + 一键试用包（<code>-autoport</code>、<code>-open</code>、中文报错提示）对新手部署很友好。</li>
+</ul>
+<h3 id="32">3.2 实测/核查发现的硬问题</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>问题</th>
+<th>证据</th>
+<th>级别</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>前端依赖 <code>xlsx@^0.18.5</code> 带两个已知高危 CVE</strong></td>
+<td><code>CVE-2023-30533</code>（原型污染，CVSS 7.8）、<code>CVE-2024-22363</code>（ReDoS，7.5）。SheetJS 在 npm 上最后一版就是 0.18.5，修复版只从 <code>cdn.sheetjs.com</code> 分发（0.19.3 / 0.20.2+）。网盘会<strong>解析用户上传的表格</strong>，属于真实攻击面</td>
+<td><strong>P0</strong></td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong><code>go test ./...</code> 不绿，与文档宣称矛盾</strong></td>
+<td>见第 1 节；<code>filesystem.TestLocalConfigJSONEscaping</code> FAIL。CI 虽配置了 <code>go test -race</code>，但最新 commit 上仍有失败用例</td>
+<td><strong>P0</strong></td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>三个统计接口后端不存在</strong></td>
+<td>全库 <code>stats</code> 零命中；前端注释自认「后端无 API」；README 却列为已实现功能</td>
+<td><strong>P1</strong></td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>单实例内存状态，重启丢数据</strong></td>
+<td><code>chunkUploads</code> 仍是内存 map；README 已列 WebDAV 锁/限流/失败计数/分片会话五项；CHANGELOG 已知 Bug #1 未修</td>
+<td><strong>P1</strong></td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>OAuth2 无 PKCE、授权码并发可重放</strong></td>
+<td>全库 <code>code_challenge / PKCE / code_verifier</code> 零命中；自评 P2-5 的 <code>redirect_uri</code> 空数组放行、code <code>Used</code> 非原子判断，<strong>不在已修清单里</strong></td>
+<td><strong>P1</strong></td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>PAT 撤销不联动会话</strong></td>
+<td><code>controllers/pat.go</code> 的 <code>DeletePAT</code> 只删 DB 行；已签发 JWT 在过期前仍可用（CHANGELOG 已知 Bug #12）</td>
+<td><strong>P1</strong></td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>插件系统等价于任意代码执行</strong></td>
+<td>子进程隔离 + 崩溃重启 + 协议弹窗做得不错，但<strong>无插件签名/校验和、无 capabilities 权限收敛</strong>；<code>install.go</code> 的 <code>validateURL</code> 只校验 scheme 与 loopback。装第三方插件 = 给服务器 RCE</td>
+<td><strong>P1</strong></td>
+</tr>
+<tr>
+<td>8</td>
+<td><strong>最危险的模块零测试</strong></td>
+<td><code>webdav</code> 包 <code>[no test files]</code>；<code>internal/service</code>、<code>pkg/pluginset</code>、<code>pkg/storage</code>、<code>pkg/plugin/install</code> 同样无测试。而历史 P0 全出在 WebDAV</td>
+<td><strong>P1</strong></td>
+</tr>
+<tr>
+<td>9</td>
+<td><strong>无内容审核 / 举报 / 日志留存</strong></td>
+<td>全库零命中（与 2.1 呼应）</td>
+<td><strong>P0（站长侧）</strong></td>
+</tr>
+<tr>
+<td>10</td>
+<td><strong>无可观测性、无备份</strong></td>
+<td>无 healthz / metrics / 结构化日志 / 备份实现</td>
+<td><strong>P1</strong></td>
+</tr>
+<tr>
+<td>11</td>
+<td><strong>硬编码 1 号存储策略</strong></td>
+<td>自评 §4.2 指出上传/分片/离线下载三处 <code>handlerForPolicyID(1)</code>，删掉 1 号策略会静默写入非法策略；未列入修复清单</td>
+<td>P2</td>
+</tr>
+<tr>
+<td>12</td>
+<td><strong>README「Docker / deb / rpm 打包」名不副实</strong></td>
+<td>仓库无 Dockerfile，只有 <code>nfpm.yaml</code>（deb/rpm）</td>
+<td>P2</td>
+</tr>
+</tbody>
+</table>
+<h3 id="33">3.3 架构与可维护性</h3>
+<p><code>【代码核查】</code> 大文件集中：<code>file.go</code> 1804 行、<code>webdav.go</code> 1003 行、<code>pkg/plugin/host/manager.go</code> 923 行、<code>plugins.go</code> 816 行；前端 <code>Files.tsx</code> 1390 行、<code>Plugins.tsx</code> 734 行、<code>api/client.ts</code> 643 行。自评 §4.1 已建议拆分 <code>controllers/file|upload|version|tag|trash</code> 与 <code>internal/service</code>，<strong>收口做了一部分，拆分没做</strong>。</p>
+<p><code>db.Get()</code> 全局单例 + 硬编码策略 ID + 每请求多次查 <code>settings</code>（自评 P2-6 的缓存缺失）仍是隐性技术债。</p>
+<h3 id="34">3.4 测试策略的结构性偏差</h3>
+<p>34 个测试文件看似不少，但：</p>
+<ul>
+<li>全部集中在 middleware / pkg / models / conf 这些<strong>好测的部分</strong>；<code>controllers</code> 有测试但单包跑 <strong>298 秒</strong>，CI 每次要等 5 分钟，容易被人绕过。</li>
+<li><strong>WebDAV 包零测试</strong>、<code>internal/service</code> 零测试——而这两个正是 P0 高发区。</li>
+<li><code>go test -race</code> 只在 CI 跑；<code>【文档自述】</code> 作者自己写了「本地 Windows 无 MinGW，CGO_ENABLED=0，本地跑不了 race，只有 CI 能验」，意味着<strong>本地开发阶段拿不到并发问题反馈</strong>。</li>
+<li>自评里提的「权限矩阵测试 / WebDAV 集成测试 / SSRF 用例 / 并发 race 测试」四项，<strong>目前只在 <code>routers/integration_test.go</code> 有部分覆盖</strong>。</li>
+</ul>
+<h3 id="35">3.5 前端健壮性与体验</h3>
+<p><code>【代码核查】</code> 16 处 <code>alert()</code> 充当成功/失败提示（后台管理页几乎全靠弹窗）；<code>catch { // ignore }</code> 静默吞错误遍布 Dashboard；<code>ShareList.tsx</code> 明确注释「后端只回 fileId 不回文件名，只能显示占位」；i18n 五语言靠 <code>check_i18n.py</code> 脚本门禁（这个门禁设计是好的）。</p>
+<p><strong>建议</strong>：统一 Toast/错误边界组件替换 <code>alert</code>；后端在分享列表直接返回文件名；对 404/5xx 做可见提示而不是空图表。</p>
+<h3 id="36">3.6 文档一致性（会误导二开者与站长）</h3>
+<table>
+<thead>
+<tr>
+<th>位置</th>
+<th>问题</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CODE_REVIEW.md</code> 开头</td>
+<td>写「74 个 Go 文件、12,989 行」，实际 103 / 22,241；§4.5 写「无 CI」，§7 又写「CI 已加」——文档分阶段追加，状态混杂</td>
+</tr>
+<tr>
+<td><code>README</code> 致谢</td>
+<td>仍写「本项目基于 <strong>NebulaDrive</strong> 开发，原作者 mrc-sk」，自评 §5.2 早在 10-01 就指出会让人误判为 fork，至今未改</td>
+</tr>
+<tr>
+<td><code>README</code> 架构图</td>
+<td>写 <code>backend/dist/</code>，实际是 <code>backend/frontend_dist/</code>（同文档下文又写对了）</td>
+</tr>
+<tr>
+<td><code>docs/插件热加载-进度与接续.md</code></td>
+<td>10-04 写「尚未接进 main.go、前端完全没动」「明天第一件事」，实际 <code>main.go:318</code> 已 <code>pluginset.InitPlugins()</code>、10-05 CHANGELOG 已宣布完成 —— <strong>过时文档未清理</strong></td>
+</tr>
+<tr>
+<td><code>CHANGELOG</code></td>
+<td>自认有 4 个 Beta 版本未补记条目</td>
+</tr>
+<tr>
+<td>仓库根目录</td>
+<td><code>.trae-html-share-packages/</code> 两个 zip 仍提交（自评 §5.3 建议 gitignore，未做）</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4">4. 改进路线图（两个视角合并，按投入产出比排序）</h2>
+<h3 id="p0">P0 — 对外服务前必须完成</h3>
+<ol>
+<li><strong>修绿 <code>go test ./...</code>，并确认 GitHub Actions 真的启用且能拦截合并</strong>；把 <code>-race</code> + 覆盖率下限设为 PR 门禁。顺手给 <code>filesystem</code> 的 conf 全局状态做测试隔离。</li>
+<li><strong>替换 <code>xlsx@0.18.5</code></strong>：改用 <code>xlsx@https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz</code>，或换 <code>exceljs</code> / 服务端解析；同时限制上传表格体积。</li>
+<li><strong>合规三件套</strong>：举报入口 + 通知删除流程 + 日志留存 ≥6 个月；默认关闭 BT/磁力；分享页免责与投诉入口。</li>
+<li><strong>备份与恢复</strong>：定时快照 + 异地副本 + 一次真实恢复演练；<code>data/</code> 与 <code>secret.key</code> 分开保管；写下 RPO/RTO。</li>
+<li><strong>补 <code>SECURITY.md</code></strong> 与私下漏洞报告渠道。</li>
+</ol>
+<h3 id="p1">P1 — 稳定化</h3>
+<ol start="6">
+<li>分片会话落盘（<code>chunk_sessions</code> 表）；WebDAV 锁 / 限流 / 登录失败计数外置 Redis，向多副本演进。</li>
+<li>OAuth2 补 PKCE、授权码用 <code>UPDATE ... WHERE used=false</code> 原子消费、<code>redirect_uris</code> 为空则拒绝授权；PAT 撤销联动 session 黑名单。</li>
+<li>插件加签名/校验和校验 + 权限清单（capabilities）+ 默认关闭第三方安装；安装 URL 增加完整性校验。</li>
+<li>补 <strong>WebDAV 集成测试</strong>（路径穿越、<code>PUT</code> 覆盖、<code>LOCK</code>/<code>UNLOCK</code>、<code>Depth:1</code> href、白名单绕过）与插件安装器测试。</li>
+<li>补 <code>/healthz</code>、结构化日志、磁盘/流量/失败登录告警、优雅关闭。</li>
+</ol>
+<h3 id="p2">P2 — 产品化与治理</h3>
+<ol start="11">
+<li>README 加功能成熟度矩阵；清理过时文档（接续文档、自评状态段、致谢 fork 措辞、Docker 段、<code>dist</code> 路径、CHANGELOG 补记）；把已知 Bug 分级置顶。</li>
+<li><strong>实现或删除三个统计接口</strong>（当前前端请求 404）；OnlyOffice 明确写成「仅对接钩子，需自备服务」、Yjs 明确写成「仅 md/txt」。</li>
+<li>拆分 <code>file.go</code> / <code>Files.tsx</code> / <code>webdav.go</code>；统一错误提示组件；分享列表补文件名。</li>
+<li>社区治理：贡献指南、行为准则、版本支持策略、插件审核流程；<code>plugins</code> 分支的 CI 需真正覆盖（README 说「CI 审核通过后合并」，现有两个工作流只对 <code>main</code> 的 push/PR 触发）。</li>
+<li>商业化准备：AGPL 双授权决策、账单/发票/支付对接、企业客户最在意的审计导出与 SSO。</li>
+</ol>
+<hr />
+<h2 id="5">5. 结论</h2>
+<ul>
+<li><strong>对站长</strong>：现在上线等于把「内容合规责任 + 数据丢失风险 + 单点维护风险」全部扛在自己身上，而产品连举报入口、备份和健康检查都没有。<strong>建议先按 P0 做完，再灰度放量；在此之前仅限自用/内网。</strong></li>
+<li><strong>对作者</strong>：底子很好，最值得保留的是「自审 → 收口 → 回归」这套工程习惯。下一步不该再铺新功能，而应做三件事：<strong>让测试真的绿、让文档与代码一一对齐、把已知的 18 条 Bug 按级别清掉</strong>。功能数量已经不是卖点，「宣称的都能用」才是。</li>
+<li><strong>对我（技术评审）</strong>：我不会因为 3 个 star 就低估它——引用计数与存储抽象的设计是真功夫；但我也不会因为一份 743 行自审报告就高估它——<strong>报告里「已修」的清单需要独立复核，而「全绿」的断言这次就没站住</strong>。</li>
+</ul>
+<hr />
+<h3 id="_1">附录：核验方法</h3>
+<pre><code>git clone --depth 1 https://github.com/mrc-sk/nebula-drive
+go build ./... ; go vet ./... ; go test ./... -count=1      # Go 1.25.0 linux/amd64
+grep -rn 全库：stats / activity / mock / PKCE / code_challenge / safeJoin / IsLoopback / 举报 / moderation
+curl GitHub REST：repo 元数据 / languages / contributors / releases / commits / issues / branches
+WebSearch：SheetJS xlsx 0.18.5 的 CVE-2023-30533、CVE-2024-22363 与官方分发方式
+</code></pre>
+<blockquote>
+<p>说明：GitHub Actions 运行记录因 API 限流未能取回，故「CI 是否曾拦住失败用例」留待在仓库 Actions 页面确认；其余结论均有本地可复现的证据。</p>
+</blockquote></article>
+<div class="foot">NebulaDrive Wiki · 由项目文档自动构建 · 最后生成 2026-11-14</div>
+</main>
+<script src="../assets/app.js"></script></body></html>

@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>插件制作手册 · NebulaDrive Wiki</title>
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<aside id="sidebar">
+<div class="brand">NebulaDrive Wiki<small>项目文档 · 部署运维 · 插件开发</small></div>
+<input id="search" placeholder="搜索文档…" autocomplete="off">
+<div id="searchResults"></div>
+<div class="nav-group"><h4>▶ 入门</h4><a href="../pages/overview.html">项目概览 README</a><a href="../pages/license.html">AGPL 许可通俗说明</a></div><div class="nav-group"><h4>◈ 插件开发</h4><a class="active" href="../pages/plugin-manual.html">插件制作手册</a><a href="../pages/plugin-v2-guide.html">插件平台 v2 完全指南</a><a href="../pages/plugin-system-guide.html">插件系统完全指南</a><a href="../pages/pbclus-spec.html">PBClus 格式规范</a><a href="../pages/plugin-hotload.html">插件热加载：进度与接续</a><a href="../pages/plugin-builder.html">可视化插件制作器使用说明</a></div><div class="nav-group"><h4>▤ 版本与交付</h4><a href="../pages/changelog.html">CHANGELOG 变更记录</a><a href="../pages/ai-era-delivery.html">智能时代交付说明</a><a href="../pages/v2-delivery.html">插件平台 v2 交付说明</a></div><div class="nav-group"><h4>▣ 开发档案</h4><a href="../pages/audit.html">不足总结与改进建议</a><a href="../pages/code-review.html">CODE REVIEW 代码审查</a><a href="../pages/fixlog.html">FIXLOG 修复记录</a><a href="../pages/backlog.html">新功能占位清单</a></div><div class="nav-group"><h4>⚙ 运维</h4><a href="../pages/ops-manual.html">站点部署与运维手册</a><a href="../pages/ticket-desk.html">智能 AI 工单站使用说明</a><a href="../pages/plugin-store.html">官方插件市场与插件清单</a></div><div class="nav-group"><h4>· 首页</h4><a href="../index.html">Wiki 首页</a></div>
+</aside>
+<main id="main">
+<div class="crumb"><a href="../index.html">首页</a> / <span>插件开发</span> / 插件制作手册</div>
+<article class="md"><p class="desc">从零做一个插件：三文件契约、钩子、打包与调试</p><h1 id="nebuladrive">NebulaDrive 插件制作手册</h1>
+<blockquote>
+<p>面向：想给 NebulaDrive 写插件的人（不需要懂 Go，也不需要装 Go）。
+协议版本：v2（宿主同时兼容 v1）。
+配套工具：<strong><a href="插件制作器.py">插件制作器.py</a>（Python 桌面版，Windows / Linux / macOS 通用，推荐）</strong> 或 <a href="插件制作器.html">插件制作器.html</a>（浏览器版单文件）。均为图形化拖拽 / 写代码双模式，一键构建出可安装的插件目录。
+协议参考（偏底层、想深挖时再看）：仓库内 <code>docs/插件平台v2-完全指南.md</code>。</p>
+</blockquote>
+<hr />
+<h2 id="0-5">0. 先记住这 5 条</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>规则</th>
+<th>违反的后果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>插件<strong>默认关闭</strong>：全局总开关默认关、单插件装完默认关</td>
+<td>装了没反应，先去后台开总开关</td>
+</tr>
+<tr>
+<td>2</td>
+<td>v2 插件必须有 <strong>3 个文件</strong>：<code>plugin.json</code>、<code>register.go</code>、<code>co.BEGG</code></td>
+<td>缺一个就装不上，报「缺少 xxx」</td>
+</tr>
+<tr>
+<td>3</td>
+<td>三个文件可以放在<strong>任意子目录</strong>（<code>ASS/</code> 里也行），宿主递归找，深度 ≤ 5</td>
+<td>不用纠结目录长什么样</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>路径基准是 <code>co.BEGG</code> 所在目录</strong>，不是插件根目录</td>
+<td><code>home</code> 写成 <code>ASS/in.php</code> 会 404，要写 <code>in.php</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td>开启插件 = 把服务器执行权限交给插件作者；宿主对 <code>/ext/*</code> <strong>完全透传鉴权</strong></td>
+<td>只装你信任的插件</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>一句话心智模型：<strong><code>plugin.json</code> 说「我是谁、我要什么」，<code>register.go</code> 把同样的话用 Go 字面量再说一遍，<code>co.BEGG</code> 说「怎么跑起来、长什么样」。</strong> 三份声明会互相核对，不一致直接拒绝装载。</p>
+</blockquote>
+<hr />
+<h2 id="1-3">1. 快速上手（3 分钟，两个办法）</h2>
+<h3 id="a">办法 A：用可视化制作器（推荐）</h3>
+<p><strong>A1 · Python 桌面版（跨平台窗口，推荐）</strong></p>
+<ol>
+<li>Windows 双击 <code>启动-Windows.bat</code>；Linux/macOS 运行 <code>./启动-Linux.sh</code>（或直接 <code>python3 插件制作器.py</code>）。
+   需要 Python 3.8+ 与 <code>tkinter</code>；Windows 安装包自带，Linux 缺的话 <code>sudo apt install python3-tk</code>。</li>
+<li><strong>第一次启动会自动弹出 6 步新手教程</strong>，以后可从「帮助 → 新手教程」重看。</li>
+<li>左上模板库内置 <strong>21 套模板</strong>（入门 / 页面与运行时 / 主题与 UI / 钩子 / 注册型能力 / AI 场景），选一套直接改。</li>
+<li>「① 设计」页拖控件（结构控件决定能做什么、页面控件决定长什么样），点画布卡片在右侧改属性；
+   「② 代码」页可直接写 PHP / Python / HTML，也能把手工改动的 <code>plugin.json</code> / <code>co.BEGG</code> 同步回设计。</li>
+<li>「③ 校验」全绿后，点「一键构建 ZIP」，或「④ 构建」页导出到目录。</li>
+<li>解压到 <code>plugins/&lt;你的插件名&gt;/</code>，后台 → 插件 → 开启总开关（勾选风险确认）→ 启用该插件。</li>
+</ol>
+<p><strong>A2 · 浏览器版（不想装 Python 时）</strong></p>
+<ol>
+<li>双击 <code>插件制作器.html</code>（纯静态单文件，不用装任何东西，离线可用）。</li>
+<li>选模板、拖控件、写代码、校验、下载 ZIP，步骤同上。</li>
+</ol>
+<blockquote>
+<p>两个版本生成的文件完全等价，都对齐 v2 三文件契约；桌面版多了原生窗口、首次新手教程和 21 套模板。
+桌面版可离线自检：<code>python3 插件制作器.py --selftest</code>（全部模板生成 + 校验 + 打包）。</p>
+</blockquote>
+<h3 id="b">办法 B：手写三个文件</h3>
+<p>最小可运行插件（纯 PHP 页面，不写一行 Go）：</p>
+<pre><code class="language-text">plugins/hello/
+├── plugin.json
+├── register.go
+├── co.BEGG
+└── in.php
+</code></pre>
+<p><strong><code>plugin.json</code></strong></p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;hello&quot;,
+  &quot;title&quot;: &quot;Hello 面板&quot;,
+  &quot;version&quot;: &quot;1.0.0&quot;,
+  &quot;author&quot;: &quot;you&quot;,
+  &quot;protocolVersion&quot;: 2,
+  &quot;pages&quot;: [
+    { &quot;name&quot;: &quot;home&quot;, &quot;area&quot;: &quot;main&quot;, &quot;title&quot;: &quot;Hello 面板&quot;, &quot;home&quot;: &quot;in.php&quot; }
+  ]
+}
+</code></pre>
+<p><strong><code>register.go</code></strong> —— 是声明文件，<strong>不编译、不执行、服务器不用装 Go</strong>：</p>
+<pre><code class="language-go">package hello
+
+var Spec = PluginSpec{
+    Name:            &quot;hello&quot;,
+    Version:         &quot;1.0.0&quot;,
+    ProtocolVersion: 2,
+    Hooks:           []string{},
+    Install:         []string{&quot;in.php&quot;, &quot;co.BEGG&quot;},
+    Runtime:         &quot;php&quot;,
+    Home:            &quot;in.php&quot;,
+}
+</code></pre>
+<p><strong><code>co.BEGG</code></strong></p>
+<pre><code class="language-json">{
+  &quot;runtime&quot;: &quot;php&quot;,
+  &quot;requires&quot;: [&quot;php&gt;=7.4&quot;],
+  &quot;home&quot;: &quot;in.php&quot;,
+  &quot;listen&quot;: &quot;0.0.0.0&quot;,
+  &quot;pages&quot;: [
+    { &quot;name&quot;: &quot;home&quot;, &quot;area&quot;: &quot;main&quot;, &quot;title&quot;: &quot;Hello 面板&quot;, &quot;home&quot;: &quot;in.php&quot;, &quot;icon&quot;: &quot;sparkles&quot; }
+  ]
+}
+</code></pre>
+<p><strong><code>in.php</code></strong></p>
+<pre><code class="language-php">&lt;!doctype html&gt;
+&lt;html&gt;&lt;body&gt;
+&lt;h1&gt;Hello from plugin&lt;/h1&gt;
+&lt;p&gt;端口：&lt;?= htmlspecialchars(getenv('NB_PLUGIN_PORT') ?: '') ?&gt;&lt;/p&gt;
+&lt;p&gt;站点：&lt;?= htmlspecialchars(getenv('NB_PLUGIN_SITE_URL') ?: '') ?&gt;&lt;/p&gt;
+&lt;/body&gt;&lt;/html&gt;
+</code></pre>
+<p>后台启用后，主界面侧边栏出现「Hello 面板」，点开就是 <code>in.php</code>。PHP 由服务器上的 <code>php</code> 解释器执行 —— <strong>没装 PHP 的话，启用时就会明确报错，而不是装上了打不开</strong>。</p>
+<hr />
+<h2 id="2-4">2. 插件能做什么（4 类能力，可叠加）</h2>
+<table>
+<thead>
+<tr>
+<th>能力</th>
+<th>什么时候用</th>
+<th>声明在哪</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>钩子 Hook</strong>（108 个）</td>
+<td>想在「上传前拦截」「登录成功后通知」「请求进来时改写」等固定时机插一脚</td>
+<td><code>plugin.json</code> 的 <code>hooks</code> + <code>register.go</code> 的 <code>Hooks</code></td>
+</tr>
+<tr>
+<td><strong>注册型能力 Provider</strong>（13 类）</td>
+<td>想让宿主「点名调用你」当某种后端：存储、认证、通知、预览、支付、内容扫描、备份、恢复、CLI、搜索、主题、页面、AI 模型</td>
+<td><code>plugin.json</code> 的 <code>providers</code> / <code>co.BEGG</code> 的 <code>providers</code></td>
+</tr>
+<tr>
+<td><strong>HTTP 页面 Page</strong></td>
+<td>想在后台/主界面加一个侧边栏入口，里面是 PHP / Python / Node / 任意网页</td>
+<td><code>plugin.json</code> 的 <code>pages</code> + <code>co.BEGG</code> 的 <code>pages</code></td>
+</tr>
+<tr>
+<td><strong>UI 扩展点</strong></td>
+<td>侧边栏样式、主题配色、设置面板表单</td>
+<td><code>co.BEGG</code> 的 <code>ui</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>纯页面插件可以<strong>一个钩子都不订阅</strong>，此时 <code>plugin.json</code> 不需要 <code>entry</code>（没有 JSON-RPC 子进程）。这是最轻量的形态。</p>
+</blockquote>
+<hr />
+<h2 id="3">3. 三文件契约逐字段</h2>
+<h3 id="31-pluginjson-json">3.1 <code>plugin.json</code>（严格 JSON，未知字段直接报错）</h3>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>必填</th>
+<th>规则</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>✅</td>
+<td>2–64 字符，只允许 <code>[a-z0-9-_]</code>，不能以 <code>-</code> 或 <code>_</code> 开头。也是数据目录名</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>—</td>
+<td>展示名，留空回退成 <code>name</code>；≤128</td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td>建议</td>
+<td>语义化 <code>x.y.z</code>（可带 <code>-rc1</code> / <code>+build</code>）；≤32</td>
+</tr>
+<tr>
+<td><code>author</code></td>
+<td>—</td>
+<td>≤64</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>—</td>
+<td>≤512</td>
+</tr>
+<tr>
+<td><code>protocolVersion</code></td>
+<td>✅</td>
+<td><code>2</code>（v1 老插件写 <code>1</code>，宿主自动兼容，不要求后两个文件）</td>
+</tr>
+<tr>
+<td><code>hooks</code></td>
+<td>三选一</td>
+<td>钩子名数组，必须来自宿主 108 个钩子表；不能重复；最多 64 个</td>
+</tr>
+<tr>
+<td><code>pages</code></td>
+<td>三选一</td>
+<td><code>PageDecl[]</code>，见 3.3</td>
+</tr>
+<tr>
+<td><code>providers</code></td>
+<td>三选一</td>
+<td><code>Registration[]</code>，见 3.4</td>
+</tr>
+<tr>
+<td><code>entry</code></td>
+<td>条件</td>
+<td>可执行文件名（<strong>单个文件名，不能含 <code>/</code>、<code>\</code>、 <code>..</code></strong>）。纯页面插件可省略</td>
+</tr>
+<tr>
+<td><code>args</code> / <code>env</code></td>
+<td>—</td>
+<td>传给子进程的参数与环境变量（别放密钥）</td>
+</tr>
+<tr>
+<td><code>permissions</code></td>
+<td>—</td>
+<td>权限声明，仅作记录与展示</td>
+</tr>
+<tr>
+<td><code>license</code></td>
+<td>—</td>
+<td>留空默认 <code>AGPL-3.0-only</code></td>
+</tr>
+<tr>
+<td><code>homepage</code> / <code>minHostVersion</code></td>
+<td>—</td>
+<td>项目地址 / 最低宿主版本</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>hooks</code> / <code>pages</code> / <code>providers</code> 不能三者皆空</strong> —— 否则就是一个什么都不做的插件。</p>
+<h3 id="32-registergogo">3.2 <code>register.go</code>（Go 语法的字面量，只读不编译）</h3>
+<p>宿主用标准库 <code>go/parser</code> 读语法树，取 <code>var Spec = ...{...}</code> 里的字面量。<strong>引用的类型可以根本不存在</strong>，也不需要合法 import。</p>
+<ul>
+<li>可识别的变量名：<code>Spec</code> / <code>Plugin</code> / <code>PluginSpec</code> / <code>Declaration</code></li>
+<li>字段名大小写不敏感（<code>Name</code> 或 <code>name</code> 都行）</li>
+<li>只认字符串、整数、字符串切片、嵌套 map —— 不要写表达式、变量引用、函数调用</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Name</code></td>
+<td>✅ 必须等于 <code>plugin.json</code> 的 <code>name</code></td>
+</tr>
+<tr>
+<td><code>Version</code></td>
+<td>非空时必须等于 <code>plugin.json</code> 的 <code>version</code></td>
+</tr>
+<tr>
+<td><code>ProtocolVersion</code></td>
+<td>非 0 时必须等于 <code>plugin.json</code> 的 <code>protocolVersion</code></td>
+</tr>
+<tr>
+<td><code>Hooks</code></td>
+<td>✅ <strong>必须与 <code>plugin.json</code> 的 <code>hooks</code> 集合完全一致</strong>（顺序无所谓，内容必须一样）</td>
+</tr>
+<tr>
+<td><code>Provides</code></td>
+<td>注册型能力名列表（说明用）</td>
+</tr>
+<tr>
+<td><code>Install</code></td>
+<td>安装内容清单（说明用）</td>
+</tr>
+<tr>
+<td><code>Runtime</code></td>
+<td>非空时必须等于 <code>co.BEGG</code> 的 <code>runtime</code></td>
+</tr>
+<tr>
+<td><code>Home</code></td>
+<td>非空且 <code>co.BEGG.home</code> 非空时，两者必须<strong>字面一致</strong></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>这 4 项一致性由 <code>crossCheck</code> 强制。制作器会同时生成三份，天然一致；手写时最容易漏的是 <code>Hooks</code> 两边不同步。</p>
+</blockquote>
+<h3 id="33-cobegg-json">3.3 <code>co.BEGG</code>（严格 JSON）</h3>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>runtime</code></td>
+<td>✅ <code>php</code> / <code>python</code> / <code>node</code> / <code>go</code> / <code>binary</code> / <code>external</code></td>
+</tr>
+<tr>
+<td><code>requires</code></td>
+<td>解释器要求，如 <code>["php&gt;=8.1"]</code>、<code>["python3"]</code>、<code>["node&gt;=18"]</code>。<strong>缺了解释器就在启用时直接报错</strong>，宿主不自动装、不静默降级</td>
+</tr>
+<tr>
+<td><code>entry</code></td>
+<td>入口脚本（相对 <code>co.BEGG</code> 所在目录）。<code>python</code>/<code>node</code> 常用</td>
+</tr>
+<tr>
+<td><code>home</code></td>
+<td>主页文件（相对 <code>co.BEGG</code> 所在目录），如 <code>in.php</code> / <code>index.html</code>。决定侧边栏点开显示哪个页面</td>
+</tr>
+<tr>
+<td><code>static</code></td>
+<td>静态文档根目录，默认取 <code>home</code> 所在目录</td>
+</tr>
+<tr>
+<td><code>listen</code></td>
+<td>写 <code>0.0.0.0</code> 表示「需要对外地址」；也可直接写 <code>https://外部站/app</code></td>
+</tr>
+<tr>
+<td><code>port</code></td>
+<td>固定端口；<code>0</code>（默认）由宿主分配空闲端口</td>
+</tr>
+<tr>
+<td><code>command</code></td>
+<td>启动命令模板，占位符 <code>{port}</code> <code>{host}</code> <code>{dir}</code> <code>{entry}</code> <code>{home}</code> <code>{static}</code>。留空按 runtime 用默认命令</td>
+</tr>
+<tr>
+<td><code>env</code></td>
+<td>附加环境变量</td>
+</tr>
+<tr>
+<td><code>pages</code></td>
+<td><code>PageDecl[]</code>，见下</td>
+</tr>
+<tr>
+<td><code>ui</code></td>
+<td>UI 扩展点，见第 6 节</td>
+</tr>
+<tr>
+<td><code>providers</code></td>
+<td>静态注册的注册型能力</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>PageDecl</code> 字段</strong></p>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>规则</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>✅ 页面标识，只允许 <code>[a-z0-9-_]</code></td>
+</tr>
+<tr>
+<td><code>home</code></td>
+<td>主页文件，相对 <code>co.BEGG</code> 所在目录</td>
+</tr>
+<tr>
+<td><code>area</code></td>
+<td>✅ <code>admin</code>（后台侧边栏）/ <code>main</code>（主界面）/ <code>public</code></td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>侧边栏显示名</td>
+</tr>
+<tr>
+<td><code>icon</code></td>
+<td>lucide 图标名（如 <code>sparkles</code>、<code>layout-dashboard</code>），前端白名单映射</td>
+</tr>
+<tr>
+<td><code>role</code></td>
+<td><code>admin</code> / <code>user</code> / <code>any</code>（默认 <code>any</code>）</td>
+</tr>
+<tr>
+<td><code>order</code></td>
+<td>排序，小的在前</td>
+</tr>
+<tr>
+<td><code>embed</code></td>
+<td><code>iframe</code>（默认）/ <code>newtab</code></td>
+</tr>
+<tr>
+<td><code>public</code></td>
+<td><code>true</code> = 宿主不做鉴权（透传，插件自负责）</td>
+</tr>
+<tr>
+<td><code>url</code></td>
+<td>外部 <code>https://</code> 页面，填了就不反代，前端 iframe 直连</td>
+</tr>
+</tbody>
+</table>
+<h3 id="34-registration-13">3.4 <code>Registration</code> 字段（13 类）</h3>
+<table>
+<thead>
+<tr>
+<th><code>kind</code></th>
+<th>宿主默认用哪个钩子调用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>storage</code></td>
+<td><code>onStorageResolve</code></td>
+</tr>
+<tr>
+<td><code>auth</code></td>
+<td><code>onAuthProviderResolve</code></td>
+</tr>
+<tr>
+<td><code>notify</code></td>
+<td><code>onNotificationSend</code></td>
+</tr>
+<tr>
+<td><code>preview</code></td>
+<td><code>onFilePreview</code></td>
+</tr>
+<tr>
+<td><code>payment</code></td>
+<td><code>onPaymentCallback</code></td>
+</tr>
+<tr>
+<td><code>contentScan</code></td>
+<td><code>onContentScan</code></td>
+</tr>
+<tr>
+<td><code>backup</code></td>
+<td><code>onBackup</code></td>
+</tr>
+<tr>
+<td><code>restore</code></td>
+<td><code>onRestore</code></td>
+</tr>
+<tr>
+<td><code>cli</code></td>
+<td><code>onCLI</code></td>
+</tr>
+<tr>
+<td><code>search</code></td>
+<td><code>onStatsCollect</code></td>
+</tr>
+<tr>
+<td><code>theme</code></td>
+<td><code>onUIThemeApply</code></td>
+</tr>
+<tr>
+<td><code>page</code></td>
+<td><code>onUIPageOpen</code></td>
+</tr>
+<tr>
+<td><code>ai</code></td>
+<td><code>onAIProviderResolve</code></td>
+</tr>
+</tbody>
+</table>
+<p>字段：<code>kind</code>（✅ 必须属于上表）、<code>name</code>（✅ 能力名，点名时用）、<code>label</code>（展示名）、<code>hook</code>（可选，覆盖默认钩子，必须是已登记的钩子名）、<code>config</code>（任意 JSON）。</p>
+<hr />
+<h2 id="4-dir">4. 目录形式不限定，但三个「Dir」别混</h2>
+<pre><code>plugins/hello/
+├── plugin.json          ← ManifestDir（清单所在目录）
+├── register.go
+├── co.BEGG              ← BeggDir：页面服务的工作目录 + 相对路径基准
+└── in.php
+</code></pre>
+<p>也可以按你举的例子，把声明和页面全塞进子目录：</p>
+<pre><code>plugins/ass-demo/
+├── plugin.json
+└── ASS/
+    ├── register.go
+    ├── co.BEGG          ← BeggDir = plugins/ass-demo/ASS
+    ├── in.php           ← 所以 home 写 &quot;in.php&quot;，不写 &quot;ASS/in.php&quot;
+    └── lib.php
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>目录字段</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Dir</code></td>
+<td>插件安装根目录，始终等于 <code>plugins/&lt;name&gt;/</code>；JSON-RPC <code>entry</code> 的可执行文件基准</td>
+</tr>
+<tr>
+<td><code>ManifestDir</code></td>
+<td><code>plugin.json</code> 实际所在目录</td>
+</tr>
+<tr>
+<td><code>BeggDir</code></td>
+<td><code>co.BEGG</code> 实际所在目录；<strong><code>home</code> / <code>entry</code> / <code>static</code> 都相对它解析</strong></td>
+</tr>
+</tbody>
+</table>
+<p>宿主递归定位三文件（深度 ≤ 5，跳过 <code>.</code> 开头目录、<code>node_modules</code>、<code>__pycache__</code>、<code>vendor</code>）。安装时<strong>整个源目录原样复制</strong>，不裁层、不挑文件；GitHub 下载的 zip 带一层顶层目录也能识别。</p>
+<hr />
+<h2 id="5">5. 钩子：三档能力与返回格式</h2>
+<h3 id="51">5.1 三档</h3>
+<table>
+<thead>
+<tr>
+<th>档</th>
+<th>能力</th>
+<th>返回</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>通知</strong></td>
+<td>知道某事发生了，不改结果</td>
+<td>什么都不返回</td>
+</tr>
+<tr>
+<td><strong>决策</strong></td>
+<td>允许 / 拒绝本次操作</td>
+<td><code>decision: "deny"</code> + <code>reason</code>，或 <code>error</code> 里含 <code>blocked</code></td>
+</tr>
+<tr>
+<td><strong>变换</strong></td>
+<td>改写上下文，影响业务参数</td>
+<td><code>ctxPatch: {...}</code>，浅层覆盖顶层键</td>
+</tr>
+</tbody>
+</table>
+<h3 id="52">5.2 火钩子的入参与出参</h3>
+<p>宿主 → 插件（<code>fire</code>）：</p>
+<pre><code class="language-json">{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:7,&quot;method&quot;:&quot;fire&quot;,&quot;params&quot;:{
+  &quot;hook&quot;:&quot;onFileUploadBefore&quot;,
+  &quot;ctx&quot;:{&quot;userId&quot;:1,&quot;fileName&quot;:&quot;a.txt&quot;,&quot;size&quot;:123,&quot;ip&quot;:&quot;1.2.3.4&quot;},
+  &quot;seq&quot;:42
+}}
+</code></pre>
+<p>插件 → 宿主：</p>
+<pre><code class="language-json">{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:7,&quot;result&quot;:{
+  &quot;decision&quot;:&quot;deny&quot;,
+  &quot;reason&quot;:&quot;文件类型不允许&quot;,
+  &quot;ctxPatch&quot;:{&quot;maxStorage&quot;:999999},
+  &quot;log&quot;:[{&quot;level&quot;:&quot;info&quot;,&quot;message&quot;:&quot;checked&quot;}]
+}}
+</code></pre>
+<p><code>FireResult</code> 字段：<code>ctxPatch</code>（变换）、<code>error</code>（含 <code>blocked</code> 即拦截）、<code>decision</code>（<code>allow</code>/<code>deny</code>/空）、<code>reason</code>、<code>log</code>。</p>
+<blockquote>
+<p>同步钩子放在低频决策点；下载/预览等高频路径用 <code>FireIf</code> 轻量门 —— <strong>没有插件订阅时零 IPC、零等待</strong>。</p>
+</blockquote>
+<h3 id="53-108">5.3 钩子分组（108 个，全部真接线）</h3>
+<table>
+<thead>
+<tr>
+<th>分组</th>
+<th>数量</th>
+<th>典型钩子</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>文件管理 <code>file</code></td>
+<td>20</td>
+<td><code>onFileUploadBefore</code>（可拦截、可变换）、<code>onFileDownload</code>、<code>onFileDelete</code></td>
+</tr>
+<tr>
+<td>认证与会话 <code>auth</code></td>
+<td>10</td>
+<td><code>onAuthBeforeLogin</code>、<code>onAuthLoginSuccess</code>、<code>onAuthRegisterBefore</code></td>
+</tr>
+<tr>
+<td>分享 <code>share</code></td>
+<td>7</td>
+<td><code>onShareCreateBefore</code>、<code>onShareAccess</code></td>
+</tr>
+<tr>
+<td>系统生命周期 <code>system</code></td>
+<td>6</td>
+<td><code>onBoot</code>、<code>onShutdown</code>、<code>onScheduledTick</code>（每 5 分钟）、<code>onHealthCheck</code></td>
+</tr>
+<tr>
+<td>用户与权限 <code>user</code></td>
+<td>6</td>
+<td><code>onPermissionCheck</code>、<code>onUserCreate</code>、<code>onUserQuotaChange</code></td>
+</tr>
+<tr>
+<td>离线下载 <code>task</code> / WebDAV <code>webdav</code> / 存储 <code>storage</code> / 套餐 <code>billing</code></td>
+<td>各 5</td>
+<td><code>onTaskComplete</code>、<code>onWebDAVPut</code>、<code>onStorageResolve</code>、<code>onPaymentCallback</code></td>
+</tr>
+<tr>
+<td>内容治理 <code>content</code> / 协作 <code>collab</code> / 插件 <code>plugin</code> / UI <code>ui</code></td>
+<td>各 4</td>
+<td><code>onContentScan</code>、<code>onCollabSave</code>、<code>onPluginEnable</code>、<code>onUIPageOpen</code></td>
+</tr>
+<tr>
+<td>HTTP 请求 <code>request</code> / 通知 <code>notify</code> / 审计 <code>audit</code></td>
+<td>各 3</td>
+<td><code>onRequestBefore</code>（可拦截）、<code>onNotificationSend</code>、<code>onStatsCollect</code></td>
+</tr>
+<tr>
+<td>备份 <code>backup</code> / API <code>api</code></td>
+<td>各 2</td>
+<td><code>onBackup</code> / <code>onRestore</code>、<code>onApiAuth</code> / <code>onCLI</code></td>
+</tr>
+<tr>
+<td>AI 智能 <code>ai</code></td>
+<td>9</td>
+<td><code>onAIRequest</code>（可拦截外发）、<code>onAIComplete</code>、<code>onAISearch</code>、<code>onAISummary</code>、<code>onAIAsk</code></td>
+</tr>
+<tr>
+<td>限流 <code>limit</code></td>
+<td>1</td>
+<td><code>onRateLimit</code></td>
+</tr>
+</tbody>
+</table>
+<p>制作器的「代码 / 钩子」页内嵌完整 108 个（含中文说明、同步/异步、可否拦截、可否变换），勾选即自动写进两个声明文件。CLI 触发：<code>nebula hook &lt;command&gt; [args...]</code> → <code>onCLI</code>。</p>
+<hr />
+<h2 id="6-ui">6. UI 扩展点（侧边栏 / 主题 / 设置面板）</h2>
+<p>全写在 <code>co.BEGG</code> 的 <code>ui</code> 里，前端通过 <code>GET /api/plugins/ui</code> 聚合渲染：</p>
+<pre><code class="language-json">{
+  &quot;ui&quot;: {
+    &quot;sidebar&quot;: [
+      { &quot;page&quot;: &quot;home&quot;, &quot;title&quot;: &quot;我的面板&quot;, &quot;icon&quot;: &quot;sparkles&quot;, &quot;area&quot;: &quot;main&quot;, &quot;role&quot;: &quot;any&quot;, &quot;order&quot;: 10 }
+    ],
+    &quot;theme&quot;: {
+      &quot;name&quot;: &quot;ocean&quot;,
+      &quot;label&quot;: &quot;海洋蓝&quot;,
+      &quot;css&quot;: &quot;theme.css&quot;,
+      &quot;variables&quot;: { &quot;--nebula-primary&quot;: &quot;#0ea5e9&quot;, &quot;--nebula-accent&quot;: &quot;#38bdf8&quot; }
+    },
+    &quot;settings&quot;: [
+      { &quot;key&quot;: &quot;greeting&quot;, &quot;label&quot;: &quot;问候语&quot;, &quot;type&quot;: &quot;text&quot;, &quot;default&quot;: &quot;Hello&quot;, &quot;help&quot;: &quot;显示在面板顶部&quot; },
+      { &quot;key&quot;: &quot;level&quot;, &quot;label&quot;: &quot;等级&quot;, &quot;type&quot;: &quot;select&quot;, &quot;options&quot;: &quot;1,2,3&quot;, &quot;default&quot;: &quot;1&quot; },
+      { &quot;key&quot;: &quot;enabled&quot;, &quot;label&quot;: &quot;启用&quot;, &quot;type&quot;: &quot;bool&quot;, &quot;default&quot;: &quot;true&quot; }
+    ]
+  }
+}
+</code></pre>
+<ul>
+<li><code>sidebar</code> 是<strong>覆盖</strong>：按 <code>page</code> 名找到页面项，覆盖标题 / 图标 / 区域 / 角色 / 排序。页面本身还是要在 <code>pages</code> 里声明。</li>
+<li><code>theme</code> 走 <strong>CSS 变量覆盖</strong>（带注入过滤）+ 可选插件样式表，顶栏会出现主题选择器。</li>
+<li><code>settings</code> 支持的 <code>type</code>：<code>text</code> / <code>password</code> / <code>number</code> / <code>bool</code> / <code>select</code> / <code>textarea</code>；<code>select</code> 用 <code>options</code> 逗号分隔。保存走 <code>POST /api/plugins/ui/settings/:plugin</code>。</li>
+</ul>
+<hr />
+<h2 id="7-http-https">7. HTTP / HTTPS 页面是怎么跑起来的</h2>
+<ol>
+<li>宿主给插件分配一个<strong>本机端口</strong>，按 <code>co.BEGG.command</code> 起子进程，工作目录 = <code>BeggDir</code>。</li>
+<li>通过环境变量下发：<code>NB_PLUGIN_PORT</code>、<code>NB_PLUGIN_HOST</code>（恒为 <code>127.0.0.1</code>）、<code>NB_PLUGIN_NAME</code>、<code>NB_PLUGIN_DIR</code>、<code>NB_PLUGIN_HOME</code>、<code>NB_PLUGIN_SITE_URL</code>、<code>NB_PLUGIN_PROTOCOL</code>。</li>
+<li>宿主把 <code>/ext/&lt;plugin&gt;/*</code> <strong>反代</strong>到 <code>127.0.0.1:&lt;port&gt;</code>。</li>
+<li>前端侧边栏点开 → iframe 载入 <code>/ext/&lt;plugin&gt;/in.php</code>。</li>
+</ol>
+<h3 id="0000"><code>0.0.0.0</code> 规则（你要求的行为）</h3>
+<p>插件写 <code>listen: "0.0.0.0"</code> 只作为「需要对外地址」的标记，真实 socket <strong>始终收紧到 <code>127.0.0.1</code></strong>。生成浏览器可访问的 URL 时按优先级替换：</p>
+<ol>
+<li>后台绑定了<strong>域名</strong> → 用域名；</li>
+<li>只绑定了 <strong>IP</strong> → 用 IP；</li>
+<li>什么都没绑定 → 默认 <code>127.0.0.1</code>。</li>
+</ol>
+<h3 id="php-s-t"><code>php -S -t</code> 的路径坑（宿主已处理）</h3>
+<p><code>php -S ... -t ASS</code> 启动后文档根已经是 <code>ASS/</code>，此时请求 <code>/ASS/in.php</code> 会去找 <code>ASS/ASS/in.php</code> → 404。宿主用 <code>PagePath</code> 自动裁掉 static 前缀：<code>home="ASS/in.php", static="ASS"</code> → <code>/in.php</code>。<strong>所以你只要把 <code>home</code> 写成相对 <code>co.BEGG</code> 目录的路径即可</strong>，别自己拼前缀。</p>
+<h3 id="_1">默认启动命令</h3>
+<table>
+<thead>
+<tr>
+<th>runtime</th>
+<th>默认 command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>php</code></td>
+<td><code>php -S {host}:{port} -t {static}</code></td>
+</tr>
+<tr>
+<td><code>python</code></td>
+<td><code>python3 {entry}</code></td>
+</tr>
+<tr>
+<td><code>node</code></td>
+<td><code>node {entry}</code></td>
+</tr>
+<tr>
+<td><code>go</code></td>
+<td><code>go run {entry}</code></td>
+</tr>
+<tr>
+<td><code>binary</code></td>
+<td><code>{entry}</code></td>
+</tr>
+<tr>
+<td><code>external</code></td>
+<td>不起进程，前端 iframe 直连 <code>pages[].url</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="python">Python 最小服务</h3>
+<pre><code class="language-python">import os
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+port = int(os.environ[&quot;NB_PLUGIN_PORT&quot;])
+ThreadingHTTPServer((&quot;127.0.0.1&quot;, port), SimpleHTTPRequestHandler).serve_forever()
+</code></pre>
+<p>对应 <code>co.BEGG</code>：<code>"runtime":"python", "requires":["python3"], "entry":"server.py", "home":"index.html", "command":"python3 {entry}"</code>。</p>
+<h3 id="_2">鉴权边界（重要）</h3>
+<p>宿主对 <code>/ext/*</code> <strong>完全透传</strong>：不校验登录态、不注入 token、不设 iframe sandbox，插件页面与宿主同源。<strong>插件自己负责鉴权</strong>。宿主唯一兜底是「全局总开关关闭 / 插件未启用 → 404」以及「开启总开关必须 <code>acknowledge=true</code> 免责确认」。</p>
+<hr />
+<h2 id="8">8. 可视化插件制作器使用说明</h2>
+<p>打开 <code>插件制作器.html</code>（单文件、纯静态、离线可用）。</p>
+<table>
+<thead>
+<tr>
+<th>区域</th>
+<th>干什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>顶部</td>
+<td>模板下拉（PHP 面板 / Python 看板 / 外部页面 / 主题包 / 纯钩子 / 空白）、导入/导出工程、<code>一键构建</code> 下载 <code>.zip</code></td>
+</tr>
+<tr>
+<td>左栏「控件库」</td>
+<td>页面、侧边栏项、设置字段、主题、注册型能力、钩子分组 —— <strong>拖到中间画布</strong>或点「+」添加</td>
+</tr>
+<tr>
+<td>中间「画布」</td>
+<td>插件结构树，拖动排序；右侧实时预览侧边栏 / 设置表单 / 主题配色效果</td>
+</tr>
+<tr>
+<td>右栏「属性」</td>
+<td>选中某个控件后编辑字段（含校验提示）</td>
+</tr>
+<tr>
+<td>「代码」页</td>
+<td>直接编辑 <code>plugin.json</code> / <code>register.go</code> / <code>co.BEGG</code> / 页面源码，语法高亮 + 实时校验</td>
+</tr>
+<tr>
+<td>「校验」页</td>
+<td>逐条列出宿主的校验规则（name、协议版本、三文件交叉一致、页面 area/role/embed、解释器 requires、路径越界……）</td>
+</tr>
+<tr>
+<td>「构建」页</td>
+<td>生成完整目录树、可复制单个文件、<code>一键构建</code> 导出 <code>.zip</code></td>
+</tr>
+</tbody>
+</table>
+<p>制作器保证生成物满足：
+- <code>register.go</code> 与 <code>plugin.json</code> 的 <code>Name</code> / <code>Version</code> / <code>ProtocolVersion</code> / <code>Hooks</code> 一致；
+- <code>register.go</code> 的 <code>Runtime</code> / <code>Home</code> 与 <code>co.BEGG</code> 一致；
+- 纯页面插件自动省略 <code>entry</code>，并在 <code>pages</code> 里声明页面；
+- <code>home</code> 写相对 <code>co.BEGG</code> 目录的路径，页面文件一定存在；
+- 选择的钩子一定来自宿主 108 个合法钩子表。</p>
+<p>导出的 <code>.zip</code> 解压后整个文件夹丢进 <code>plugins/</code> 即可（安装器递归定位，不挑目录层级）。工程文件（<code>.pluginproj.json</code>）可保存/回读，方便二次编辑。</p>
+<hr />
+<h2 id="9">9. 调试与排错（报错文本 → 原因）</h2>
+<table>
+<thead>
+<tr>
+<th>报错</th>
+<th>原因 / 修法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>v2 插件缺少 register.go / co.BEGG</code></td>
+<td>三文件不全，或 <code>protocolVersion</code> 写成了 2 却没放这两个文件（想写 v1 就声明 <code>1</code>）</td>
+</tr>
+<tr>
+<td><code>声明不一致：hooks 两边不一致</code></td>
+<td><code>register.go</code> 的 <code>Hooks</code> 和 <code>plugin.json</code> 的 <code>hooks</code> 内容不同 —— 用制作器可避免</td>
+</tr>
+<tr>
+<td><code>声明不一致：register.go 的 Home=..., co.BEGG 的 home=...</code></td>
+<td>两处首页路径字面不一致</td>
+</tr>
+<tr>
+<td><code>未知钩子 "xxx"</code></td>
+<td>钩子名拼错或不在宿主表里；制作器只让选合法的 108 个</td>
+</tr>
+<tr>
+<td><code>plugin.json 不能三者皆空</code></td>
+<td><code>hooks</code> / <code>pages</code> / <code>providers</code> 至少写一个</td>
+</tr>
+<tr>
+<td><code>缺少 entry</code></td>
+<td>订阅了 <code>hooks</code> 却没有可执行文件；纯页面插件别订阅钩子、要声明 <code>pages</code></td>
+</tr>
+<tr>
+<td><code>缺少解释器 "php"（co.BEGG requires: ...）</code></td>
+<td>服务器没装对应解释器。装上再启用；宿主不会自动装</td>
+</tr>
+<tr>
+<td><code>co.BEGG home 指向的文件不存在</code></td>
+<td>路径基准搞错了 —— 相对 <strong>co.BEGG 所在目录</strong>，不是插件根</td>
+</tr>
+<tr>
+<td><code>co.BEGG 路径越界</code></td>
+<td><code>home</code> / <code>static</code> 用了绝对路径或含 <code>..</code></td>
+</tr>
+<tr>
+<td>页面打开 404</td>
+<td>检查 <code>home</code> 是否重复拼了 static 前缀；或插件未启用 / 全局总开关没开</td>
+</tr>
+<tr>
+<td>启用后侧边栏没出现</td>
+<td>全局总开关默认关；单插件装完默认关；两处都要开</td>
+</tr>
+<tr>
+<td><code>runtime=external 时必须在 pages 里声明带 URL 的页面</code></td>
+<td>外部页面要给 <code>pages[].url</code></td>
+</tr>
+</tbody>
+</table>
+<p>诊断接口：<code>GET /api/admin/plugins/contract/:name</code> 返回三文件契约解析结果与解释器探测情况。</p>
+<hr />
+<h2 id="10">10. 发布清单</h2>
+<ul>
+<li>[ ] <code>name</code> 全局唯一、小写、无空格</li>
+<li>[ ] 三文件齐全，<code>register.go</code> 与 <code>plugin.json</code> 的 4 项交叉一致</li>
+<li>[ ] <code>requires</code> 与实际用到的解释器/版本匹配（PHP 版本、python3、node）</li>
+<li>[ ] <code>home</code> 相对 <code>co.BEGG</code> 目录，文件真实存在</li>
+<li>[ ] 所有页面 <code>area</code> / <code>role</code> / <code>embed</code> 合法</li>
+<li>[ ] 只申请用得上的钩子（最多 64 个），高频钩子尽量少订阅</li>
+<li>[ ] 明确写出 <code>permissions</code> 和 <code>license</code></li>
+<li>[ ] 在 <code>README</code> 里写清：需要什么解释器、插件页面是否需要自己鉴权、会读写哪些数据</li>
+<li>[ ] <strong>提醒站长：插件默认关闭，开启前会弹免责确认；<code>/ext/*</code> 鉴权透传，插件必须自己做权限校验</strong></li>
+<li>[ ] 本地先跑一遍：后台开总开关 → 启用 → 打开侧边栏页面 → 看插件日志</li>
+</ul>
+<hr />
+<h2 id="11-faq">11. FAQ</h2>
+<p><strong>Q：一定要装 Go 吗？</strong>
+不用。<code>register.go</code> 只是声明文件，宿主用 <code>go/parser</code> 读字面量，不编译、不执行。PHP / Python / Node 插件都不需要服务器装 Go。</p>
+<p><strong>Q：能用 PHP 写插件主体吗？</strong>
+不能拿 PHP 写 JSON-RPC 钩子主体 —— 但可以用 PHP 写<strong>嵌入页面</strong>（<code>runtime: php</code> + <code>in.php</code>），这正是最常见的用法。钩子主体需要一个能跑 JSON-RPC over stdio 的可执行文件（Go / Python / Node / 二进制都行）。</p>
+<p><strong>Q：v1 老插件要改吗？</strong>
+不用。<code>protocolVersion: 1</code> 的插件不要求 <code>register.go</code> / <code>co.BEGG</code>，宿主握手时对 v1 插件表现为 v1，钩子名与语义冻结，零改动继续跑。只是用不上 v2 的新钩子和页面/UI 能力。</p>
+<p><strong>Q：插件目录到底能不能随便放？</strong>
+能。三文件散落在不同子目录也行，宿主递归找（深度 ≤ 5）。唯一要注意：<strong>相对路径的基准是 <code>co.BEGG</code> 所在目录</strong>。</p>
+<p><strong>Q：为什么装上没反应？</strong>
+九成是「全局总开关没开」或「单插件没启用」。这是刻意设计的双层默认关闭。</p>
+<p><strong>Q：可视化插件制作器以后会怎样？</strong>
+当前是独立单文件工具（离线、拖拽 + 代码双模式、一键构建 zip）。正式版之后计划做成后台内嵌的可视化制作器；本次先把「一键构建」能力落地。</p>
+<hr />
+<h2 id="12">12. 制作器验证记录（本次交付实测）</h2>
+<p>制作器生成的产物<strong>不是纸面推导</strong>，全部用宿主真实代码跑过。当前以 <strong>Python 桌面版制作器</strong>为准（<code>插件制作器.py</code>，21 套模板、首次启动新手教程、108 钩子选择器）；HTML 版作为免安装备选，两者生成物等价、钩子表已同步为 108 条。</p>
+<table>
+<thead>
+<tr>
+<th>验证项</th>
+<th>方法</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>21 套模板生成</td>
+<td><code>python3 插件制作器.py --selftest</code></td>
+<td>21/21 生成 + 校验 + ZIP CRC + 导出目录全绿</td>
+</tr>
+<tr>
+<td>三文件契约</td>
+<td>宿主 <code>plugin.LoadContract(dir, false)</code></td>
+<td>21/21 通过（含 <code>crossCheck</code> / <code>ValidateFiles</code>）</td>
+</tr>
+<tr>
+<td>安装入口</td>
+<td><code>install.InstallFromDir</code> / <code>InstallFromZip</code></td>
+<td>各 21/21 成功（含 <code>verifyEntry</code>）</td>
+</tr>
+<tr>
+<td>递归定位</td>
+<td><code>ASS/</code> 布局 <code>BeggDir=./ASS</code>、清单在根</td>
+<td>宿主正确识别两个不同目录</td>
+</tr>
+<tr>
+<td>解释器探测</td>
+<td><code>LoadContract(dir, true)</code></td>
+<td>缺 php 时按预期在装载阶段明确报错</td>
+</tr>
+<tr>
+<td>页面路径</td>
+<td><code>Begg.PagePath</code></td>
+<td>无 <code>ASS/ASS</code> 重复前缀</td>
+</tr>
+<tr>
+<td>GUI 交互</td>
+<td>虚拟显示器下 <code>--gui-check</code></td>
+<td>94 项（模板遍历 / 5 页签 / 拖控件 / 属性 / 钩子选择器 / 教程）全通过</td>
+</tr>
+<tr>
+<td>首次教程</td>
+<td>连续两次启动</td>
+<td>第一次弹、第二次自动跳过</td>
+</tr>
+<tr>
+<td>真实运行</td>
+<td><code>python3 server.py</code> + HTTP 请求</td>
+<td>返回 200，页面与控件正常渲染</td>
+</tr>
+<tr>
+<td>钩子接线</td>
+<td>全仓库静态扫描</td>
+<td><strong>108 个钩子，缺调用点 0</strong>（含 9 个新增 AI 钩子）</td>
+</tr>
+<tr>
+<td>后端全量</td>
+<td><code>go build</code> / <code>go vet</code> / <code>go test ./...</code></td>
+<td>全绿，含新增 AI 网关 10 项单测</td>
+</tr>
+<tr>
+<td>前端全量</td>
+<td><code>npx tsc -b</code> / <code>npx vite build</code></td>
+<td>全绿，CodeMirror 单独 chunk（开关关闭时不加载）</td>
+</tr>
+</tbody>
+</table>
+<p>两个可直接解压安装的示例包：<code>示例插件-ass-demo.zip</code>（PHP / ASS 布局）、<code>示例插件-py-dashboard.zip</code>（Python）。</p>
+<blockquote>
+<p>桌面版与 HTML 版的「一键构建 ZIP」都走同一个手写 ZIP store 打包函数，示例包正是用它生成的；ZIP 已用 <code>zipfile.testzip()</code> 校验 CRC 与可执行位。</p>
+</blockquote>
+<h3 id="_3">制作器里两个容易忽略、但已处理的坑</h3>
+<ol>
+<li><strong><code>NB_PLUGIN_DIR</code> ≠ 文档根目录</strong>。宿主的 <code>cmd.Dir</code> 是 <code>co.BEGG</code> 所在目录（<code>BeggDir</code>），而环境变量 <code>NB_PLUGIN_DIR</code> 指向插件安装根目录。在 <code>ASS/</code> 布局下若 Python/Node 服务脚本 <code>chdir(NB_PLUGIN_DIR)</code> 会找不到 <code>index.html</code>。制作器生成的 <code>server.py</code> / <code>server.js</code> 一律用<strong>当前工作目录</strong>作为文档根，不做 chdir。</li>
+<li><strong>有钩子订阅时 <code>entry</code> 的基准是插件根目录</strong>，不是 <code>co.BEGG</code> 所在目录。制作器把 <code>plugin.py</code> / <code>plugin.js</code> 放在根目录，与 <code>Manifest.ExecPath</code> 的解析基准对齐；同时保证 <code>plugin.json</code> 的 <code>entry</code> 声明与文件生成条件完全一致，避免「声明了却没文件」。</li>
+</ol>
+<hr />
+<h2 id="13-ai">13. AI 智能扩展（智能时代）</h2>
+<blockquote>
+<p>这一节是给「想让插件提供 AI 能力」的人看的。宿主内置了智能搜索、近期常用、代码空间、AI 助手、摘要与自动标签，但<strong>没有绑死任何模型厂商</strong>。</p>
+</blockquote>
+<h3 id="131">13.1 三档降级</h3>
+<table>
+<thead>
+<tr>
+<th>档</th>
+<th>谁提供智能</th>
+<th>什么时候生效</th>
+<th>你要做什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>L0 本地算法</strong></td>
+<td>宿主内置</td>
+<td>永远</td>
+<td>什么都不用做，联想词、近期常用、词法补全、提取式摘要开箱可用</td>
+</tr>
+<tr>
+<td><strong>L1 AI 网关</strong></td>
+<td>站长在后台填的 OpenAI 兼容端点</td>
+<td>填了 key 且开启总开关</td>
+<td>不用写插件，后台 → AI 设置里配置</td>
+</tr>
+<tr>
+<td><strong>L3 插件接管</strong></td>
+<td>你的插件</td>
+<td>订阅钩子或注册 <code>ai</code> Provider</td>
+<td>见下面两种方式</td>
+</tr>
+</tbody>
+</table>
+<p>顺序是 <strong>插件接管 → 模型网关 → 本地算法</strong>。任一档不可用自动往下降，所以没配 key 时功能不会报错，只是「不那么聪明」。</p>
+<h3 id="132-ai">13.2 九个 AI 钩子</h3>
+<table>
+<thead>
+<tr>
+<th>钩子</th>
+<th>档</th>
+<th>能做什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>onAIRequest</code></td>
+<td>同步 · 可拦截 · 可变换</td>
+<td>模型请求发出前触发。写 <code>decision=deny</code> 阻止外发；写 <code>ctx.prompt</code> / <code>ctx.model</code> 改写请求</td>
+</tr>
+<tr>
+<td><code>onAIResponse</code></td>
+<td>异步通知</td>
+<td>请求结束（成功/失败都发）。<code>ctx.success</code> / <code>ctx.latencyMs</code> / <code>ctx.*Tokens</code></td>
+</tr>
+<tr>
+<td><code>onAIProviderResolve</code></td>
+<td>同步 · 可变换</td>
+<td><strong>注册型(ai)</strong>：点名调用 AI 能力时触发。写 <code>ctx.handled=true</code> + <code>ctx.result</code> 即完全接管</td>
+</tr>
+<tr>
+<td><code>onAIComplete</code></td>
+<td>同步 · 可变换</td>
+<td>代码空间补全时触发（在网关之前）。写 <code>ctx.completion</code> 直接给结果，宿主不再调模型</td>
+</tr>
+<tr>
+<td><code>onAIRecommend</code></td>
+<td>同步 · 可变换</td>
+<td>联想 / 近期常用 / 热门生成时触发。写 <code>ctx.suggestions</code> 或 <code>ctx.fileIds</code> 覆盖内置结果</td>
+</tr>
+<tr>
+<td><code>onAISearch</code></td>
+<td>同步 · 可拦截 · 可变换</td>
+<td>自然语言搜文件时触发。写 <code>ctx.filters</code>（JSON）覆盖检索条件、写 <code>ctx.answer</code> 直接作答</td>
+</tr>
+<tr>
+<td><code>onAISummary</code></td>
+<td>同步 · 可变换</td>
+<td>生成摘要/标签时触发。写 <code>ctx.summary</code> / <code>ctx.tags</code> 接管</td>
+</tr>
+<tr>
+<td><code>onAIAsk</code></td>
+<td>同步 · 可拦截 · 可变换</td>
+<td>AI 助手问答时触发。写 <code>ctx.answer</code> 直接回答</td>
+</tr>
+<tr>
+<td><code>onAIConfigChange</code></td>
+<td>异步通知</td>
+<td>后台保存 AI 配置后触发</td>
+</tr>
+</tbody>
+</table>
+<p><strong>钩子是同步的</strong>：<code>ctx</code> 是共享可变 map，插件通过 <code>ctxPatch</code> 回写的字段，宿主在 <code>Fire</code> 返回后直接读。不要在这些钩子里做耗时操作（宿主对单个同步 handler 有 5 秒上限）。</p>
+<h3 id="133">13.3 方式一：只订阅钩子（最简单）</h3>
+<p>插件订阅 <code>onAIProviderResolve</code>，收到请求后写 <code>result</code>：</p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;my-ai&quot;, &quot;version&quot;: &quot;1.0.0&quot;, &quot;protocolVersion&quot;: 2,
+  &quot;entry&quot;: &quot;plugin.py&quot;,
+  &quot;hooks&quot;: [&quot;onAIProviderResolve&quot;, &quot;onAIComplete&quot;]
+}
+</code></pre>
+<p><code>plugin.py</code> 的 <code>fire</code> 分支返回：</p>
+<pre><code class="language-python">if method == &quot;fire&quot; and params.get(&quot;hook&quot;) == &quot;onAIProviderResolve&quot;:
+    return {&quot;jsonrpc&quot;: &quot;2.0&quot;, &quot;id&quot;: rid, &quot;result&quot;: {
+        &quot;CtxPatch&quot;: {
+            &quot;handled&quot;: True,
+            &quot;result&quot;: &quot;这是插件给出的回答（这里换成你的本地模型 / 私有 API）&quot;,
+            &quot;provider&quot;: &quot;plugin:my-local-llm&quot;
+        }
+    }}
+</code></pre>
+<p>宿主看到 <code>handled=true</code> 就采用 <code>result</code>，<strong>不再发任何外部请求</strong>。这也是「严格不出域」部署的做法：不填 key，只装一个本地模型插件。</p>
+<h3 id="134-ai-provider">13.4 方式二：注册 <code>ai</code> Provider（可后台点名）</h3>
+<p>在 <code>co.BEGG</code> 里声明：</p>
+<pre><code class="language-json">{
+  &quot;runtime&quot;: &quot;python&quot;,
+  &quot;requires&quot;: [&quot;python3&quot;],
+  &quot;providers&quot;: [
+    { &quot;kind&quot;: &quot;ai&quot;, &quot;name&quot;: &quot;local-llm&quot;, &quot;label&quot;: &quot;本地大模型&quot;,
+      &quot;config&quot;: { &quot;endpoint&quot;: &quot;http://127.0.0.1:11434&quot; } }
+  ]
+}
+</code></pre>
+<p>后台 → AI 设置 → 「能力提供方」下拉就能选到 <code>local-llm</code>。选中后宿主通过 <code>CallProvider(ai, "local-llm", ctx)</code> 点名调用，默认走 <code>onAIProviderResolve</code>（可以用 <code>hook</code> 字段覆盖成别的已登记钩子）。</p>
+<p><code>plugin.json</code> 里对应的 <code>providers</code> 也要写一份（三文件交叉一致规则不变），<code>register.go</code> 的 <code>Provides</code> 建议写 <code>["ai:local-llm"]</code>。</p>
+<h3 id="135">13.5 宿主侧配套能力</h3>
+<table>
+<thead>
+<tr>
+<th>能力</th>
+<th>接口</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>智能联想 / 近期常用 / 热门</td>
+<td><code>GET /api/files/suggest?q=</code></td>
+<td>一次返回 suggestions / history / recent / hot</td>
+</tr>
+<tr>
+<td>自然语言搜文件</td>
+<td><code>POST /api/ai/search</code></td>
+<td>问句 → 检索条件 → 文件列表</td>
+</tr>
+<tr>
+<td>代码补全</td>
+<td><code>POST /api/ai/complete</code></td>
+<td>L0 标识符补全 + 可选模型补全</td>
+</tr>
+<tr>
+<td>摘要与自动标签</td>
+<td><code>POST /api/ai/summary/:id</code></td>
+<td>带缓存，内容变更自动失效</td>
+</tr>
+<tr>
+<td>AI 助手</td>
+<td><code>POST /api/ai/ask</code></td>
+<td>上下文只含文件名与检索结果</td>
+</tr>
+<tr>
+<td>后台配置</td>
+<td><code>GET/POST /api/admin/ai/config</code></td>
+<td>key 脱敏回显，传 <code>******</code> 表示不修改</td>
+</tr>
+<tr>
+<td>用量与日志</td>
+<td><code>GET /api/admin/ai/usage</code> <code>/logs</code></td>
+<td>只记长度/耗时/Token，不记 prompt 正文</td>
+</tr>
+</tbody>
+</table>
+<h3 id="136-readme">13.6 隐私边界（务必写进你的插件 README）</h3>
+<ul>
+<li>站长选择「配置即用」时，文件名与代码片段会发给所配的模型服务商；<strong>宿主不做强制脱敏</strong>，由插件与站长自行确认服务商条款。</li>
+<li>审计日志只记录 <code>promptChars</code>、<code>tokens</code>、<code>latencyMs</code>、成功/失败，不落 prompt 正文。</li>
+<li>插件如果要在 <code>onAIRequest</code> 里做脱敏，直接改写 <code>ctx.prompt</code> 即可，宿主会用改写后的文本发请求。</li>
+<li>不希望任何数据出域：不填 key，用 <code>onAIRequest</code> 拦截 + 本地模型插件提供 <code>result</code>。</li>
+</ul>
+<h3 id="137">13.7 最少可运行示例</h3>
+<p><code>示例插件-ai-provider.zip</code>（若使用制作器：选「AI 场景」分组下的模板，在钩子里勾上 <code>onAIProviderResolve</code> 和 <code>onAIComplete</code>，或直接手写上面三文件）即可生成一个「不联网也能回答」的 AI 插件。生成后照第 1 节办法 A 构建、安装、启用即可。</p></article>
+<div class="foot">NebulaDrive Wiki · 由项目文档自动构建 · 最后生成 2026-11-14</div>
+</main>
+<script src="../assets/app.js"></script></body></html>

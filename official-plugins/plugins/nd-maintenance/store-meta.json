@@ -1,0 +1,11 @@
+{
+  "title": "维护模式与站点公告",
+  "description": "放置标志文件即进入维护模式（管理员仍可进），并可向页面注入公告。",
+  "tags": [
+    "运维",
+    "公告",
+    "维护"
+  ],
+  "author": "NebulaDrive Official",
+  "license": "AGPL-3.0-only"
+}

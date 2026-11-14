@@ -1,0 +1,18 @@
+{
+  "name": "nd-maintenance",
+  "title": "维护模式与站点公告",
+  "version": "1.0.0",
+  "author": "NebulaDrive Official",
+  "description": "放置标志文件即进入维护模式（管理员仍可进），并可向页面注入公告。",
+  "entry": "plugin.py",
+  "protocolVersion": 2,
+  "hooks": [
+    "onRequestBefore",
+    "onUIPageOpen"
+  ],
+  "permissions": [
+    "request:read"
+  ],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://cloud.berrywing.top/"
+}

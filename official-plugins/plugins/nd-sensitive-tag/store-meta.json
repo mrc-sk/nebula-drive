@@ -1,0 +1,11 @@
+{
+  "title": "敏感文件标记",
+  "description": "按关键词扫描文件名，命中后自动打上「需复核」标签，不拦截上传。",
+  "tags": [
+    "内容",
+    "合规",
+    "标记"
+  ],
+  "author": "NebulaDrive Official",
+  "license": "AGPL-3.0-only"
+}

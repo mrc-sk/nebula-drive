@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>新功能占位清单 · NebulaDrive Wiki</title>
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<aside id="sidebar">
+<div class="brand">NebulaDrive Wiki<small>项目文档 · 部署运维 · 插件开发</small></div>
+<input id="search" placeholder="搜索文档…" autocomplete="off">
+<div id="searchResults"></div>
+<div class="nav-group"><h4>▶ 入门</h4><a href="../pages/overview.html">项目概览 README</a><a href="../pages/license.html">AGPL 许可通俗说明</a></div><div class="nav-group"><h4>◈ 插件开发</h4><a href="../pages/plugin-manual.html">插件制作手册</a><a href="../pages/plugin-v2-guide.html">插件平台 v2 完全指南</a><a href="../pages/plugin-system-guide.html">插件系统完全指南</a><a href="../pages/pbclus-spec.html">PBClus 格式规范</a><a href="../pages/plugin-hotload.html">插件热加载：进度与接续</a><a href="../pages/plugin-builder.html">可视化插件制作器使用说明</a></div><div class="nav-group"><h4>▤ 版本与交付</h4><a href="../pages/changelog.html">CHANGELOG 变更记录</a><a href="../pages/ai-era-delivery.html">智能时代交付说明</a><a href="../pages/v2-delivery.html">插件平台 v2 交付说明</a></div><div class="nav-group"><h4>▣ 开发档案</h4><a href="../pages/audit.html">不足总结与改进建议</a><a href="../pages/code-review.html">CODE REVIEW 代码审查</a><a href="../pages/fixlog.html">FIXLOG 修复记录</a><a class="active" href="../pages/backlog.html">新功能占位清单</a></div><div class="nav-group"><h4>⚙ 运维</h4><a href="../pages/ops-manual.html">站点部署与运维手册</a><a href="../pages/ticket-desk.html">智能 AI 工单站使用说明</a><a href="../pages/plugin-store.html">官方插件市场与插件清单</a></div><div class="nav-group"><h4>· 首页</h4><a href="../index.html">Wiki 首页</a></div>
+</aside>
+<main id="main">
+<div class="crumb"><a href="../index.html">首页</a> / <span>开发档案</span> / 新功能占位清单</div>
+<article class="md"><p class="desc">未完成事项与接续指引</p><h1 id="_1">新功能占位清单 —— 实施进度与交付说明</h1>
+<blockquote>
+<p>记录时间：本轮会话 · <strong>已于 2026-11-07 全部合入 main（51c641e）</strong>
+状态：<strong>5 项功能全部完成</strong>（先占位骨架，随后逐项实现并验证），本文归档为交付记录</p>
+</blockquote>
+<hr />
+<h2 id="0">0. 一句话结论</h2>
+<p>5 项新功能<strong>全部实现完毕</strong>，每项都有包级测试/单测 + 反向验证 + 真机端到端。
+<code>Hooks</code> 表里已无 <code>Wired:false</code>，管理端不再显示"未接入"。</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>功能</th>
+<th>状态</th>
+<th>详述</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>①</td>
+<td>onAntiLeech 覆盖公开分享下载</td>
+<td>✅</td>
+<td>FIXLOG §20</td>
+</tr>
+<tr>
+<td>②</td>
+<td>smtp-email 真实发信</td>
+<td>✅</td>
+<td>FIXLOG §21</td>
+</tr>
+<tr>
+<td>③</td>
+<td>onApiAuth 接通</td>
+<td>✅</td>
+<td>FIXLOG §22</td>
+</tr>
+<tr>
+<td>④</td>
+<td>hmac-auth 实现校验</td>
+<td>✅</td>
+<td>FIXLOG §23</td>
+</tr>
+<tr>
+<td>⑤</td>
+<td>插件配置加密 + 配置 UI</td>
+<td>✅</td>
+<td>FIXLOG §24</td>
+</tr>
+<tr>
+<td>⑥</td>
+<td>onBackup / onRestore / onCLI</td>
+<td>✅</td>
+<td>FIXLOG §25</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_2">最终验证状态</h3>
+<ul>
+<li><code>go build</code> / <code>go vet</code> / <code>go test ./...</code> → <strong>15 个包全绿</strong></li>
+<li><code>smoke_plugin.sh</code> → <strong>41/41</strong>（真实进程 + 真实子进程插件 + 真实签名）</li>
+<li><code>smoke_policy_config.sh</code> → <strong>14/14</strong></li>
+<li>前端 <code>npm run build</code>（tsc 严格 + vite）→ 通过，<code>frontend_dist</code> 已同步</li>
+<li><code>check_i18n.py</code> → 五语言对称</li>
+<li>三个示例插件 <code>go vet</code> + <code>go test</code> → 通过</li>
+</ul>
+<h3 id="_3">顺带修掉的既有缺陷（不在原计划内）</h3>
+<ul>
+<li>存储策略密钥明文写回库（§17）</li>
+<li>插件冒烟测试实际上从未跑到过插件部分（§18）</li>
+<li>脚本腐坏无人知晓 → 已接进 CI（§18.5、§21）</li>
+<li><code>APIAuth</code> 在缺 <code>Authorization</code> 时早退，导致 HMAC 类扩展鉴权<strong>永远收不到请求</strong>（§23）</li>
+<li>钩子注册表被插入两份 <code>onCLI</code>（§25）</li>
+</ul>
+<hr />
+<h2 id="1">1. 交付地图</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>功能</th>
+<th>主要落点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>onAntiLeech 覆盖公开分享下载</td>
+<td><code>controllers/share.go</code> 的 <code>serveShareFile</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>smtp-email 邮件外发</td>
+<td><code>examples/plugins/smtp-email/</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td>onApiAuth 接通</td>
+<td><code>middleware/api_auth.go</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td>示例插件 hmac-auth</td>
+<td><code>examples/plugins/hmac-auth/</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td>插件配置加密 + 配置 UI</td>
+<td><code>models/session.go</code> + <code>Plugins.tsx</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td>onBackup / onRestore / onCLI</td>
+<td><code>controllers/backup.go</code> + <code>main.go</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2">2. 逐项详情</h2>
+<h3 id="21-smtp-email">2.1 smtp-email —— 把邮件真正发出去 —— ✅ 已完成</h3>
+<p><strong>已实现</strong>：<code>net/smtp</code> 三种 TLS 模式（<code>starttls</code>/<code>implicit</code>/<code>none</code>）、
+中文主题 RFC 2047 编码、中文正文 base64、ASCII 正文 7bit、
+头注入防护（剥离 CR/LF）、SMTP AUTH（服务器未声明 AUTH 时明确报错）、
+配置不全时 fail closed、密码脱敏。</p>
+<p><strong>与本节原计划的差异</strong>：</p>
+<ul>
+<li>原计划第 3 条"失败记录落 <code>DataDir</code>"<strong>没有做</strong> —— 失败信息走宿主日志
+  环形缓冲即可，落盘还要担磁盘被写满的风险。因此 <code>plugin.json</code> 里
+  原本声明的 <code>write-own-datadir</code> 权限<strong>已删除</strong>：声明用不到的权限会
+  高估插件所需权限，而管理员正是靠这份声明判断风险。</li>
+<li>端到端不是用 <code>aiosmtpd</code>，而是在 Go 里写了个最小 SMTP 服务器
+  （见下面三层测试），这样能进 CI、无外部依赖。</li>
+</ul>
+<p><strong>三层测试</strong>（字段名是宿主与插件两个 module 之间的约定，改名没有编译错误）：</p>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>覆盖</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>controllers/notification_email_test.go</code></td>
+<td>宿主侧：<code>CreateNotification</code> 真的触发 <code>onEmail</code>，字段名与内容正确；无邮箱时不触发</td>
+</tr>
+<tr>
+<td><code>examples/plugins/smtp-email/main_test.go</code></td>
+<td>插件侧：假 SMTP 服务器真实协议往返，8 个用例</td>
+</tr>
+<tr>
+<td><code>pkg/plugin/host/smtp_email_e2e_test.go</code></td>
+<td>完整链路：宿主下发配置 → 子进程 → <code>net/smtp</code> → 假服务器 → 断言报文</td>
+</tr>
+</tbody>
+</table>
+<p><strong>单测抓出的实现 bug</strong>：base64 路径漏了 CRLF 归一化（收件人会拿到 LF 行尾，
+违反 RFC 5321）。断言 <code>正文解码后应等于 toCRLF(原文)</code> 当场抓出，<strong>改的是实现</strong>。</p>
+<p><strong>反向验证</strong>：把插件的 <code>ctx["to"]</code> 改成 <code>ctx["recipient"]</code> 后，
+端到端测试 1.02 秒内精确报出"字段名约定断了"（第一版要 16 秒才失败且
+报的是超时，会被误判成网络问题）。</p>
+<p><strong>遗留</strong>：SMTP 抖动时的失败重试与退避尚未实现。当前失败即记 warn；
+宿主每次创建通知都会重新触发，所以"下一封"会自然重试。</p>
+<h3 id="22-onantileech">2.2 onAntiLeech 覆盖公开分享下载 —— ✅ 已完成</h3>
+<p><strong>原缺口</strong>：<code>onAntiLeech</code> 全项目只有一个调用点（<code>controllers/file.go</code>），
+公开分享走 <code>controllers/share.go</code> 的 <code>serveShareFile</code>，<strong>完全不触发该钩子</strong> ——
+装了防盗链插件的站点，分享链接依然可以被任意第三方站点盗刷。</p>
+<p><strong>实际实现</strong>（与本节原计划的差异，均已写进注释说明理由）：</p>
+<ul>
+<li>调用点落在 <code>target</code> 解析并通过祖先链校验之后、<code>handlerForFile(&amp;target)</code> 之前。</li>
+<li>拦截判定复用 <code>plugin.IsBlockedError</code>。</li>
+<li><strong><code>download</code> 与 <code>preview</code> 都过闸</strong>。原计划里我把"预览要不要拦"留作待决定的取舍，
+  实现时实测发现：<code>preview</code> 虽然用 inline，返回的仍是<strong>完整文件内容</strong>，
+  只拦 download 就是留了一条完整的 exfil 通道。反向验证直接打出了证据：
+  <code>share_antileech_test.go:126: 分享**预览**未被防盗链拦截: status=200 body=hello share</code>
+  所以宿主对两者一视同仁，把取舍通过 <code>shareKind</code> 交给插件。</li>
+<li>ctx 契约最终为：
+  <code>{userId(恒为0), userName(恒为空), ip, ua, fileId, fileName, referer, shareId, shareKind, shareOwnerId}</code>。
+  <code>userId</code> <strong>键必须存在</strong>（键缺失与"存在且为 0"是两种语义）；分享所有者另放
+  <code>shareOwnerId</code>，避免与"访问者"混淆。</li>
+</ul>
+<p><strong>验证</strong>：3 个包级测试（下载/预览拦截、无插件零回归、非 blocked 错误不拦截）
++ 两次反向验证（全部各自 FAIL）+ <code>smoke_plugin.sh</code> <strong>26/26 端到端</strong>。
+详见 FIXLOG §20。</p>
+<p><strong>行为变更提示</strong>：装了防盗链插件的站点，分享链接现在也会被判定。
+本站分享页会带自身 Referer，正常配置下命中白名单；只想保护下载的插件
+请按 <code>shareKind</code> 自行放行。</p>
+<h3 id="23-4-44">2.3 接通 4 个预留钩子 —— 进度：4/4 ✅</h3>
+<p>四项原先都是 <code>Wired=false</code>。占位阶段给它们补了 <code>Planned=true</code> + <code>Plan</code> 说明，
+管理端会如实显示"未接入 + 规划中"。现在<strong>全部接通</strong>，<code>Hooks</code> 表里
+已无 <code>Wired:false</code>。</p>
+<table>
+<thead>
+<tr>
+<th>钩子</th>
+<th>状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>onApiAuth</strong></td>
+<td>✅ FIXLOG §22</td>
+</tr>
+<tr>
+<td><strong>onBackup</strong></td>
+<td>✅ FIXLOG §25（新增 <code>POST /api/admin/backup</code>）</td>
+</tr>
+<tr>
+<td><strong>onRestore</strong></td>
+<td>✅ FIXLOG §25（新增 <code>POST /api/admin/backup/restore</code>，RequireConfirm）</td>
+</tr>
+<tr>
+<td><strong>onCLI</strong></td>
+<td>✅ FIXLOG §25（新增 <code>nebula plugin &lt;cmd&gt;</code> 子命令分发）</td>
+</tr>
+</tbody>
+</table>
+<h4 id="onapiauth">onApiAuth ✅ 已完成</h4>
+<p><strong>计划被推翻的一点</strong>：原计划写"照 <code>onRateLimit</code> 加同步门"，但那个前提不成立 ——
+<code>onRateLimit</code> 有 7 个调用点、只有 1 个要读结果，才需要单独开门；
+<code>onApiAuth</code> 只有<strong>一个</strong>调用点且必须读结果，所以直接把它本身改成
+<code>ModeSync</code> + <code>Blockable: true</code> 即可，<strong>不需要任何额外的门</strong>。
+教训：照抄某个模式之前，先核对前提是否相同。</p>
+<p><strong>实现要点</strong>：</p>
+<ul>
+<li>调用点：<code>middleware/api_auth.go</code>，PAT / OAuth2 <strong>都失败之后</strong>才触发
+  （热路径零成本 + 内置凭据优先，插件无法否决有效令牌）。</li>
+<li>放行：插件写 <code>ctx["principalUserId"]</code>；拒绝：返回含 <code>blocked</code> 的 error（403）；
+  两者都没有 → 401（<strong>fail closed</strong>）。</li>
+<li>ctx 契约见 <code>hooks.go</code> 的钩子文档。两处刻意设计：
+  <code>headers</code> <strong>不含 Authorization</strong>（内置凭据留在宿主）；
+  <code>bodyHash</code> 有 64KB 上限且会把已读字节放回请求流（下游仍能读到完整 body）。</li>
+<li><code>principalUserId</code> 必须兼容 <code>int</code>/<code>uint</code>/<code>float64</code> —— 进程外插件回写经 JSON
+  往返后是 <code>float64</code>，只认一种会<strong>静默无法放行</strong>。</li>
+</ul>
+<p><strong>验证</strong>：7 个包级用例 + 2 次反向验证（"没表态当成放行" 与 "忽略 blocked"
+都各自 FAIL）+ <code>smoke_plugin.sh</code> 第 8 节真机端到端（<strong>30/30</strong>）。</p>
+<p><strong>配套插件</strong>：<code>examples/plugins/hmac-auth/</code> 的契约清单<strong>已修正</strong> ——
+占位阶段写的 <code>timestamp</code>/<code>signature</code>/<code>appKey</code> 等字段宿主根本不发，
+它们是插件应自己从 <code>ctx["headers"]</code> 取的凭据头。该插件仍是探针，
+<strong>当前不会放行任何请求</strong>。</p>
+<h4 id="onbackup-onrestore">onBackup / onRestore ✅ 已完成</h4>
+<ul>
+<li>新增 <code>POST /api/admin/backup</code>：生成 zip（<code>nebula.db</code> + <code>manifest.json</code>），
+  生成<strong>之后</strong>触发 <code>onBackup</code>（异步通知，插件据此复制到 S3/异地或落审计）。
+  MySQL/PG 不做库文件备份（拿不到一致快照），响应里明说。</li>
+<li>新增 <code>POST /api/admin/backup/restore</code>（挂 <code>RequireConfirm</code>）：<strong>暂存制</strong>。
+  校验 SQLite 文件头后写进 <code>data/restore/</code> + <code>PENDING</code> 标记，
+  真正的替换发生在下次启动（<code>ApplyPendingRestore</code> 在 <code>db.Init</code> 之前）。
+  热替换正在使用的 SQLite 库会损坏数据，这不是保守而是唯一安全做法。
+  原库改名保留（<code>.pre-restore-&lt;ts&gt;</code>），挪不动就放弃、不硬覆盖。</li>
+<li><code>GET /api/admin/backup/download?name=</code>：名字来自查询参数，
+  字符集校验 + 解析后前缀校验双保险（8 种穿越形状都有测试）。</li>
+</ul>
+<h4 id="oncli">onCLI ✅ 已完成</h4>
+<ul>
+<li>新增 <code>nebula plugin &lt;cmd&gt; [args...]</code> 子命令，放在 <code>flag.Parse</code> <strong>之后</strong>
+  （全局参数如 <code>-data</code> 在子命令里照常可用）。</li>
+<li><code>onCLI</code> 是 <code>ModeSync</code> + <code>Blockable</code>（命令行必须拿到输出）：
+  插件写 <code>cliOutput</code>（打印）与 <code>cliExitCode</code>。
+  退出码约定 <code>0</code> 成功 / <code>1</code> 用法错误或被拒 / <code>2</code> 未安装。</li>
+<li>子命令不启动 HTTP 服务（冒烟里有断言）。</li>
+</ul>
+<h3 id="24-hmac-auth">2.4 hmac-auth —— ✅ 已完成</h3>
+<p><strong>已实现</strong>：HMAC-SHA256 校验、常量时间比较（<code>hmac.Equal</code>）、
+时间窗防重放、<code>exemptPaths</code> 路径段匹配、<code>bodyTruncated</code> 拒绝、
+配置不全时 fail closed、日志脱敏。</p>
+<p><strong>规范串</strong>：<code>METHOD\nPATH\nQUERY\nTIMESTAMP\nBODY_SHA256_HEX</code>，五行缺一不可。</p>
+<p><strong>实现过程中发现的真 bug（只有端到端能抓到）</strong>：
+签名请求一直返回 401，而插件进程在跑、钩子计数也对、插件日志却一片空白。
+根因是 <code>APIAuth</code> 在 <code>tok == ""</code> 时<strong>提前 401 返回</strong>，而 HMAC 客户端
+根本不用 <code>Authorization</code> 头 —— 扩展鉴权永远收不到这类请求，
+且那个 401 看起来完全正常。已修（把早退改成最后兜底）并补了回归测试。
+详见 FIXLOG §23。</p>
+<p><strong>验证</strong>：插件单测 7 项篡改表 + 时间窗 + fail closed + 免签边界；
+<code>pkg/plugin/host</code> 真实子进程端到端 4 例；<code>smoke_plugin.sh</code> 第 8 节
+真实 HTTP 签名（有效 200 / 篡改 403 / 缺签名 403 / 过期 403），<strong>36/36</strong>。</p>
+<p><strong>遗留</strong>：<code>principalUserId</code> 只支持单一身份 —— 多个调用方需要各自身份时，
+得按 appKey 映射到不同用户。</p>
+<h3 id="25-ui">2.5 插件工程增强（配置加密 + 配置 UI）—— ✅ 已完成</h3>
+<p><strong>已实现</strong>：</p>
+<ul>
+<li><code>models.Plugin.Config</code> 类型改为 <code>models.Encrypted</code>，落库自动加密；</li>
+<li>两处 <code>Update("config", ...)</code> <strong>同时</strong>包成 <code>models.Encrypted(...)</code>
+  （见下方原计划里的陷阱说明 —— 它果然就是坑点）；</li>
+<li>新增 <code>migratePluginConfig()</code> 数据迁移（存量明文 → 密文，幂等），
+  并纳入 <code>SensitiveFieldsEncrypted()</code> 探针；</li>
+<li>读取侧 <code>pluginset.pluginConfig()</code> 改用 <code>p.Config.String()</code>；</li>
+<li>前端把<strong>只读</strong>配置块换成真正的编辑器：草稿与已存配置分离
+  （刷新不冲掉正在输入的内容）、保存前校验 JSON、进入编辑时美化缩进、
+  <strong>前端不做任何加密</strong>（密钥不能发给浏览器）；</li>
+<li>i18n：删 2 个 key、加 8 个，五语言对称（<code>check_i18n.py</code> 守住）。</li>
+</ul>
+<p><strong>三层守卫（都做了反向验证）</strong>：控制器测试读原始列断言密文；
+迁移测试覆盖存量明文；<code>smoke_plugin.sh</code> 真机断言
+"数据库文件里没有明文插件密钥"（用 grep 而非 sqlite3，不引入依赖）。
+退回裸 string 时分别 FAIL（控制器）与 36/1（冒烟）。</p>
+<p><strong>原计划（保留作对照）</strong>：</p>
+<hr />
+<h2 id="3">3. 今天的改动清单</h2>
+<h3 id="31">3.1 占位骨架（本轮主体）</h3>
+<p><strong>后端（3 个文件改动 + 3 个新测试）</strong></p>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>改动</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>backend/pkg/plugin/hooks.go</code></td>
+<td><code>HookMeta</code> 增 <code>Planned</code>/<code>Plan</code> 字段；<code>onAntiLeech</code> 标 <code>Planned</code> 并写明分享覆盖契约；4 个未接入钩子标 <code>Planned</code> + 计划说明</td>
+</tr>
+<tr>
+<td><code>backend/controllers/plugins.go</code></td>
+<td><code>ListPluginHooks</code> 响应增 <code>planned</code>/<code>plan</code></td>
+</tr>
+<tr>
+<td><code>backend/pkg/plugin/hooks_test.go</code></td>
+<td>新增 <code>TestHookPlanMetadata</code>（守住 Planned/Plan 不变量）</td>
+</tr>
+<tr>
+<td><code>backend/pkg/plugin/install/manifests_test.go</code></td>
+<td>新增 <code>TestExampleManifests</code>（校验 examples 下每份 plugin.json 能被真实解析）</td>
+</tr>
+<tr>
+<td><code>backend/pkg/plugin/host/example_plugins_test.go</code></td>
+<td><code>TestExamplePlugins_LoadAndDispatch</code>（真实 init 握手 + 派发事件；两个插件的"是否应拦截"期望<strong>相反</strong>，注释里写明了原因）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>新增目录（2 个插件骨架）</strong></p>
+<ul>
+<li><code>examples/plugins/smtp-email/</code>：<code>go.mod</code>、<code>plugin.json</code>、<code>main.go</code>、<code>README.md</code></li>
+<li><code>examples/plugins/hmac-auth/</code>：<code>go.mod</code>、<code>plugin.json</code>、<code>main.go</code>、<code>README.md</code></li>
+</ul>
+<p><strong>前端（7 个文件改动）</strong></p>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>改动</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>frontend/src/api/client.ts</code></td>
+<td><code>HookInfo</code> 增 <code>planned</code>/<code>plan</code></td>
+</tr>
+<tr>
+<td><code>frontend/src/pages/admin/Plugins.tsx</code></td>
+<td>钩子卡片"规划中"徽章 + 计划文案；插件卡片只读配置块 + 明文警示</td>
+</tr>
+<tr>
+<td><code>frontend/src/i18n/{en,zh-CN,zh-TW,ja,ko}.ts</code></td>
+<td><code>plugin</code> 命名空间增 6 个 key（五语言对称）</td>
+</tr>
+<tr>
+<td><code>backend/frontend_dist/**</code></td>
+<td><code>npm run build</code> 重新产出并同步</td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-bug">3.2 顺带修掉的既有安全 bug（非本计划范围）</h3>
+<p>调研 §2.5「配置加密能不能照抄 <code>Policy.Config</code>」时，发现 <code>Policy.Config</code>
+自己的写入路径就是漏的 —— <code>UpdatePolicy</code> 传裸 string 进 <code>Updates(map)</code>，
+绕过了 <code>models.Encrypted</code> 的 <code>driver.Valuer</code>，<strong>以明文把 SFTP 密码 /
+云厂商密钥写回库</strong>。</p>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>改动</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>backend/controllers/admin_ex.go</code></td>
+<td><code>UpdatePolicy</code>：<code>req.Config</code> → <code>models.From(req.Config)</code>，附说明注释</td>
+</tr>
+<tr>
+<td><code>backend/models/encrypted_bare_string_test.go</code></td>
+<td>新增。固化「裸 string 不被加密」这条 <code>database/sql</code> 约束</td>
+</tr>
+<tr>
+<td><code>backend/controllers/admin_policy_config_test.go</code></td>
+<td>新增。打 <code>PUT /policies/:id</code>，读<strong>原始列</strong>断言密文前缀</td>
+</tr>
+<tr>
+<td><code>FIXLOG.md</code></td>
+<td>新增第 17 节（根因、影响、为什么既有测试没拦住、双向验证、对插件配置加密的直接影响）</td>
+</tr>
+</tbody>
+</table>
+<p>已做<strong>双向验证</strong>：改回裸 string 时回归测试报
+<code>policies.config 必须加密落库，实际 = "{\"password\":\"edited-by-admin\"}"（明文泄露）</code>，
+改回 <code>models.From</code> 后通过。</p>
+<p><strong>新增文档</strong>：本文件。</p>
+<hr />
+<h2 id="4">4. 实施顺序（已全部完成）</h2>
+<pre><code>① 2.2 onAntiLeech 覆盖分享下载    ✅ FIXLOG §20
+② 2.1 smtp-email 真实发信         ✅ FIXLOG §21
+③ 2.3 onApiAuth 接线              ✅ FIXLOG §22
+④ 2.4 hmac-auth 实现校验           ✅ FIXLOG §23
+⑤ 2.5 配置加密 + 配置编辑 UI       ✅ FIXLOG §24
+⑥ 2.3 剩下 onBackup/onRestore/onCLI ✅ FIXLOG §25
+</code></pre>
+<p><strong>过程中发现并修掉的既有缺陷</strong>（都不在原计划内）：</p>
+<table>
+<thead>
+<tr>
+<th>缺陷</th>
+<th>位置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>存储策略密钥明文写回库</td>
+<td>§17</td>
+</tr>
+<tr>
+<td>插件冒烟测试从未跑到过插件部分</td>
+<td>§18</td>
+</tr>
+<tr>
+<td>冒烟脚本腐坏无人知晓 → 接入 CI</td>
+<td>§18.5、§21</td>
+</tr>
+<tr>
+<td><code>APIAuth</code> 缺 Authorization 时早退，HMAC 类扩展鉴权永远收不到请求</td>
+<td>§23</td>
+</tr>
+<tr>
+<td>钩子注册表被插入两份 <code>onCLI</code></td>
+<td>§25</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5">5. 验证命令</h2>
+<pre><code class="language-bash"># 后端
+cd backend &amp;&amp; go build ./... &amp;&amp; go vet ./... &amp;&amp; go test ./... -count=1
+
+# 示例插件（各自独立 module：backend 的 go test 覆盖不到它们）
+cd examples/plugins/smtp-email &amp;&amp; go test ./... &amp;&amp; go vet ./...
+cd ../hmac-auth &amp;&amp; go test ./... &amp;&amp; go vet ./...
+
+# 端到端冒烟（起真实进程 + 真实 SQLite + 真实 HTTP；约 1~2 分钟）
+#   插件热加载：安装 → 启用拉起子进程 → onAntiLeech 拦截 403 → 禁用回收
+#   密钥静态加密：Create/Update 后原始列必须是密文 + 解密链路仍可用
+cd backend &amp;&amp; bash smoke_plugin.sh &amp;&amp; SMOKE_REQUIRE_SQLITE3=1 bash smoke_policy_config.sh
+
+# 前端（改完必须重新 build，产物直接写进 backend/frontend_dist）
+cd frontend &amp;&amp; python check_i18n.py &amp;&amp; npm run build
+
+</code></pre>
+<blockquote>
+<p>两个冒烟脚本与<strong>示例插件单测</strong>都已接进 <code>.github/workflows/smoke.yml</code>
+（示例插件是独立 module，<code>backend</code> 的 <code>go test ./...</code> 覆盖不到它们）。
+注意一条产品行为（FIXLOG §18.2）：<strong>首次安装后不重启，插件宿主为 nil、
+插件接口全部 503</strong>。冒烟脚本里已按真实部署方式加了重启步骤。</p>
+</blockquote>
+<hr />
+<h2 id="6">6. 实现时遵守的既有约定（后续维护也要）</h2>
+<p>这些约束在本轮实现中都被遵守，改动插件相关代码时仍适用：</p>
+<ol>
+<li><strong>拦截只认字符串</strong>：<code>strings.Contains(err.Error(), "blocked")</code>（大小写敏感），
+   唯一实现是 <code>plugin.IsBlockedError</code>。不要在业务代码里再写一遍判定。</li>
+<li><strong><code>Mode</code> 由实际触发点决定，不是设计意图</strong>：<code>onRateLimit</code> 的
+   "整体异步 + 个别处同步门"、<code>onApiAuth</code>/<code>onCLI</code> 的纯同步，
+   都是被"有几个调用点、要不要读结果"逼出来的。
+   <strong>照抄某个模式之前先核对前提是否相同</strong>（§22 就是照抄失败的一次）。</li>
+<li><strong><code>Fire</code> 不持锁执行用户代码</strong>，<code>Register</code>/<code>List</code> 不能被 IPC 往返卡住。</li>
+<li><strong>未接入的钩子不许假装可用</strong>：管理端靠 <code>wired</code>/<code>planned</code> 两个正交字段
+   如实展示。现在 <code>Hooks</code> 表里已无 <code>Wired:false</code>，但仍要守住
+   "标了 <code>Planned</code> 就必须有 <code>Plan</code>"的不变量（<code>TestHookPlanMetadata</code>）。</li>
+<li><strong><code>main.go</code> 的启动顺序</strong>：<code>ApplyPendingRestore</code>（备份恢复，在 <code>db.Init</code>
+   之前）→ <code>db.Init</code> → <code>pluginset.InitPlugins</code> → <code>migrations.Run</code>。
+   <code>onDBMigrate</code> 在迁移内部触发，顺序错了会错过本次。</li>
+<li><strong>写加密字段必须包 <code>models.Encrypted(...)</code></strong>：<code>driver.Valuer</code> 只对
+   带类型的值生效，传裸 string 会明文落库且<strong>没有任何报错</strong>（§17、§24）。</li>
+<li><strong>跨进程的数字类型要兼容 <code>float64</code></strong>：进程外插件的回写经 JSON 往返后
+   都是 <code>float64</code>；只认 <code>int</code>/<code>uint</code> 会让功能<strong>静默失效</strong>（§22、§25）。</li>
+</ol>
+<h2 id="7">7. 已知缺口（如实记录，未修）</h2>
+<table>
+<thead>
+<tr>
+<th>缺口</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RestoreBackup</code> 无 zip bomb 限额</td>
+<td>只限制了上传体积 4GB；<code>install</code> 包解压插件时有条目数/解压总量限制，这里没有。正常备份包由本系统生成不会超限，<strong>若将来开放接收外部备份包必须补上</strong></td>
+</tr>
+<tr>
+<td><code>principalUserId</code> 单一身份</td>
+<td>hmac-auth 多调用方需要各自身份时得按 appKey 映射，当前只支持一个</td>
+</tr>
+<tr>
+<td>SMTP 无失败重试退避</td>
+<td>投递失败即记 warn；宿主每次创建通知会重新触发，所以"下一封"会自然重试</td>
+</tr>
+<tr>
+<td><code>onRestore</code> 拦不住恢复</td>
+<td>异步钩子 + 暂存制，设计使然；需要否决请在权限层解决（文档已写明）</td>
+</tr>
+</tbody>
+</table></article>
+<div class="foot">NebulaDrive Wiki · 由项目文档自动构建 · 最后生成 2026-11-14</div>
+</main>
+<script src="../assets/app.js"></script></body></html>

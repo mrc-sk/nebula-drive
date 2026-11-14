@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CODE REVIEW 代码审查 · NebulaDrive Wiki</title>
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<aside id="sidebar">
+<div class="brand">NebulaDrive Wiki<small>项目文档 · 部署运维 · 插件开发</small></div>
+<input id="search" placeholder="搜索文档…" autocomplete="off">
+<div id="searchResults"></div>
+<div class="nav-group"><h4>▶ 入门</h4><a href="../pages/overview.html">项目概览 README</a><a href="../pages/license.html">AGPL 许可通俗说明</a></div><div class="nav-group"><h4>◈ 插件开发</h4><a href="../pages/plugin-manual.html">插件制作手册</a><a href="../pages/plugin-v2-guide.html">插件平台 v2 完全指南</a><a href="../pages/plugin-system-guide.html">插件系统完全指南</a><a href="../pages/pbclus-spec.html">PBClus 格式规范</a><a href="../pages/plugin-hotload.html">插件热加载：进度与接续</a><a href="../pages/plugin-builder.html">可视化插件制作器使用说明</a></div><div class="nav-group"><h4>▤ 版本与交付</h4><a href="../pages/changelog.html">CHANGELOG 变更记录</a><a href="../pages/ai-era-delivery.html">智能时代交付说明</a><a href="../pages/v2-delivery.html">插件平台 v2 交付说明</a></div><div class="nav-group"><h4>▣ 开发档案</h4><a href="../pages/audit.html">不足总结与改进建议</a><a class="active" href="../pages/code-review.html">CODE REVIEW 代码审查</a><a href="../pages/fixlog.html">FIXLOG 修复记录</a><a href="../pages/backlog.html">新功能占位清单</a></div><div class="nav-group"><h4>⚙ 运维</h4><a href="../pages/ops-manual.html">站点部署与运维手册</a><a href="../pages/ticket-desk.html">智能 AI 工单站使用说明</a><a href="../pages/plugin-store.html">官方插件市场与插件清单</a></div><div class="nav-group"><h4>· 首页</h4><a href="../index.html">Wiki 首页</a></div>
+</aside>
+<main id="main">
+<div class="crumb"><a href="../index.html">首页</a> / <span>开发档案</span> / CODE REVIEW 代码审查</div>
+<article class="md"><p class="desc">P0/P1 问题清单与修复思路</p><h1 id="nebuladrive">NebulaDrive 后端安全与架构审查报告</h1>
+<blockquote>
+<p>审查对象：<code>github.com/mrc-sk/nebula-drive</code> @ <code>main</code>（clone 深度 50）
+审查范围：<code>backend/</code> 全部 74 个 Go 文件（12,989 行），重点为 controllers / middleware / filesystem / webdav / pkg / conf
+审查方式：全量逐文件精读（只读，未修改任何代码）
+副署日期：2026-10-01</p>
+</blockquote>
+<hr />
+<h2 id="0">0. 总体结论</h2>
+<p><strong>一句话</strong>：这是一个架构思路正确、工程完成度远超预期、但<strong>安全边界系统性缺失</strong>的项目。功能铺得很广，但在"谁能访问什么"这件事上，几乎所有关键路径都存在缺口。</p>
+<p>先说做得好的，因为这些是真的好：</p>
+<table>
+<thead>
+<tr>
+<th>亮点</th>
+<th>评价</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>引用计数（FileObject + releaseLegacy 兜底）</strong></td>
+<td>全项目最扎实的一块。UPSERT 风格自增、唯一键冲突回退、旧数据按 files 表计数保守删除、启动时 backfill——这是<strong>教科书级的实现</strong>，考虑到了升级路径和数据安全。</td>
+</tr>
+<tr>
+<td><strong>数据模型设计</strong></td>
+<td><code>File.IsDir</code> 统一目录树、<code>FileObject</code> 分离物理对象、<code>FileVersion</code> 归档、<code>Setting</code> KV、<code>AuditLog</code>，边界清晰，没有过度设计。</td>
+</tr>
+<tr>
+<td><strong>存储抽象层（filesystem.Handler）</strong></td>
+<td>接口只有 7 个方法，工厂注册，加后端就是填 handler。SFTP/远程 WebDAV 也接进来了，扩展性验证过。</td>
+</tr>
+<tr>
+<td><strong>配置加密</strong></td>
+<td>AES-GCM + 独立 secret.key + 0600 权限 + env/ini 分离（敏感 vs 非敏感），这套设计是对的。</td>
+</tr>
+<tr>
+<td><strong>限流/封禁的工程细节</strong></td>
+<td>滑动窗口实现无内存泄漏（<code>kept := ts[:0]</code> 原地复用）、登录失败 5 分钟 10 次自动封禁、验证码阈值递进。</td>
+</tr>
+</tbody>
+</table>
+<p><strong>但</strong>：以上全部是"内部机制正确"，而<strong>外部边界（鉴权、授权、路径、网络）几乎是空的</strong>。下面按严重级排列。</p>
+<hr />
+<h2 id="1-p0">1. P0 — 必须立即修（可导致数据泄露 / 越权 / 服务不可用）</h2>
+<h3 id="p0-1-webdav">P0-1 WebDAV 存在路径穿越，可读写服务器任意文件 ⚠️ 最严重</h3>
+<p><strong>位置</strong>：<code>filesystem/fs.go</code> 的 <code>Local.Put/Get/GetRange/Delete/Size/Copy</code>，全部使用 <code>filepath.Join(l.Root, name)</code> 且<strong>零校验</strong>。</p>
+<p><strong>触发链</strong>：</p>
+<pre><code class="language-go">// webdav/webdav.go:474-495
+ext := path.Ext(remaining)                      // remaining 来自 URL 路径，完全用户可控
+srcName := fmt.Sprintf(&quot;dav-%d-%s&quot;, time.Now().Unix(), remaining)  // 未过滤 ../ 
+h.Put(c.Request.Body, srcName, size)            // → filepath.Join(root, &quot;dav-...-../../etc/x&quot;)
+</code></pre>
+<p><code>WebDAV PUT</code> 的 <code>remaining</code> 直接由 URL 路径推导而来。虽然 <code>resolvePath</code> 里做了 <code>path.Clean("/"+p)</code>，但：
+1. <code>Clean</code> 只处理 <code>/</code> 分隔符，<strong>不处理 Windows 的 <code>\</code></strong>；
+2. 关键点：<code>remaining</code> 是<strong>未匹配到的剩余段</strong>，攻击者构造 <code>/dav/a/../../../../tmp/evil.sh</code> 时，<code>Clean</code> 会把它规整成 <code>/tmp/evil.sh</code>，此时 <code>resolvePath</code> 从根查找 <code>tmp</code> → 找不到 → 返回 <code>remaining = "tmp/evil.sh"</code>，<code>parentOf(nil) = nil</code> → <strong>文件被写到 uploads/tmp/evil.sh 之外</strong>。</p>
+<p>更直接的：文件名里的绝对路径成分在 Windows 下 <code>filepath.Join("uploads", "C:\\Windows\\x")</code> 的行为需要实测，但 <code>..\</code> 序列在 Windows 下<strong>必然穿越</strong>，因为 <code>filepath.Join</code> 用的是 <code>filepath.Separator</code>，而 URL 里可以用 <code>%5C</code> 编码后经 <code>url.PathUnescape</code> 还原出 <code>\</code>。</p>
+<p><strong>影响</strong>：
+- 攻击者（任意有 WebDAV 权限的普通用户）可<strong>写入任意路径</strong>——写 SSH authorized_keys、写 cron、写 Web 目录 getshell；
+- 可<strong>读取任意文件</strong>（<code>GET /dav/../../../../etc/passwd</code>）——注意 <code>getOrHead</code> 走的是 <code>h.Get(node.SourceName)</code>，<code>SourceName</code> 来自 DB，这条相对安全；但 <code>put</code> 的 <code>srcName</code> 是明文拼接的，写入后这条记录进了 DB，后续 GET 就能读回来。<strong>等于开放了一个任意文件写入 + 读取通道</strong>。</p>
+<p><strong>修复</strong>（必须做的三件事，缺一不可）：</p>
+<pre><code class="language-go">// 1. filesystem/fs.go —— 增加统一的安全 join，所有 handler 强制走它
+func safeJoin(root, name string) (string, error) {
+    // 归一化分隔符，杜绝 Windows \ 绕过
+    clean := strings.ReplaceAll(name, &quot;\\&quot;, &quot;/&quot;)
+    p := filepath.Join(root, filepath.FromSlash(clean))
+    absRoot, err := filepath.Abs(root)
+    if err != nil { return &quot;&quot;, err }
+    absPath, err := filepath.Abs(p)
+    if err != nil { return &quot;&quot;, err }
+    // 必须严格是 root 的子路径
+    if absPath != absRoot &amp;&amp; !strings.HasPrefix(absPath, absRoot+string(filepath.Separator)) {
+        return &quot;&quot;, errors.New(&quot;path traversal detected&quot;)
+    }
+    return absPath, nil
+}
+// 然后 Put/Get/GetRange/Delete/Size/Copy 里所有 filepath.Join 换成 safeJoin
+
+// 2. webdav/webdav.go put() —— 拒绝非法字符
+if strings.ContainsAny(remaining, `/\`) || remaining == &quot;.&quot; || remaining == &quot;..&quot; {
+    c.String(400, &quot;Invalid filename&quot;); return
+}
+// srcName 不要拼接用户输入，改为纯 UUID + ext，与 HTTP 上传保持一致
+srcName := util.UUID() + path.Ext(remaining)
+</code></pre>
+<p><strong>注意</strong>：<code>filesystem/fs.go</code> 里 <code>Local</code> 是唯一的"裸奔" handler；S3/OSS/COS 因为 key 是扁平 namespace 不受影响，但 <strong>SFTP handler 和远程 WebDAV handler 同样是 <code>path</code> 拼接，必须一起检查</strong>（<code>filesystem/sftp.go</code>）。</p>
+<hr />
+<h3 id="p0-2-webdav-put-200">P0-2 WebDAV PUT 覆盖文件时直接返回 200 且丢弃上传内容</h3>
+<p><strong>位置</strong>：<code>webdav/webdav.go:437-446</code></p>
+<pre><code class="language-go">if remaining == &quot;&quot; {
+    if node.IsDir { c.String(409, &quot;Is A Directory&quot;); return }
+    _ = node
+    // 直接新增一个同路径同名文件，旧的保留
+    c.String(200, &quot;OK&quot;)     // ← 上传的 body 被完全丢弃，也没写任何东西
+    return
+}
+</code></pre>
+<p><strong>影响</strong>：这是<strong>数据静默丢失</strong>。任何 WebDAV 客户端（Windows 资源管理器、Finder、RaiDrive）覆盖已有文件时，客户端收到 200 认为成功，<strong>实际内容零写入</strong>。用户会以为保存成功。README 宣称"WebDAV RFC 4918 全方法实现"——这是不成立的。</p>
+<p>而且注释里写的"直接新增一个同路径同名文件"<strong>代码里也没做</strong>，只是 <code>_ = node</code> 后返回 200。</p>
+<p><strong>修复</strong>：</p>
+<pre><code class="language-go">if remaining == &quot;&quot; {
+    if node.IsDir { c.String(409, &quot;Is A Directory&quot;); return }
+    // 走真正的覆盖：归档旧版本 → 写新内容 → 更新 File
+    // 最简可行：删除旧物理引用后按新文件写入，或直接复用 UploadVersion 的逻辑
+    return overwriteFile(c, u, node)   // 需实现
+}
+</code></pre>
+<hr />
+<h3 id="p0-3-webdav-putmove">P0-3 WebDAV PUT/MOVE 完全绕过上传白名单与配额</h3>
+<p><strong>位置</strong>：<code>webdav/webdav.go:431-496</code>、<code>513-549</code></p>
+<p>对比 HTTP 上传（<code>controllers/file.go:221-226</code>）有四道检查：扩展名白名单、魔术字节、配额、审计日志。WebDAV <code>put</code> <strong>只有配额检查</strong>（还没走 <code>ensureQuota</code>，是自己手写的一份，逻辑不一致）：</p>
+<pre><code class="language-go">// webdav.go:457-468 —— 手写配额，用 u.GroupID 的 MaxStorage
+if g.MaxStorage != -1 { ... }
+</code></pre>
+<p>但 HTTP 路径用的是 <code>effectiveMaxStorage</code>（<strong>套餐额度优先</strong>，见 <code>file.go:69-84</code>）。两套配额逻辑并存 → WebDAV 用户可绕过套餐限额。</p>
+<p>同时<strong>没有扩展名白名单</strong>，所以：
+- 直接 PUT 一个 <code>shell.php</code>、<code>x.exe</code> → 落盘到 Web 可访问目录（结合 P0-1 更危险）
+- 无魔术字节校验</p>
+<p><strong>修复</strong>：把 <code>put</code> 改为调用 <code>controllers</code> 里同一套 <code>ensureQuota</code> + <code>isAllowedExtension</code> + 魔术字节检查。<strong>抽出一个 <code>internal/service/upload.go</code> 供 HTTP 与 WebDAV 共用</strong>，别再手写第二份。</p>
+<hr />
+<h3 id="p0-4-webdav-lockunlock-200">P0-4 WebDAV 实现了 LOCK/UNLOCK 但返回 200 空响应</h3>
+<p><strong>位置</strong>：<code>webdav/webdav.go:259-260</code></p>
+<pre><code class="language-go">case &quot;COPY&quot;, &quot;PROPPATCH&quot;, &quot;LOCK&quot;, &quot;UNLOCK&quot;:
+    c.Status(200)
+</code></pre>
+<p>这是<strong>假实现</strong>。协议上 <code>LOCK</code> 必须返回 <code>Lock-Token</code> 头和 XML body（含 <code>lockdiscovery</code>），否则：</p>
+<ul>
+<li><strong>macOS Finder 挂载后会反复报错或直接只读</strong>（Finder 强依赖 LOCK）</li>
+<li><strong>Microsoft Office 直接保存失败</strong>（Office 保存前必须 LOCK）</li>
+<li>Windows 资源管理器会出现"无法创建文件"</li>
+</ul>
+<p><code>OPTIONS</code> 里还宣告了 <code>DAV: 1,2</code>，其中 <code>2</code> 就代表支持 LOCK。<strong>宣告了但没实现，比不宣告更糟</strong>——客户端会信任这个声明然后失败。</p>
+<p><strong>修复</strong>（二选一）：
+- <strong>方案 A（推荐，工作量大）</strong>：实现最小可用的 LOCK/UNLOCK（内存 or DB 存 lock token + 超时），或者直接引入 <code>golang.org/x/net/webdav</code> 作为底层。
+- <strong>方案 B（务实）</strong>：OPTIONS 里降级为 <code>DAV: 1</code>，移除 LOCK/UNLOCK 声明，并在 README 明确"不支持 Office/Finder 直接保存"。</p>
+<p><strong>顺带</strong>：<code>COPY</code> 和 <code>PROPPATCH</code> 返回 200 也是假的。COPY 应该真的复制，PROPPATCH 至少返回 207。</p>
+<hr />
+<h3 id="p0-5-cors-allowallorigins-true-allowheaders">P0-5 全局 CORS <code>AllowAllOrigins: true</code> + <code>AllowHeaders: ["*"]</code></h3>
+<p><strong>位置</strong>：<code>routers/router.go:30-35</code></p>
+<pre><code class="language-go">cors.New(cors.Config{
+    AllowAllOrigins:  true,
+    AllowHeaders:     []string{&quot;*&quot;},
+    AllowCredentials: false,
+})
+</code></pre>
+<p><code>AllowCredentials: false</code> 确实挡住了"带 Cookie 的跨站读取"这一最经典场景，<strong>这是唯一的救命稻草</strong>（因为 token 也叫 <code>nebula_token</code> cookie，但跨站读响应会被浏览器拦截）。</p>
+<p>但仍有实际风险：
+1. <code>Authorization: Bearer &lt;pat&gt;</code> 是<strong>显式头</strong>，不受 cookie 同源策略保护。任何恶意页面都能用受害者浏览器上用户可能粘贴过的 PAT 发请求——虽然攻击者拿不到 token 值，但如果用户在浏览器里存了 PAT（比如某插件），<strong>任意站点可代发请求并读取响应</strong>。
+2. 全部 API（含 <code>/api/admin/*</code>）对所有源开放。
+3. <code>AllowHeaders: ["*"]</code> 允许自定义头，配合 P0-1 更容易构造攻击。</p>
+<p><strong>修复</strong>：</p>
+<pre><code class="language-go">// 从 settings 读白名单，默认只允许同源
+allowed := allowedOrigins()   // 例如 []string{cfg.System.Domain}
+if len(allowed) == 0 {
+    // 全封闭：仅同源（浏览器自动放行同源，无需 CORS 头）
+    r.Use(cors.New(cors.Config{AllowOrigins: []string{}}))
+} else {
+    r.Use(cors.New(cors.Config{AllowOrigins: allowed, AllowHeaders: []string{&quot;Authorization&quot;,&quot;Content-Type&quot;,&quot;X-Confirm-Password&quot;,&quot;X-Share-Pwd&quot;,&quot;X-Share-Extract&quot;}}))
+}
+</code></pre>
+<hr />
+<h3 id="p0-6-ssrf">P0-6 离线下载是标准的 SSRF + 无限制资源消耗</h3>
+<p><strong>位置</strong>：<code>controllers/task.go</code></p>
+<pre><code class="language-go">func downloadBytes(url string) ([]byte, error) {
+    resp, err := http.Get(url)          // ← 任意 URL，无校验
+    ...
+    return io.ReadAll(resp.Body)        // ← 全量读进内存，无大小上限
+}
+// runHTTPTask 里同样是 http.DefaultClient.Get(url)，无校验、无超时
+</code></pre>
+<p>三个独立问题：</p>
+<ol>
+<li><strong>SSRF</strong>：普通用户可让服务器请求 <code>http://127.0.0.1:5212/api/admin/...</code>、<code>http://169.254.169.254/latest/meta-data/iam/security-credentials/</code>（云元数据，<strong>直接偷 AK/SK</strong>）、内网 Redis/MySQL 端口。这是<strong>云环境下最危险的漏洞之一</strong>。</li>
+<li><strong>内存打爆</strong>：<code>downloadBytes</code> 的 <code>io.ReadAll</code> 无上限。用户提交一个 50GB 的 "torrent" 链接（实际返回巨量内容）→ <strong>OOM 崩溃</strong>。</li>
+<li><strong>超时缺失</strong>：<code>http.Get</code> 用 <code>DefaultClient</code>，无 <code>Timeout</code>，慢速攻击（slowloris 式）可长期占用 goroutine。</li>
+</ol>
+<p><strong>修复</strong>：</p>
+<pre><code class="language-go">func safeHTTPClient() *http.Client {
+    return &amp;http.Client{
+        Timeout: 30 * time.Second,
+        CheckRedirect: func(req *http.Request, via []*http.Request) error {
+            if len(via) &gt;= 3 { return errors.New(&quot;too many redirects&quot;) }
+            return validateURL(req.URL)   // 每次跳转都校验
+        },
+        Transport: &amp;http.Transport{DialContext: safeDialContext},
+    }
+}
+
+func validateURL(u *url.URL) error {
+    if u.Scheme != &quot;http&quot; &amp;&amp; u.Scheme != &quot;https&quot; { return errors.New(&quot;bad scheme&quot;) }
+    ips, err := net.LookupIP(u.Hostname())
+    if err != nil { return err }
+    for _, ip := range ips {
+        if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+           ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+            return errors.New(&quot;internal address blocked&quot;)
+        }
+    }
+    return nil
+}
+
+// 下载限流：io.LimitReader(resp.Body, maxTorrentSize)   // 例如 10MB
+// safeDialContext 里也要做一次 IP 校验，防 DNS Rebinding
+</code></pre>
+<p><strong>另外</strong>：BT/磁力下载本质上无法用 URL 白名单防——建议<strong>默认关闭离线下载</strong>，或限制为管理员 + 明确的风险提示 + 独立低权限运行（容器 + 无云元数据访问）。</p>
+<hr />
+<h2 id="2-p1">2. P1 — 高优先级（功能错误 / 一致性缺陷 / 越权面）</h2>
+<h3 id="p1-1-breadcrumb">P1-1 <code>Breadcrumb</code> 完全没有鉴权 —— 可遍历任意用户文件树</h3>
+<p><strong>位置</strong>：<code>controllers/file.go:617-633</code></p>
+<pre><code class="language-go">func Breadcrumb(c *gin.Context) {
+    id, _ := strconv.Atoi(c.Param(&quot;id&quot;))
+    var crumbs []models.File
+    cur := uint(id)
+    for cur != 0 {
+        var f models.File
+        if err := db.Get().First(&amp;f, cur).Error; err != nil { break }
+        crumbs = append(crumbs, f)      // ← 无 owner 校验！
+        ...
+    }
+}
+</code></pre>
+<p>路由是 <code>files := api.Group("/files", middleware.Auth(true))</code>，所以<strong>只要求登录，不要求归属</strong>。任意登录用户传 <code>id=1,2,3...</code> 就能<strong>枚举出其他所有用户的目录名与结构</strong>（<code>File</code> 结构体直接 JSON 序列化，<code>OwnerID</code>、<code>Size</code>、<code>SourceName</code>、<code>MimeType</code> 全部泄露）。</p>
+<p><strong>修复</strong>：</p>
+<pre><code class="language-go">u := middleware.CurrentUser(c)
+...
+if !u.IsAdmin &amp;&amp; f.OwnerID != u.ID { break }   // 或返回 403
+</code></pre>
+<hr />
+<h3 id="p1-2-list-parent-search-join">P1-2 <code>List</code> 接口的 <code>parent</code> 参数越权 + <code>Search</code> 的 JOIN 泄露</h3>
+<p><strong>位置</strong>：<code>controllers/file.go:105-130</code>、<code>controllers/search.go:99-116</code></p>
+<p><code>List</code> 里加了 <code>owner_id = ?</code> 条件 ✓，<strong>但没校验 <code>parentID</code> 是否属于该用户</strong>——不泄露数据（因为 owner 过滤仍在），但会误导性返回空列表，属轻微问题。</p>
+<p><strong>真正的问题在 <code>Search</code></strong>：</p>
+<pre><code class="language-go">// search.go:99-103
+if tagParam := c.Query(&quot;tag&quot;); tagParam != &quot;&quot; {
+    q = q.Joins(&quot;JOIN file_tags ON file_tags.file_id = files.id&quot;).
+        Where(&quot;file_tags.tag IN ? AND file_tags.owner_id ?&quot;, tags, u.ID)
+    //                                    ↑ 这里写的是 &quot;owner_id ?&quot;，缺了 &quot;=&quot; ！！！
+}
+</code></pre>
+<p><strong><code>file_tags.owner_id ?</code> 是 SQL 语法错误</strong>（GORM 会尽力拼，行为未定义），应该是 <code>file_tags.owner_id = ?</code>。按标签搜索功能<strong>当前是坏的</strong>。</p>
+<pre><code class="language-go">// search.go:113-116
+if c.Query(&quot;share&quot;) == &quot;1&quot; {
+    q = q.Joins(&quot;JOIN shares ON shares.file_id = files.id&quot;).
+        Where(&quot;shares.deleted_at IS NULL&quot;)     // ← 没有 shares.owner_id 过滤
+}
+</code></pre>
+<p>JOIN shares 后<strong>只过滤 <code>deleted_at IS NULL</code></strong>，虽然外边有 <code>owner_id = ?</code>（针对 files 表），所以不直接越权，但如果某个文件的 sharing 记录被另一个用户的 file_id 碰撞……实际上 <code>files.owner_id</code> 已限制，风险可控。<strong>仍建议加 <code>shares.owner_id = ?</code> 显式约束</strong>。</p>
+<hr />
+<h3 id="p1-3-savesearchhistory-sql-mysql">P1-3 <code>SaveSearchHistory</code> 的清理 SQL 在 MySQL 下会报错</h3>
+<p><strong>位置</strong>：<code>controllers/search.go:207-208</code></p>
+<pre><code class="language-go">db.Get().Where(&quot;user_id = ? AND id NOT IN (SELECT id FROM search_histories WHERE user_id = ? ORDER BY id DESC LIMIT 20)&quot;, u.ID, u.ID).
+    Delete(&amp;models.SearchHistory{})
+</code></pre>
+<p>MySQL 不允许在 DELETE 的子查询里引用<strong>同一张表</strong>（错误 1093），必须包一层派生表。SQLite 可以。<strong>跨库兼容性 bug</strong>。</p>
+<p><strong>修复</strong>：</p>
+<pre><code class="language-sql">-- MySQL 需改为：
+DELETE FROM search_histories WHERE user_id = ? AND id NOT IN (
+  SELECT id FROM (SELECT id FROM search_histories WHERE user_id = ? ORDER BY id DESC LIMIT 20) t
+)
+-- 或者干脆用 GORM 分两步：先查出保留的 id 列表，再 Delete(&quot;id NOT IN ?&quot;)
+</code></pre>
+<hr />
+<h3 id="p1-4">P1-4 缺事务：所有"多步写入"都可能产生中间状态</h3>
+<p>全项目搜索 <code>db.Get().Transaction(</code> <strong>零命中</strong>。以下操作全部是裸的多条语句：</p>
+<table>
+<thead>
+<tr>
+<th>位置</th>
+<th>问题</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>file.go:185-193</code>（Rapid 秒传）</td>
+<td><code>Create(File)</code> 与 <code>Retain(FileObject)</code> 分离，若 Retain 失败 → File 存在但无引用计数 → <strong>后续删除不会释放物理文件（泄漏）</strong></td>
+</tr>
+<tr>
+<td><code>file.go:299-307</code>（Upload）</td>
+<td>同上</td>
+</tr>
+<tr>
+<td><code>file.go:1018-1039</code>（UploadVersion）</td>
+<td>归档版本 + 更新 File + Retain，任一失败即数据不一致</td>
+</tr>
+<tr>
+<td><code>file.go:1148-1169</code>（RestoreVersion）</td>
+<td>归档 + 更新 + Retain + Delete(version)，四步无事务</td>
+</tr>
+<tr>
+<td><code>install.go:41-73</code>（Install）</td>
+<td>建表 → 建组 → 建管理员 → 存配置，<strong>中途失败留下半装状态</strong>，而 <code>conf.Save</code> 是最后一步——如果 Save 失败，DB 里已有数据但 <code>IsInstalled()=false</code>，<strong>下次启动会重新走安装，重复建表/建用户冲突</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>修复</strong>（以秒传为例）：</p>
+<pre><code class="language-go">err := db.Get().Transaction(func(tx *gorm.DB) error {
+    if err := tx.Create(&amp;f).Error; err != nil { return err }
+    if err := storage.RetainTx(tx, exist.PolicyID, exist.SourceName, exist.Size, exist.Hash); err != nil { return err }
+    return nil
+})
+if err != nil { /* 回滚，返回错误 */ }
+</code></pre>
+<p>注意 <code>storage.Retain/ReleaseObject</code> 目前硬依赖 <code>db.Get()</code>，<strong>需要改造为接受 <code>*gorm.DB</code> 参数</strong>（保留无参版本做兼容）。</p>
+<hr />
+<h3 id="p1-5-toctou">P1-5 配额检查存在 TOCTOU 竞态，可超额上传</h3>
+<p><strong>位置</strong>：<code>file.go:88-102</code> + 所有调用点</p>
+<pre><code class="language-go">func ensureQuota(userID uint, additionalBytes int64) error {
+    // 1. 读 u.Storage
+    // 2. 比较 u.Storage + additional &gt; max
+    // 3. 返回 ok
+}
+// 之后才 addStorage()  ← 中间有窗口
+</code></pre>
+<p>并发场景：用户余额 9GB / 限额 10GB，同时发起 3 个 1GB 上传 → 三个请求都读到 9GB 都通过 → 最终 12GB，<strong>超额 20%</strong>。重复几十次即可无限膨胀。</p>
+<p><strong>修复</strong>：用原子的条件更新代替"读-判断-写"：</p>
+<pre><code class="language-go">res := db.Get().Model(&amp;models.User{}).
+    Where(&quot;id = ? AND (storage + ?) &lt;= ?&quot;, userID, delta, maxStorage).
+    UpdateColumn(&quot;storage&quot;, gorm.Expr(&quot;storage + ?&quot;, delta))
+if res.RowsAffected == 0 { return errors.New(&quot;quota exceeded&quot;) }
+</code></pre>
+<p>把"占额度"和"校验"合并成一条原子 SQL。<strong>但这需要重构 <code>addStorage</code> 的调用顺序</strong>（目前是先干活后加额度）。</p>
+<hr />
+<h3 id="p1-6-map">P1-6 分片上传的并发 map 访问 + 无过期清理</h3>
+<p><strong>位置</strong>：<code>file.go:651-771</code></p>
+<pre><code class="language-go">chunkUploadsMu.Lock()
+meta, ok := chunkUploads[uploadID]
+chunkUploadsMu.Unlock()
+...
+chunkUploadsMu.Lock()
+meta.Chunks[idx] = chunkPath    // ← meta 是 *chunkUploadMeta，锁外修改
+chunkUploadsMu.Unlock()
+</code></pre>
+<p>虽然加了锁，但 <code>meta</code> 是指针，<strong>锁保护的是 map 而不是 meta 内部字段</strong>。<code>ChunkMerge</code> 里 <code>meta.Chunks[i]</code> 的读发生在锁外（<code>for i := 0; i &lt; meta.ChunkCount; i++ { cp, ok := meta.Chunks[i] }</code>），与 <code>ChunkUpload</code> 的写并发 → <strong>data race</strong>（<code>go test -race</code> 会报）。</p>
+<p>另外：
+- <code>chunkUploads</code> <strong>永不清理</strong>。中断的上传会话永久留在内存 map 里 → 内存泄漏。
+- <code>Chunks</code> 里的临时文件也不会清 → <strong>磁盘泄漏</strong>（<code>uploads/chunks/</code> 无限增长）。
+- <code>meta.Size</code> 是<strong>用户自己声明的</strong>（<code>chunkInitReq.Size</code>），合并后直接 <code>addStorage(meta.Size)</code>。用户声明 1KB 实际上传 10GB → <strong>配额被绕过</strong>。应该用 <code>mergedSize</code>。</p>
+<p><strong>修复</strong>：</p>
+<pre><code class="language-go">// 1. 给 meta 加自己的 mutex，或者用 sync.Map + 值语义
+type chunkUploadMeta struct {
+    mu sync.Mutex
+    ...
+}
+// 2. 加 janitor goroutine：每小时清理 CreatedAt 超过 24h 的会话及其临时文件
+// 3. mergedSize 从实际写入字节数统计（tee reader 计数），不用 meta.Size
+</code></pre>
+<hr />
+<h3 id="p1-7-canceltask-close-panic">P1-7 <code>CancelTask</code> 双重 close panic</h3>
+<p><strong>位置</strong>：<code>task.go:400-415</code> + <code>runHTTPTask:354</code></p>
+<pre><code class="language-go">// CancelTask
+if ok {
+    if j.gid != &quot;&quot; { _ = aria2.GetManager().Remove(j.gid) }
+    close(j.cancel)          // ← 若任务刚结束（defer 已 delete dlJobs）则 ok=false，安全
+}
+</code></pre>
+<p>竞态：<code>ok</code> 为 true 但任务 goroutine 同时在 <code>defer</code> 里 <code>delete(dlJobs, id)</code>。若两个并发 <code>CancelTask</code> 请求同时命中同一个 job（<code>ok=true</code> 都成立，因为 delete 还没执行）→ <strong>两次 <code>close(j.cancel)</code> → panic: close of closed channel → 整个进程崩溃</strong>。</p>
+<p><code>gin.Recovery()</code> 能捕获并返回 500，但 panic 期间该 goroutine 的其他工作丢失。</p>
+<p><strong>修复</strong>：用 <code>sync.Once</code> 包住 close，或改用 <code>context.CancelFunc</code>：</p>
+<pre><code class="language-go">type activeJob struct {
+    taskID uint
+    gid    string
+    cancel context.CancelFunc   // 天然幂等
+}
+</code></pre>
+<hr />
+<h2 id="3-p2">3. P2 — 中优先级（正确性 / 健壮性 / 体验）</h2>
+<h3 id="p2-1-webdav-hrefof">P2-1 WebDAV 的 <code>hrefOf</code> 只返回一级名字 —— 目录树对客户端是错的</h3>
+<p><strong>位置</strong>：<code>webdav/webdav.go:334-338</code></p>
+<pre><code class="language-go">func hrefOf(f models.File) string {
+    // 简化：直接返回 /name；PROPFIND 结果仅在根和一级子目录准确
+    return &quot;/&quot; + url.PathEscape(f.Name)
+}
+</code></pre>
+<p><code>PROPFIND Depth:1</code> 对 <code>/a/b</code> 返回的子项 href 会是 <code>/c</code> 而不是 <code>/a/b/c</code>。<strong>macOS Finder 和 nginx 的 davfs 会因此算错路径</strong>，点击子目录会跳到错误位置。注释里承认了"仅根和一级准确"，但 <code>Depth</code> 默认是 <code>0</code>——Windows 资源管理器发 <code>Depth:1</code>，直接踩坑。</p>
+<p><strong>修复</strong>：<code>hrefOf</code> 需要<strong>接收完整路径前缀</strong>，或者在 <code>propfind</code> 里根据当前请求路径拼接。</p>
+<h3 id="p2-2-bug">P2-2 回收站清理会重复扣减配额（重入 bug）</h3>
+<p><code>cleanupTrash</code>（<code>file.go:1487-1507</code>）：</p>
+<pre><code class="language-go">addStorage(f.OwnerID, -f.Size)     // 扣额度
+db.Get().Unscoped().Delete(&amp;f)     // 物理删除
+</code></pre>
+<p>但 <code>Purge</code>（手动彻底删除，<code>file.go:605</code>）<strong>也做同样两件事</strong>。如果用户在 6 小时清理窗口内先 <code>Purge</code>，随后 cleanup 扫描到的 <code>files</code> 列表是<strong>清理开始时的快照</strong>（<code>Find</code> 结果在循环外），可能包含已被 Purge 的记录 → <strong>重复扣减 <code>storage</code></strong> → 用户额度变成负数。</p>
+<p><strong>修复</strong>：<code>Unscoped().Delete</code> 前用 <code>RowsAffected</code> 判断是否真的删到了记录，只有 <code>RowsAffected&gt;0</code> 才 <code>addStorage</code>：</p>
+<pre><code class="language-go">res := db.Get().Unscoped().Delete(&amp;f)
+if res.RowsAffected &gt; 0 { addStorage(f.OwnerID, -f.Size) }
+</code></pre>
+<p>同理 <code>Purge</code> 也要加。</p>
+<h3 id="p2-3-jwt">P2-3 JWT 解析不校验签名算法</h3>
+<p><strong>位置</strong>：<code>pkg/jwt/jwt.go:63-65</code></p>
+<pre><code class="language-go">_, err := jwt.ParseWithClaims(tok, c, func(t *jwt.Token) (interface{}, error) {
+    return secret, nil      // ← 没检查 t.Method
+})
+</code></pre>
+<p><code>golang-jwt/v5</code> 默认在 <code>ParseWithClaims</code> 里<strong>会</strong>校验 alg 是否与 key 类型匹配（HS256 + []byte），所以<strong>当前不可利用 <code>alg:none</code></strong>。但<strong>显式验证是好习惯</strong>，防御未来重构引入 <code>RS256</code> 混淆：</p>
+<pre><code class="language-go">if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+    return nil, fmt.Errorf(&quot;unexpected signing method: %v&quot;, t.Header[&quot;alg&quot;])
+}
+</code></pre>
+<p>另外 <code>Claims</code> 没有 <code>Issuer</code>/<code>Audience</code>，也没有 <code>NotBefore</code>，建议补上。</p>
+<h3 id="p2-4-setup2fa">P2-4 <code>Setup2FA</code> 的关闭分支在未开启时会崩</h3>
+<p><strong>位置</strong>：<code>auth.go:206-213</code></p>
+<pre><code class="language-go">// 关闭需验证码
+if !service.ValidateTOTP(u.TwoFactor, req.Code) {   // u.TwoFactor 可能为 &quot;&quot;
+</code></pre>
+<p>用户没开 2FA 时调 <code>POST /2fa/setup {enable:false}</code> → <code>ValidateTOTP("", code)</code> → 取决于实现，可能 panic 或返回 false。应加前置判断：</p>
+<pre><code class="language-go">if u.TwoFactor == &quot;&quot; { c.JSON(400, gin.H{&quot;message&quot;:&quot;未开启两步验证&quot;}); return }
+</code></pre>
+<h3 id="p2-5-oauth2-redirect_uri">P2-5 OAuth2 实现不完整，且 <code>redirect_uri</code> 校验有洞</h3>
+<p><strong>位置</strong>：<code>oauth.go</code></p>
+<table>
+<thead>
+<tr>
+<th>问题</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>OAuthAuthorize</code> 的 redirect 校验可绕过</td>
+<td><code>if len(uris) &gt; 0 &amp;&amp; redirectURI != ""</code> —— 若 app 的 <code>RedirectURIs</code> 为<strong>空数组</strong>（创建时 <code>redirectUris</code> 非必填），则<strong>任意 redirect_uri 都放行</strong> → <strong>授权码劫持</strong>。</td>
+</tr>
+<tr>
+<td>没有 PKCE</td>
+<td>公开客户端无法安全使用</td>
+</tr>
+<tr>
+<td>没有 <code>refresh_token</code></td>
+<td><code>oauthTokenTTL=2h</code>，到期需重新授权（体验问题）</td>
+</tr>
+<tr>
+<td><code>OAuthAuthorizeConfirm</code> 不复核 redirect_uri</td>
+<td>只查 client_id，<strong>直接相信请求体里的 <code>RedirectURI</code></strong> → 攻击者可构造 <code>client_id</code> 合法但 <code>redirect_uri</code> 指向自己的确认请求</td>
+</tr>
+<tr>
+<td>code 换 token 时不校验 <code>Used</code> 的原子性</td>
+<td><code>if oc.Used {...}</code> 然后 <code>Update("used", true)</code>，<strong>并发下同一 code 可换两次 token</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>修复优先级</strong>：redirect_uri 严格白名单（空则拒绝）+ Confirm 阶段复核 + code 用 <code>UPDATE ... WHERE used = false</code> 判断 RowsAffected。</p>
+<h3 id="p2-6-settingint-getsetting">P2-6 <code>settingInt</code> / <code>getSetting</code> 每次请求都查库，且无缓存</h3>
+<p><code>getSetting</code> 在 <code>isAllowedExtension</code>、<code>getSettingBool</code>、<code>limitForCategory</code> 等<strong>每个上传请求里被调用 3-5 次</strong>，每次都 <code>SELECT ... WHERE key = ?</code>。高并发下这是明显的 DB 放大。建议加<strong>带 TTL 的内存缓存</strong>（30s）+ 保存设置时主动失效。</p>
+<h3 id="p2-7-plaintext-token">P2-7 <code>plaintext 密码/token 明文入库/落盘</code></h3>
+<table>
+<thead>
+<tr>
+<th>位置</th>
+<th>问题</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>models.User.TwoFactor</code></td>
+<td>注释写"加密"，<strong>实际明文存 TOTP secret 到 DB</strong>（<code>auth.go:228</code>: <code>Update("two_factor", req.Secret)</code>）。DB 泄露 = 2FA 全废。应走 <code>conf.EncryptString</code>。</td>
+</tr>
+<tr>
+<td><code>models.Share.Password</code> / <code>ExtractCode</code></td>
+<td><strong>明文比对</strong>（<code>share.go:137,141</code>）。应存 hash（提取码短，需加盐或限定尝试次数）。</td>
+</tr>
+<tr>
+<td><code>models.PersonalAccessToken.Token</code> / <code>AccessToken.Token</code></td>
+<td><strong>明文存 token</strong>（<code>pat.go:38</code>）。DB 泄露 = 所有 API 令牌可用。应存 SHA-256，比对时哈希后查。</td>
+</tr>
+<tr>
+<td><code>OAuthApp.ClientSecret</code></td>
+<td>明文（<code>oauth.go:39</code>）。同上。</td>
+</tr>
+<tr>
+<td><code>jwt_secret</code> 存在 <code>settings</code> 表</td>
+<td><code>jwt.go:39</code> 写入 DB。<strong>这让 conf 层对 secret.key 的加密保护形同虚设</strong>——JWT 密钥反而在明文 DB 里。建议移到 <code>data/secret.key</code> 体系。</td>
+</tr>
+<tr>
+<td><code>Policy.Config</code></td>
+<td>注释写"JSON 加密"（<code>models.go:139</code>），<strong>实际 <code>filesystem.New</code> 直接 <code>json.Unmarshal([]byte(configJSON))</code> 明文解析</strong>。S3/OSS/COS 的 AK/SK 明文入库。</td>
+</tr>
+</tbody>
+</table>
+<p><strong>这一条整体是 P1 级别的问题</strong>，但因为是"设计层面需权衡"，归到 P2。<strong>修正建议</strong>：至少 <code>TwoFactor</code>、<code>Token</code>、<code>ClientSecret</code>、<code>Policy.Config</code> 四项必须加密或哈希。</p>
+<h3 id="p2-8-secret-aria2-rpc-rpc">P2-8 <code>Secret()</code> 方法暴露 aria2 RPC 密钥 + RPC 无访问控制</h3>
+<p><code>aria2/aria2.go:59-63</code> 提供 <code>Secret()</code> 导出方法（注释"调试用"），且 <code>--rpc-allow-origin-all=true</code>、<code>--rpc-listen-port=6800</code> 绑定所有网卡（未指定 <code>--rpc-listen-all=false</code>，默认只监听 localhost，<strong>这点没问题</strong>）。但 <code>Secret()</code> 导出给外部包用，容易误用于响应体。建议删除或改为 <code>internal</code>。</p>
+<h3 id="p2-9">P2-9 回收站清理的目录处理逻辑有误</h3>
+<p><code>cleanupTrash</code> 对 <code>IsDir</code> 的记录<strong>跳过物理删除但执行 <code>addStorage(-f.Size)</code></strong>。目录的 <code>Size</code> 通常是 0（<code>Mkdir</code> 不设 size），所以影响小；但如果曾经给目录设过 size，会错误扣减。<strong>且目录删除不递归其子文件</strong> → 子文件成为<strong>孤儿记录</strong>（<code>parent_id</code> 指向已删除的目录），既不出现在列表（<code>parent_id IS ?</code> 查不到）也不会被清理 → <strong>永久占用配额</strong>。</p>
+<p><strong>修复</strong>：删除目录时递归处理子节点，或至少把孤儿的 <code>parent_id</code> 置 NULL 移到根。</p>
+<hr />
+<h2 id="4">4. 架构层面</h2>
+<h3 id="41-vs">4.1 单体内聚 vs 边界划分</h3>
+<p><code>controllers</code> 包已经膨胀到 20+ 文件、<code>file.go</code> 单文件 1508 行。<code>file.go</code> 里混了：文件 CRUD、上传（3 种模式）、下载、Range 解析、版本控制、标签、批量操作、回收站清理、设置读取工具。<strong>建议拆分</strong>：</p>
+<pre><code>controllers/
+├── file/           # List/Download/Delete/Rename/Move
+├── upload/         # Upload/Rapid/Chunk*/UploadVersion
+├── version/        # ListVersions/DownloadVersion/RestoreVersion/DeleteVersion
+├── tag/
+└── trash/          # Purge/cleanupTrash
+internal/service/   # 跨 controller 复用的业务逻辑（配额、上传校验、refcount 事务）
+</code></pre>
+<p><strong>关键</strong>：<code>getSetting</code>/<code>isAllowedExtension</code>/<code>ensureQuota</code> 这些<strong>被 WebDAV 重复实现了一遍</strong>（见 P0-3）。抽到 <code>internal/service</code> 是消除这类不一致的根本手段。</p>
+<h3 id="42-dbget-1">4.2 <code>db.Get()</code> 全局单例 + 硬编码 1 号策略</h3>
+<pre><code class="language-go">h, p, err := handlerForPolicyID(1)   // 上传、分片合并、离线下载全用这个
+</code></pre>
+<p><strong>存储策略 id=1 被硬编码</strong>在至少 3 处。如果管理员删除了 1 号策略，或想改默认策略，这些路径会静默失败或写入非法策略。应该统一走一个 <code>defaultPolicy()</code> 函数（查 <code>is_default = true</code>，回退到 1）。</p>
+<h3 id="43-filestsx-1390">4.3 前端 <code>Files.tsx</code> 1390 行</h3>
+<p>单文件承载了列表/网格、拖拽、批量选择、预览、右键菜单、上传队列。建议按功能拆组件。前端整体 10,745 行 / 34 文件，<code>api/client.ts</code> 418 行是 axios 封装——<strong>注意检查它是否把所有接口都做了错误兜底</strong>（README 提到曾经"删除 mock 假数据兜底"，说明历史上存在<strong>前端伪造数据</strong>的情况；这类兜底如果还在别处，会掩盖后端 500）。</p>
+<h3 id="44-422">4.4 测试覆盖 42.2% 的结构问题</h3>
+<p>29 个 <code>_test.go</code> 文件，但<strong>全是单元测试</strong>（middleware、pkg、conf）。<strong>零集成测试</strong>——没有一处 <code>httptest.NewServer</code> 打通完整请求链。而本次发现的所有 P0 问题（路径穿越、WebDAV 覆盖丢数据、SSRF）<strong>都是集成层才能发现的</strong>。42.2% 这个数字有虚高感：它覆盖的是"好测的部分"（工具函数、中间件），而<strong>最难测也最需要测的部分（controllers 的文件操作、WebDAV、跨模块协作）几乎空白</strong>。</p>
+<p><strong>建议优先级（按发现 bug 的 ROI）</strong>：
+1. WebDAV 集成测试（路径穿越用例、PUT 覆盖、LOCK）—— 能立刻暴露 P0-1/2/3/4
+2. 文件生命周期集成测试（上传→秒传→复制→删除→回收站→清理，断言 refs 与 storage 一致）
+3. 权限矩阵测试（用户 A 访问用户 B 的所有接口，断言全 403）
+4. SSRF 用例（task 提交内网地址，断言被拒）
+5. 并发测试（<code>go test -race</code> 跑分片上传、配额、CancelTask）</p>
+<h3 id="45-ci">4.5 无 CI</h3>
+<p>仓库里没有 <code>.github/workflows/</code>，只有 <code>nfpm.yaml</code>。README 提到的"CI 审核通过后合并"（plugins 分支）<strong>目前无实现</strong>。至少应加：</p>
+<pre><code class="language-yaml"># .github/workflows/ci.yml
+- go vet ./...
+- go test -race -coverprofile=coverage.out ./...
+- go build ./...
+- cd frontend &amp;&amp; npm ci &amp;&amp; npm run build &amp;&amp; npx tsc --noEmit
+</code></pre>
+<p><code>-race</code> 尤其重要（能抓到 P1-6 的 data race）。</p>
+<hr />
+<h2 id="5">5. 合规与工程规范</h2>
+<h3 id="51-license-agpl-30">5.1 LICENSE：已改为 AGPL-3.0 ✅</h3>
+<p><strong>原问题</strong>（审查时状态）：<code>MIT License + 署名保留附加条款 v1.0</code>，要求"至少 3 处署名，禁止移除"。</p>
+<ol>
+<li><strong>已不是 MIT</strong>。MIT 明确允许"移除所有声明"（只需在副本中保留版权与许可声明，不是运行时展示）。附加"UI 页脚必须显示"的要求，与 MIT 第 1 条冲突。这种情况下<strong>整个许可的解释权不明</strong>——发生争议时，法院可能认定附加条款不可执行（于是等于纯 MIT），也可能认定整个许可为非自由许可。</li>
+<li><strong>"UI 页脚必须显示"在 OSI 定义下属于 field-of-use 限制</strong>，Debian/FSF 会判定为非自由许可，<strong>无法进入多数发行版仓库</strong>（这对"自托管系统"的推广是实际损失）。</li>
+<li><strong>无法执行性</strong>：二开者改个 UI 主题、换掉 Footer 组件（React 里就是删个 <code>&lt;footer&gt;</code>），谁知道？没有技术手段强制。</li>
+</ol>
+<p><strong>已采取的方案：AGPL-3.0</strong>（作者于 2026-10-02 变更，采纳上表方案 A）。</p>
+<p>这个选择一次性解决了上述三个问题：</p>
+<table>
+<thead>
+<tr>
+<th>原问题</th>
+<th>在 AGPL-3.0 下的状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>与 MIT 第 1 条冲突、解释权不明</td>
+<td>✅ 消失。AGPL-3.0 是 OSI 认证的自由软件，条款自洽</td>
+</tr>
+<tr>
+<td>field-of-use 限制，无法进发行版仓库</td>
+<td>✅ 消失。可正常进入 Debian 等发行版</td>
+</tr>
+<tr>
+<td>署名要求无法技术强制</td>
+<td>✅ 消失。署名要求本就不是许可证该管的事</td>
+</tr>
+</tbody>
+</table>
+<p><strong>而且保护力度实际上更强</strong>。原条款真正想防的是"署名被移除"，但那对自托管产品几乎不构成商业风险；
+真正的风险是<strong>拿去做成闭源 SaaS 卖钱</strong>——而这恰恰是 AGPL-3.0 第 13 条覆盖的场景
+（即使只是"通过网络提供服务"也触发源码开放义务）。对 NebulaDrive 这种自托管定位，AGPL 是更合适的选择。</p>
+<p><strong>需要接受的代价</strong>：</p>
+<ul>
+<li><strong>网络服务同样触发源码开放</strong>。AGPL 不区分"自部署"与"提供 SaaS"——
+  任何人把改过的版本部署到服务器上通过网络提供服务，都必须向使用者提供对应源码。
+  这对"欢迎社区部署"是好事，但如果未来想做<strong>官方托管 SaaS 且不公开核心代码</strong>，需要另行评估。</li>
+<li><strong>企业采用门槛</strong>。部分商业公司因 AGPL 的传染性而回避使用。
+  考虑到 NebulaDrive 已有企业功能（套餐/订阅/兑换码），若日后需要吸引企业客户，
+  可考虑提供"商业许可"双轨——这也是 AGPL 生态的常见做法。</li>
+</ul>
+<p><strong>⚠️ 待同步事项</strong>：仓库根目录 <code>LICENSE</code> 文件与 <code>README.md</code> 第 7/141/152/158 行的许可证声明
+需一并更新为 AGPL-3.0，否则会出现「GitHub 页面显示 AGPL-3.0、但仓库文件里仍是旧的组合协议」
+的不一致状态——而 LICENSE 文件才是法律上生效的那份。</p>
+<h3 id="52-readme">5.2 README 的三个问题</h3>
+<ol>
+<li><strong>开头重复</strong>："本项目基于 NebulaDrive 开发，原作者 mrc-sk"出现 3 次（开头/协议/致谢）。<strong>开头那次会让读者误判这是 fork</strong>（实际是原创）。建议开头只写 <code>作者 mrc-sk</code>。</li>
+<li><strong>"WebDAV RFC 4918 全方法实现"是过度声明</strong>（见 P0-2/P0-4）。建议改为"实现 PROPFIND/GET/PUT/MKCOL/DELETE/MOVE 等核心方法；LOCK/UNLOCK/COPY/PROPPATCH 为占位，暂不支持 Office/Finder 直接编辑"。</li>
+<li><strong>CHANGELOG 的 20 条已知 bug</strong> 是诚实的好信号，但<strong>没有分级</strong>。建议加 <code>[Blocker]</code> / <code>[Major]</code> / <code>[Minor]</code> 标签，让用户知道能不能上车。</li>
+</ol>
+<h3 id="53-trae-html-share-packages-gitignore">5.3 <code>.trae-html-share-packages/</code> 应 gitignore</h3>
+<p>内容是两个 zip（<code>backend/frontend_dist/index.html.zip</code>、<code>frontend/index.html.zip</code>），是 AI 编辑器（Trae）的产物，与项目无关。混在仓库根目录会干扰阅读。</p>
+<p><strong>⚠️ 顺带发现一个真问题</strong>：<code>backend/frontend_dist/</code> 被 <code>go:embed</code> 引用，但如果它是编辑器注入的 zip 解包产物，<strong>通过 npm build 重新生成前端会覆盖它</strong>。建议在 README 写清楚构建顺序（先 <code>npm run build</code> 产出到 <code>backend/frontend_dist</code>，再 <code>go build</code>），并确认 <code>vite.config.ts</code> 的 <code>outDir</code> 指向正确。</p>
+<h3 id="54-frontenddist-gitignore">5.4 <code>frontend/dist/</code> 在 .gitignore 里写了两次</h3>
+<pre><code class="language-gitignore">frontend/dist/   # 第 9 行附近
+frontend/dist/   # 第 13 行附近（重复）
+</code></pre>
+<p>小事，顺手清一下。</p>
+<hr />
+<h2 id="6">6. 优先级修复清单（按投入产出比排序）</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>问题</th>
+<th>严重级</th>
+<th>预估工作量</th>
+<th>状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>WebDAV 路径穿越</strong>（safeJoin + 拒绝非法文件名）</td>
+<td>P0</td>
+<td>2h</td>
+<td>✅ 已修 <code>P0-1</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>CORS 收紧</strong>（白名单 CORS）</td>
+<td>P0</td>
+<td>1h</td>
+<td>✅ 已修 <code>P0-5</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>SSRF 防护</strong>（URL 校验 + 超时 + 大小限 + 跳转校验）</td>
+<td>P0</td>
+<td>4h</td>
+<td>✅ 已修 <code>P0-6</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Breadcrumb 鉴权</strong>（加 owner 检查）</td>
+<td>P1</td>
+<td>15min</td>
+<td>✅ 已修 <code>P1-1</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>WebDAV PUT 覆盖真实现</strong></td>
+<td>P0</td>
+<td>3h</td>
+<td>✅ 已修 <code>P0-2</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>WebDAV PUT 接入白名单+统一配额</strong></td>
+<td>P0</td>
+<td>2h</td>
+<td>✅ 已修 <code>P0-3</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>敏感字段加密</strong>（TOTP/token/ClientSecret/Policy.Config）</td>
+<td>P1</td>
+<td>4h</td>
+<td>✅ 已修 <code>P2-7</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td><strong>配额原子化</strong>（条件 UPDATE）</td>
+<td>P1</td>
+<td>3h</td>
+<td>✅ 已修 <code>P1-5</code></td>
+</tr>
+<tr>
+<td>9</td>
+<td><strong>关键路径加事务</strong>（Rapid/Upload/UploadVersion/Install 等 13 处）</td>
+<td>P1</td>
+<td>6h</td>
+<td>✅ 已修 <code>P1-4</code></td>
+</tr>
+<tr>
+<td>10</td>
+<td><strong>Search 的 tag JOIN 语法修复</strong> + 分页 SQL 跨库</td>
+<td>P2</td>
+<td>1h</td>
+<td>✅ JOIN <code>P1-2</code> + 跨库清理 <code>P1-3</code></td>
+</tr>
+<tr>
+<td>11</td>
+<td><strong>chunkUploads 加过期清理 + meta 加锁 + size 用实际值</strong></td>
+<td>P1</td>
+<td>3h</td>
+<td>✅ 已修 <code>P1-6</code></td>
+</tr>
+<tr>
+<td>12</td>
+<td><strong>CancelTask 幂等化</strong></td>
+<td>P1</td>
+<td>30min</td>
+<td>✅ 已修 <code>P1-7</code></td>
+</tr>
+<tr>
+<td>13</td>
+<td><strong>补集成测试 + CI（-race）</strong></td>
+<td>P1</td>
+<td>2d</td>
+<td>🟡 测试套件已救活并全绿；CI 未加</td>
+</tr>
+<tr>
+<td>14</td>
+<td><strong>LICENSE 方案决策 + README 修正</strong></td>
+<td>P2</td>
+<td>3h</td>
+<td>🟡 已定 AGPL-3.0；README 待同步</td>
+</tr>
+<tr>
+<td>15</td>
+<td><strong>WebDAV LOCK/UNLOCK/COPY/PROPPATCH</strong></td>
+<td>P0/P2</td>
+<td>4h+</td>
+<td>✅ 已修 <code>P0-4</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="_1">清单之外还修掉的</h3>
+<p>审查时没列进清单、但在动手过程中发现并修复的：</p>
+<table>
+<thead>
+<tr>
+<th>问题</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Purge</code> / <code>cleanupTrash</code> 重复扣减配额</td>
+<td>改为条件原子删除，避免重复点击把用户已用容量扣成负数 <code>P2-2</code></td>
+</tr>
+<tr>
+<td><strong>测试驱动 ≠ 生产驱动</strong></td>
+<td>测试用需 CGO 的 <code>gorm.io/driver/sqlite</code>，生产用纯 Go 的 <code>glebarez/sqlite</code>。导致测试在无 GCC 环境完全跑不起来，且"测试通过 ≠ 线上通过"——<strong>这正是第 10 项能潜伏到生产的机制</strong></td>
+</tr>
+<tr>
+<td>测试连接从不关闭</td>
+<td>Windows 上句柄不释放导致 <code>t.TempDir()</code> 清理失败，<strong>断言全过的测试被判 FAIL</strong></td>
+</tr>
+<tr>
+<td><code>db.Init</code> 泄漏连接池</td>
+<td>安装向导每点一次"测试连接"泄漏一个连接池</td>
+</tr>
+<tr>
+<td>4 处差值记账绕过额度校验</td>
+<td>协作保存、版本恢复等路径用无校验的 <code>addStorage</code>，增量为正时可超额</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_2">验证状态</h3>
+<pre><code>go build ./...   EXIT=0
+go vet ./...     EXIT=0
+go test ./...    EXIT=0   （12 个包全部通过）
+</code></pre>
+<p>每一项"具体怎么修的、踩了什么坑"见 <a href="fixlog.html"><code>FIXLOG.md</code></a>。</p>
+<hr />
+<h2 id="7">7. 最后几句直话</h2>
+<p>这个项目的<strong>天花板很高</strong>——存储抽象、引用计数、配置加密这三块的设计水平明显高于同类国产自托管项目。但它现在的问题不是"某处代码写得不好"，而是<strong>安全模型没有建立起来</strong>：</p>
+<ul>
+<li>HTTP 路径有一套完整的校验链（白名单→魔术字节→配额→审计），<strong>WebDAV 路径完全没有</strong>。</li>
+<li>内部机制（refcount）考虑到了竞态和升级兼容，<strong>外部边界（谁能不能访问）几乎是裸的</strong>。</li>
+<li>测试覆盖"好测的部分"，跳过"最需要测的部分"。</li>
+</ul>
+<p><strong>根因是同一个</strong>：<code>controllers</code> 里的业务逻辑被 WebDAV <strong>抄了第二遍</strong>，而抄的时候只抄了主干、丢掉了安全层。</p>
+<p>所以当时只给了一条建议：<strong>建 <code>internal/service</code> 层，把所有校验（配额、白名单、魔术字节、出站请求）收进去，让 HTTP 和 WebDAV 都只能走同一个入口。</strong></p>
+<h3 id="_3">这条建议实施后的验证：判断是对的</h3>
+<p><code>internal/service</code> 落地（<code>outbound.go</code> + <code>quota.go</code>）之后，修复过程反过来印证了根因判断：</p>
+<ul>
+<li><strong>P0-3（WebDAV 绕开安全链）不再是"给 WebDAV 补上检查"，而是"换个入口"</strong> ——
+  <code>readDAVUpload</code> 直接复用 HTTP 上传的同一套白名单/魔术字节/体积上限，WebDAV 侧结构上不可能再漏。</li>
+<li><strong>P1-5（配额 TOCTOU）的修法只有一种</strong> —— 把"读-判-写"合并成单条条件 UPDATE。
+  这段逻辑没办法在两个地方各写一遍，必须收口。</li>
+<li><strong>新增的配额/白名单逻辑立刻被 9 个写入点复用</strong> —— 若还按旧结构分散在各 controller 里，
+  光是"记得同步"就足以再次出洞。</li>
+</ul>
+<p><strong>一个被低估的收益</strong>：校验收口之后，"某个入口忘了校验"从<strong>靠人记住</strong>变成了<strong>结构上不可能</strong>。
+这比修掉当下这 6 个 P0 更重要 —— 修掉的是症状，收口修的是产生症状的结构。</p>
+<h3 id="_4">剩下的</h3>
+<ol>
+<li>~~<strong>P2-7 敏感字段加密</strong>~~ ✅ 已修。两类字段用了不同方案：需要读回原值的
+   （TOTP secret / ClientSecret / 存储配置）用 AES-256-GCM 可逆加密；
+   只需要比对的（OAuth/PAT 令牌）用 SHA-256 单向哈希 —— 后者同时解决了
+   "可逆加密破坏唯一索引和 WHERE 查询"的问题，且泄露后无法直接冒用。
+   密文带 <code>enc:v1:</code> 前缀，因此存量明文可平滑升级，老用户的 2FA 不会失效。</li>
+<li>~~<strong>CI</strong>~~ ✅ 已加。<code>.github/workflows/go-ci.yml</code>：ubuntu + windows 矩阵，
+   跑 <code>go build</code> → <code>go vet</code> → <code>go test -race -count=1 ./...</code>，触发于 push main / PR / 手动。
+   显式设 <code>CGO_ENABLED=1</code> 并前置检查 gcc —— race detector 依赖 cgo，
+   而本机 <code>go env CGO_ENABLED=0</code>（无 MinGW），<strong>本地跑不了 race，只有 CI 能验</strong>。
+   同时补齐了此前缺失的 <code>go.sum</code>（原来仓库里没有，CI 的 <code>cache-dependency-path</code> 会直接报错）。</li>
+<li>~~<strong>README 的 WebDAV 措辞</strong>~~ ✅ 已改。原文"RFC 4918 全方法实现"会误导客户端开发者以为
+   能写自定义 dead property。现改为列出 12 个方法全名，并明确两条限制：
+   PROPPATCH 按 §9.2 返回 <code>207 + 403 Forbidden</code>（不写 dead property）、
+   LOCK 是进程内排他锁（重启后失效，多副本部署不共享）。</li>
+</ol>
+<hr />
+<p><em>本报告基于 commit <code>a26c73f</code>（hotfix V1-0.0.2-beta）的静态代码审查，所有结论均标注了具体文件与行号，可逐条复核。</em></p>
+<p><em>2026-10-02 更新：审查结论已全部复核并落地修复，本文档同步了修复状态清单。
+实现细节与踩坑记录见 <a href="fixlog.html"><code>FIXLOG.md</code></a>。
+除 §5.1（许可证，作者已决策改为 AGPL-3.0）外，报告中的原始判断未因修复而改变。</em></p></article>
+<div class="foot">NebulaDrive Wiki · 由项目文档自动构建 · 最后生成 2026-11-14</div>
+</main>
+<script src="../assets/app.js"></script></body></html>

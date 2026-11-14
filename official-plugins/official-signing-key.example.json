@@ -1,0 +1,7 @@
+{
+  "name": "NebulaDrive 官方插件",
+  "keyId": "14e8acbd1853ea9e",
+  "publicKey": "10KGiBvCfpt5O4M+4eG4kWaMrus+efNADHS/+zUcWH8=",
+  "privateKey": "<PRIVATE_KEY_KEPT_LOCALLY_NEVER_COMMIT>",
+  "_note": "私钥仅保存在部署机，用于 ndtools pack 签名；本文件只提供公钥与格式示例。"
+}

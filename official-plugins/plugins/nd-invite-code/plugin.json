@@ -1,0 +1,17 @@
+{
+  "name": "nd-invite-code",
+  "title": "注册邀请码",
+  "version": "1.0.0",
+  "author": "NebulaDrive Official",
+  "description": "为开放注册补上注册码校验：未填或填错注册码一律拒绝，码表由管理员维护。",
+  "entry": "plugin.py",
+  "protocolVersion": 2,
+  "hooks": [
+    "onAuthRegisterBefore"
+  ],
+  "permissions": [
+    "auth:read"
+  ],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://cloud.berrywing.top/"
+}

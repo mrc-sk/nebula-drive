@@ -1,0 +1,11 @@
+{
+  "title": "分享链接策略",
+  "description": "强制分享链接设置密码与有效期，禁止无保护的永久公开链接。",
+  "tags": [
+    "分享",
+    "安全",
+    "策略"
+  ],
+  "author": "NebulaDrive Official",
+  "license": "AGPL-3.0-only"
+}

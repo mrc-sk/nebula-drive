@@ -1,0 +1,18 @@
+{
+  "name": "nd-filename-clean",
+  "title": "文件名规范化",
+  "version": "1.0.0",
+  "author": "NebulaDrive Official",
+  "description": "自动清洗上传与重命名时的非法字符、路径片段与过长文件名。",
+  "entry": "plugin.py",
+  "protocolVersion": 2,
+  "hooks": [
+    "onFileUploadBefore",
+    "onFileRename"
+  ],
+  "permissions": [
+    "file:read"
+  ],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://cloud.berrywing.top/"
+}

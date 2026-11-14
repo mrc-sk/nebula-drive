@@ -86,3 +86,10 @@ guide/build/
 guide/
 backend/data.bak.*/
 backend/uploads/
+
+
+# V26-11.1：交付资产的运行产物与密钥（不入库）
+__pycache__/
+*.pyc
+official-plugins/official-signing-key.json
+wiki-site/.build-cache/

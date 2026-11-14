@@ -1,0 +1,11 @@
+{
+  "title": "文件名规范化",
+  "description": "自动清洗上传与重命名时的非法字符、路径片段与过长文件名。",
+  "tags": [
+    "文件",
+    "规范化",
+    "安全"
+  ],
+  "author": "NebulaDrive Official",
+  "license": "AGPL-3.0-only"
+}

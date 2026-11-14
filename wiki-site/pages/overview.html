@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>项目概览 README · NebulaDrive Wiki</title>
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<aside id="sidebar">
+<div class="brand">NebulaDrive Wiki<small>项目文档 · 部署运维 · 插件开发</small></div>
+<input id="search" placeholder="搜索文档…" autocomplete="off">
+<div id="searchResults"></div>
+<div class="nav-group"><h4>▶ 入门</h4><a class="active" href="../pages/overview.html">项目概览 README</a><a href="../pages/license.html">AGPL 许可通俗说明</a></div><div class="nav-group"><h4>◈ 插件开发</h4><a href="../pages/plugin-manual.html">插件制作手册</a><a href="../pages/plugin-v2-guide.html">插件平台 v2 完全指南</a><a href="../pages/plugin-system-guide.html">插件系统完全指南</a><a href="../pages/pbclus-spec.html">PBClus 格式规范</a><a href="../pages/plugin-hotload.html">插件热加载：进度与接续</a><a href="../pages/plugin-builder.html">可视化插件制作器使用说明</a></div><div class="nav-group"><h4>▤ 版本与交付</h4><a href="../pages/changelog.html">CHANGELOG 变更记录</a><a href="../pages/ai-era-delivery.html">智能时代交付说明</a><a href="../pages/v2-delivery.html">插件平台 v2 交付说明</a></div><div class="nav-group"><h4>▣ 开发档案</h4><a href="../pages/audit.html">不足总结与改进建议</a><a href="../pages/code-review.html">CODE REVIEW 代码审查</a><a href="../pages/fixlog.html">FIXLOG 修复记录</a><a href="../pages/backlog.html">新功能占位清单</a></div><div class="nav-group"><h4>⚙ 运维</h4><a href="../pages/ops-manual.html">站点部署与运维手册</a><a href="../pages/ticket-desk.html">智能 AI 工单站使用说明</a><a href="../pages/plugin-store.html">官方插件市场与插件清单</a></div><div class="nav-group"><h4>· 首页</h4><a href="../index.html">Wiki 首页</a></div>
+</aside>
+<main id="main">
+<div class="crumb"><a href="../index.html">首页</a> / <span>入门</span> / 项目概览 README</div>
+<article class="md"><p class="desc">NebulaDrive 是什么、功能清单与快速开始</p><h1 id="nebuladrive">NebulaDrive</h1>
+<blockquote>
+<p>新一代毛玻璃风格开源云存储系统 · 作者 <strong>mrc-sk</strong> · 仓库 <a href="https://github.com/mrc-sk/nebula-drive">https://github.com/mrc-sk/nebula-drive</a></p>
+<p>作者：<strong>mrc-sk</strong> · <a href="https://github.com/mrc-sk/nebula-drive">https://github.com/mrc-sk/nebula-drive</a></p>
+</blockquote>
+<p><a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" /></a>
+<a href="#"><img alt="Go Build" src="https://img.shields.io/badge/build-passing-brightgreen" /></a>
+<a href="#"><img alt="Coverage" src="https://img.shields.io/badge/coverage-42.2%25-green" /></a></p>
+<hr />
+<h2 id="_1">✨ 项目介绍</h2>
+<p>NebulaDrive 是一个对标 Cloudreve Pro 的<strong>自托管云存储系统</strong>，采用 Go + React 18 + Vite + TypeScript + TailwindCSS 构建，主打
+<strong>毛玻璃 / 亚克力设计语言</strong>、支持多存储后端、离线下载、WebDAV 访问、分享双因子、OAuth2.0 开放 API、协作编辑钩子、公共插件库，以及「智能时代」：智能搜索、近期常用、AI 助手、摘要与自动标签、可选开启的代码空间。</p>
+<hr />
+<h2 id="_2">🎯 核心特性</h2>
+<table>
+<thead>
+<tr>
+<th>模块</th>
+<th>功能</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>🗂️ <strong>文件管理</strong></td>
+<td>列表/网格双视图、版本控制（保留最近 10 版）、文件标签、拖拽上传（脉冲边框）、批量移动/复制/改存储策略、回收站 30 天自动清理</td>
+</tr>
+<tr>
+<td>☁️ <strong>多存储后端</strong></td>
+<td>本地 / AWS S3（aws-sdk-go-v2）/ 阿里云 OSS / 腾讯云 COS，官方 SDK 真实接入</td>
+</tr>
+<tr>
+<td>🌐 <strong>WebDAV</strong></td>
+<td>RFC 4918 方法集：PROPFIND / PROPPATCH / MKCOL / GET / HEAD / PUT / DELETE / MOVE / COPY / LOCK / UNLOCK / OPTIONS，支持 Range 下载；后台可自定义路径前缀 &amp; 方法集白名单。<br><strong>已知限制</strong>：PROPPATCH 按 RFC §9.2 返回 <code>207 + 403 Forbidden</code>（不写自定义 dead property），LOCK 为进程内排他锁（重启后失效）</td>
+</tr>
+<tr>
+<td>🚀 <strong>离线下载</strong></td>
+<td>HTTP / BT / 磁力，内嵌 aria2c 子进程 + JSON-RPC，未安装 aria2 自动回退</td>
+</tr>
+<tr>
+<td>🔐 <strong>认证安全</strong></td>
+<td>bcrypt + JWT + 单设备登录、2FA(TOTP) 可选、邮箱验证码、7 天记住登录</td>
+</tr>
+<tr>
+<td>🔗 <strong>分享双因子</strong></td>
+<td>提取码 + 密码两层保护，签名 URL 防盗链 5 分钟有效</td>
+</tr>
+<tr>
+<td>🤝 <strong>协作编辑</strong></td>
+<td>OnlyOffice 对接钩子 + MD/TXT 内置 Yjs CRDT，WebSocket 实时同步</td>
+</tr>
+<tr>
+<td>🧩 <strong>插件系统</strong></td>
+<td>平台 v2：<strong>108 个钩子</strong>（20 组，全部真接线）+ <strong>13 类注册型扩展点</strong>（storage/auth/notify/backup/page/ai…）+ 多语言运行时（php/python/node/go）+ 插件自建 HTTP 页面（<code>/ext/*</code>）+ 前端动态侧边栏/主题扩展 + <strong>PBClus 插件包</strong>（多平台 + Ed25519 签名 + 信任库）+ com.json 插件商店</td>
+</tr>
+<tr>
+<td>🤖 <strong>智能时代</strong></td>
+<td>智能搜索联想 + 近期常用/热门（本地算法兜底）、自然语言搜文件、AI 助手、摘要与自动标签；后台可配任意 OpenAI 兼容模型，也可由社区 <code>ai</code> Provider 完全接管，不绑厂商</td>
+</tr>
+<tr>
+<td>💻 <strong>代码空间</strong>（可选）</td>
+<td>后台开关默认<strong>关闭</strong>；开启后 CodeMirror 6 在线编辑 14 种语言，本地词法补全 + 可选 AI 补全，保存自动归档版本；独立 lazy chunk，关闭时不加载</td>
+</tr>
+<tr>
+<td>🔑 <strong>开放 API</strong></td>
+<td>OAuth2.0 Authorization Code + 个人访问令牌 PAT + /api/v1/* 标准接口</td>
+</tr>
+<tr>
+<td>🛡️ <strong>安全加固</strong></td>
+<td>CSP/X-Frame/HSTS 安全头、上传白名单+魔术字节、密码强度策略、IP 自动封禁、敏感操作二次确认</td>
+</tr>
+<tr>
+<td>📊 <strong>数据统计</strong></td>
+<td>KPI 卡片 + 流量趋势折线 + 文件类型饼图 + 用户活跃度热力图</td>
+</tr>
+<tr>
+<td>🎨 <strong>外观定制</strong></td>
+<td>站点名/Logo/主题色(6色预设+自定义)/ICP/页脚 后台可视化配置</td>
+</tr>
+<tr>
+<td>🥚 <strong>彩蛋模式</strong></td>
+<td>Logo 持续旋转 hover 暂停、imfeelinglucky 主题转盘、Konami ↑↑↓↓←→←→BA 文字摇摆、连点头像霓虹光环</td>
+</tr>
+<tr>
+<td>🌏 <strong>多语言</strong></td>
+<td>简体中文 / 繁體中文 / English / 日本語 / 한국어，5 种语言一键切换</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>智能化不强制联网</strong>：AI 与代码空间默认关闭，本地算法（联想、近期常用、词法补全、提取式摘要）开箱可用。配置模型后自动增强，未配置时所有功能自动降级但不会报错。详见 <a href="plugin-v2-guide.html"><code>docs/插件平台v2-完全指南.md</code></a> 第 14 章 与 <code>docs/插件制作手册.md</code> 第 13 章。</p>
+</blockquote>
+<hr />
+<h2 id="_3">🚀 快速开始</h2>
+<h3 id="_4">方式一：一键试用包（推荐给想快速体验的人）</h3>
+<p>不想装环境的话，用这个：</p>
+<pre><code class="language-bash"># 产出试用包（构建者侧）
+packaging\build-release.bat          # Windows
+./packaging/build-release.sh          # Linux / macOS
+./packaging/build-release.sh --all    # 在 Linux 上交叉编译三个平台
+
+# → release\NebulaDrive-&lt;版本&gt;-&lt;系统&gt;-&lt;架构&gt;\
+
+# 使用者侧：解压后运行对应脚本即可
+#   Windows : start.bat        （双击）
+#   Linux   : ./start.sh
+#   macOS   : ./start.sh
+</code></pre>
+<p><strong>构建者只需装 Go 1.25+</strong>；前端产物 <code>backend/frontend_dist/</code> 随仓库提交，
+所以<strong>不需要 Node</strong>。使用方则什么都不用装。</p>
+<p><strong>单二进制 45 MB，打成 zip 约 15 MB</strong>
+（<code>-trimpath -ldflags="-s -w"</code> 剥离符号表，比默认小 27%）。
+前端通过 <code>go:embed</code> 内嵌进二进制，<strong>使用者无需安装 Go / Node / 数据库</strong>。</p>
+<p><code>start.sh</code> 会自动补加执行权限，并检查二进制格式是否与当前系统匹配
+（拿了 Windows 版会得到明确提示，而不是难以理解的 <code>Exec format error</code>）。</p>
+<p><code>start.bat</code> 做的事：
+- <code>-autoport</code> 自动挑选空闲端口（5212 起，冲突时顺延），避免"端口被占用"起不来
+- <code>-open</code> 启动后自动打开浏览器
+- 缺文件 / 端口全占时给中文提示，而不是命令行报错
+- 前台运行，日志直接显示（不另开黑框）</p>
+<p><code>packaging\试用说明.md</code> 面向使用者，含安装向导步骤、可试的功能、常见问题。</p>
+<h3 id="_5">方式二：单二进制运行</h3>
+<pre><code class="language-bash"># 下载发行版或自行编译
+./nebula
+
+# 默认监听 :5212，浏览器打开
+# http://localhost:5212/   → 首次访问自动跳安装向导
+</code></pre>
+<p>启动后控制台会打印访问地址和下一步提示：</p>
+<pre><code>  ────────────────────────────────────────────
+   访问地址：http://127.0.0.1:5212
+
+   首次使用：请在浏览器打开上面的地址，
+             按安装向导创建管理员账号。
+             （默认使用 SQLite，无需额外数据库）
+  ────────────────────────────────────────────
+</code></pre>
+<h3 id="_6">常用启动参数</h3>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-autoport</code></td>
+<td>自动挑选空闲端口（5212 起试30 个），忽略配置里的端口</td>
+</tr>
+<tr>
+<td><code>-open</code></td>
+<td>启动后自动打开浏览器</td>
+</tr>
+<tr>
+<td><code>-listen &lt;addr&gt;</code></td>
+<td>指定监听地址，如 <code>127.0.0.1:6000</code></td>
+</tr>
+<tr>
+<td><code>-data &lt;dir&gt;</code></td>
+<td>数据目录，默认 <code>data</code>（含 SQLite 文件与加密密钥）</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><code>-autoport</code> 优先级高于配置文件里的 <code>listen</code>。这样"上次安装留下的端口被别人占了"
+不会导致起不来。</p>
+</blockquote>
+<h3 id="_7">源码编译</h3>
+<pre><code class="language-bash"># 后端 (Go 1.25+)
+cd backend
+go build -o nebula .
+
+# 前端 (Node 20+)
+cd ../frontend
+npm install
+npm run build
+# 产物会被 go embed 嵌入到后端二进制
+</code></pre>
+<h3 id="docker-deb-rpm">Docker / deb / rpm 打包</h3>
+<pre><code class="language-bash"># deb + rpm
+nfpm package -p deb
+nfpm package -p rpm
+</code></pre>
+<hr />
+<h2 id="plugins">🧩 公共插件库（plugins 分支）</h2>
+<blockquote>
+<p>社区可以做好插件往 <strong><code>plugins</code></strong> 分支提交 PR。
+商店目录 <code>com.json</code> 在该分支根，管理端「插件 → 商店」自动拉取展示；
+<strong>目录里必须有对应的插件目录</strong>，否则条目会被移除（曾清掉 4 个空壳条目）。</p>
+</blockquote>
+<h3 id="_8">插件目录结构</h3>
+<pre><code>plugins/
+├── _examples/              ← 现有插件（kebab-case 目录）
+│   ├── smtp-email/         ← plugin.json + main.go + go.mod + README
+│   └── referer-guard/
+├── your-plugin/            ← 新插件放这里
+│   ├── plugin.json         ← 元数据（name/entry/protocolVersion/hooks 必需）
+│   ├── main.go             ← Go 插件逻辑（也可用 php/python/node，见 v2 契约）
+│   ├── go.mod
+│   └── README.md
+├── com.json                ← 商店目录（合并 PR 时更新此文件）
+└── README.md               ← 插件提交指南
+</code></pre>
+<h3 id="_9">插件提交步骤</h3>
+<ol>
+<li>从 <strong><code>plugins</code></strong> 分支 checkout 出 feature/xxx</li>
+<li>按上述结构放好插件代码 + plugin.json（<strong>不要</strong>提交运行产物——
+   该分支曾因误提交 <code>data/</code> 与数据库文件而清理过）</li>
+<li>更新 <code>com.json</code> 加上你的条目（id 必须与目录名一致）</li>
+<li>提交 PR，目标分支选 <strong>plugins</strong>（不是 main）；CI 审核通过后合并</li>
+</ol>
+<h3 id="main-examplesplugins7">本仓库自带的示例插件（main 分支 <code>examples/plugins/</code>，7 个可运行）</h3>
+<p>referer-guard（防盗链）· smtp-email（邮件）· hmac-auth（HMAC 鉴权）·
+notify-webhook（通知转发）· backup-mirror（备份镜像）·
+download-limiter（下载限流）· collab-redirect（协作跳转）。
+打包分发用 <code>pbclus-pack</code>（见 <code>docs/PBClus-格式规范.md</code>）。</p>
+<hr />
+<h2 id="_10">🏗️ 架构说明</h2>
+<pre><code>nebula-drive/
+├── backend/
+│   ├── conf/            # 配置层（AES-GCM 加密敏感字段）
+│   ├── models/          # GORM 数据模型
+│   ├── middleware/      # 认证/限流/安全头/IP 封禁/二次确认
+│   ├── controllers/     # 业务控制器（文件/分享/用户/管理/WebDAV）
+│   ├── pkg/
+│   │   ├── db/          # SQLite/MySQL/PostgreSQL 多库支持
+│   │   ├── jwt/         # JWT 签发解析
+│   │   ├── plugin/      # 插件平台 v2（99 钩子/注册型扩展点/三文件契约）
+│   │   │   └── pbclus/  # PBClus 插件包容器（多平台+签名+信任库）
+│   │   ├── aria2/       # aria2 JSON-RPC 客户端
+│   │   ├── tls/         # ACME + 手动证书
+│   │   └── util/        # 工具（UUID/MD5/buffer 池）
+│   ├── filesystem/      # 存储抽象层（Local/S3/OSS/COS/缩略图）
+│   ├── migrations/      # schema_migrations 版本化迁移
+│   ├── routers/         # Gin 路由注册
+│   ├── webdav/          # WebDAV RFC 4918 处理器
+│   └── dist/            # go embed 嵌入的前端静态资源
+└── frontend/
+    ├── src/
+    │   ├── components/  # UI 组件（通知铃铛/主题切换/语言切换/播放器/预览）
+    │   ├── layouts/     # 主布局（侧边栏+顶栏+移动端4Tab）
+    │   ├── pages/       # 登录/文件/分享/管理/安装向导
+    │   ├── i18n/        # 5 种语言包
+    │   ├── store/       # zustand 状态（主题/通知/用户）
+    │   └── api/         # axios 客户端
+    └── index.css        # 毛玻璃/亚克力/旋转彩蛋/动画
+</code></pre>
+<h3 id="_11">部署形态</h3>
+<p>当前为<strong>单实例设计</strong>。以下状态保存在进程内存中，多副本部署需注意：</p>
+<table>
+<thead>
+<tr>
+<th>状态</th>
+<th>位置</th>
+<th>多副本后果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WebDAV 排他锁</td>
+<td><code>webdav.go</code> 的 <code>davLocks</code> map</td>
+<td>副本间锁不共享 → 并发写可能互相覆盖</td>
+</tr>
+<tr>
+<td>登录失败计数</td>
+<td><code>middleware/ip_guard.go</code> 的 <code>loginFailures</code> map</td>
+<td>计数不共享 → 攻击者可用 N 个副本各试 9 次绕过封禁阈值（封禁<strong>记录</strong>在 DB，判定是共享的，但触发需要凑满 10 次）</td>
+</tr>
+<tr>
+<td>验证码触发阈值</td>
+<td>同上（3 次失败后要求验证码）</td>
+<td>同上</td>
+</tr>
+<tr>
+<td>通用限流</td>
+<td><code>middleware/rate_limit.go</code> 的 <code>limiter.records</code></td>
+<td>限流额度按副本数倍增</td>
+</tr>
+<tr>
+<td>分片上传会话</td>
+<td><code>controllers/file.go</code> 的会话 map</td>
+<td>必须开启会话粘性（sticky session）</td>
+</tr>
+</tbody>
+</table>
+<p>需要水平扩展时，数据库可切 MySQL / PostgreSQL（<code>conf</code> 已支持），IP 封禁记录也已落库可直接共享；上表前四项需先外置到 Redis 等共享存储。</p>
+<hr />
+<h2 id="ci">🔧 CI / 持续集成</h2>
+<p>两个 GitHub Actions 工作流（<code>.github/workflows/</code>）：</p>
+<table>
+<thead>
+<tr>
+<th>工作流</th>
+<th>触发条件</th>
+<th>做什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>go-ci.yml</code></td>
+<td>改 <code>backend/**</code> 或工作流本身</td>
+<td><code>go build</code> + <code>go vet</code> + <code>go test -race</code>（ubuntu + windows 双平台，需 cgo）</td>
+</tr>
+<tr>
+<td><code>frontend-ci.yml</code></td>
+<td>改 <code>frontend/**</code> 或工作流本身</td>
+<td><code>npm ci</code> + <code>npm run build</code>（<code>tsc -b</code> 严格类型检查 + <code>vite</code> 生产构建），并校验 <code>backend/frontend_dist</code> 与构建产物一致</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>⚠️ <strong>内嵌前端同步约定</strong>：<code>backend/frontend_dist</code> 被 Go <code>go:embed</code> 打进单二进制。
+改了前端源码后，必须在 <code>frontend/</code> 下执行 <code>npm run build</code> 再一并提交 <code>backend/frontend_dist/</code>，
+否则 <code>frontend-ci.yml</code> 的同步守卫会判红。</p>
+</blockquote>
+<hr />
+<h2 id="_12">📝 开源协议</h2>
+<blockquote>
+<p><strong>GNU Affero General Public License v3.0（AGPL-3.0）</strong></p>
+<p>Copyright (c) 2026 <strong>mrc-sk</strong> · Repository: <a href="https://github.com/mrc-sk/nebula-drive">https://github.com/mrc-sk/nebula-drive</a></p>
+<p>第一次听说 AGPL？看 <a href="./AGPL-通俗说明.md">AGPL-通俗说明.md</a>，有说人话的版本和常见疑问解答。</p>
+</blockquote>
+<h3 id="_13">✅ 你可以</h3>
+<ul>
+<li><strong>自托管</strong>：给自己团队 / 公司 / 客户部署，不需要通知作者</li>
+<li><strong>修改与二次开发</strong>：任意修改、按需定制，自用无需公开</li>
+<li><strong>收费服务</strong>：可以收费卖运维、部署、定制开发等服务</li>
+</ul>
+<h3 id="_14">🔒 你必须</h3>
+<p>AGPL-3.0 的核心义务是<strong>网络服务同样要开源</strong>（这是它与 GPL 的唯一区别）：</p>
+<ol>
+<li><strong>对外提供网络服务时</strong>：若把本程序或其修改版部署到服务器、供他人通过网络访问，
+   <strong>必须向这些使用者提供完整的对应源码</strong>（含你的修改）。</li>
+<li><strong>分发二进制时</strong>：随附完整源码，或提供获取源码的书面要约。</li>
+<li><strong>保留版权与许可声明</strong>：不得删除 <a href="./LICENSE">LICENSE</a> 中的版权声明。</li>
+<li><strong>标注修改</strong>：对原代码做过修改的部分需注明。</li>
+</ol>
+<blockquote>
+<p><strong>常见疑问</strong></p>
+<table>
+<thead>
+<tr>
+<th>场景</th>
+<th>是否需要公开你的修改源码</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>内部使用，不对外提供服务</td>
+<td>❌ 不需要（自部署自用完全自由）</td>
+</tr>
+<tr>
+<td>改了代码自己部署，不对外开放</td>
+<td>❌ 不需要</td>
+</tr>
+<tr>
+<td>改了代码部署到公网供他人使用</td>
+<td>✅ <strong>需要</strong>（属对外提供网络服务，AGPL §13）</td>
+</tr>
+<tr>
+<td>编译成二进制分发 / 卖给客户，客户自行部署</td>
+<td>✅ <strong>需要</strong>（属"分发"，须随附或书面要约提供源码，§6）</td>
+</tr>
+<tr>
+<td>用本项目搭建 SaaS 收费</td>
+<td>✅ <strong>需要</strong>（包括你基于它做的修改）</td>
+</tr>
+</tbody>
+</table>
+<p>简言之：<strong>自用随便，一旦让别人用上（无论发给他们，还是让他们上网访问），就得给源码。</strong>
+注意：AGPL <strong>不允许</strong>闭源分发衍生版本——这与 MIT 等宽松协议不同。</p>
+<p>简单记：<strong>只要"让别人用上"，就要开源你的修改</strong>——不论是把软件发给他们，还是让他们上网访问。
+唯一"什么都不用做"的情况是：<strong>只给你自己（或你自己的组织）用</strong>。</p>
+</blockquote>
+<p>完整条款见 <a href="./LICENSE">LICENSE</a>；通俗解释见 <a href="./AGPL-通俗说明.md">AGPL-通俗说明.md</a>。</p>
+<hr />
+<h2 id="_15">❤️ 致谢</h2>
+<p>作者：<strong>mrc-sk</strong> · <a href="https://github.com/mrc-sk">https://github.com/mrc-sk</a>
+仓库：<a href="https://github.com/mrc-sk/nebula-drive">https://github.com/mrc-sk/nebula-drive</a></p>
+<blockquote>
+<p>本项目基于 <strong>NebulaDrive (<a href="https://github.com/mrc-sk/nebula-drive">https://github.com/mrc-sk/nebula-drive</a>)</strong> 开发，
+原作者 <strong>mrc-sk</strong>。感谢所有为公共插件库贡献代码的社区成员。</p>
+</blockquote></article>
+<div class="foot">NebulaDrive Wiki · 由项目文档自动构建 · 最后生成 2026-11-14</div>
+</main>
+<script src="../assets/app.js"></script></body></html>

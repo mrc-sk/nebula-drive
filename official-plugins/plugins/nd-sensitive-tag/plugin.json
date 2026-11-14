@@ -1,0 +1,18 @@
+{
+  "name": "nd-sensitive-tag",
+  "title": "敏感文件标记",
+  "version": "1.0.0",
+  "author": "NebulaDrive Official",
+  "description": "按关键词扫描文件名，命中后自动打上「需复核」标签，不拦截上传。",
+  "entry": "plugin.py",
+  "protocolVersion": 2,
+  "hooks": [
+    "onContentScan",
+    "onFileUploadAfter"
+  ],
+  "permissions": [
+    "content:read"
+  ],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://cloud.berrywing.top/"
+}

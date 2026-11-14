@@ -1,0 +1,19 @@
+{
+  "name": "nd-login-brake",
+  "title": "登录爆破抑制",
+  "version": "1.0.0",
+  "author": "NebulaDrive Official",
+  "description": "同一 IP / 账号短时间连续登录失败后临时锁定，抑制暴力破解。",
+  "entry": "plugin.py",
+  "protocolVersion": 2,
+  "hooks": [
+    "onAuthBeforeLogin",
+    "onAuthLoginFailed",
+    "onAuthLoginSuccess"
+  ],
+  "permissions": [
+    "auth:read"
+  ],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://cloud.berrywing.top/"
+}

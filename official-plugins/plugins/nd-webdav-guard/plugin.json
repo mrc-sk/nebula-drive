@@ -1,0 +1,18 @@
+{
+  "name": "nd-webdav-guard",
+  "title": "WebDAV 写保护",
+  "version": "1.0.0",
+  "author": "NebulaDrive Official",
+  "description": "按需把 WebDAV 切成只读，或保护指定目录不被 WebDAV 写入/删除。",
+  "entry": "plugin.py",
+  "protocolVersion": 2,
+  "hooks": [
+    "onWebDAVPut",
+    "onWebDAVDelete"
+  ],
+  "permissions": [
+    "webdav:read"
+  ],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://cloud.berrywing.top/"
+}

@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CHANGELOG 变更记录 · NebulaDrive Wiki</title>
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<aside id="sidebar">
+<div class="brand">NebulaDrive Wiki<small>项目文档 · 部署运维 · 插件开发</small></div>
+<input id="search" placeholder="搜索文档…" autocomplete="off">
+<div id="searchResults"></div>
+<div class="nav-group"><h4>▶ 入门</h4><a href="../pages/overview.html">项目概览 README</a><a href="../pages/license.html">AGPL 许可通俗说明</a></div><div class="nav-group"><h4>◈ 插件开发</h4><a href="../pages/plugin-manual.html">插件制作手册</a><a href="../pages/plugin-v2-guide.html">插件平台 v2 完全指南</a><a href="../pages/plugin-system-guide.html">插件系统完全指南</a><a href="../pages/pbclus-spec.html">PBClus 格式规范</a><a href="../pages/plugin-hotload.html">插件热加载：进度与接续</a><a href="../pages/plugin-builder.html">可视化插件制作器使用说明</a></div><div class="nav-group"><h4>▤ 版本与交付</h4><a class="active" href="../pages/changelog.html">CHANGELOG 变更记录</a><a href="../pages/ai-era-delivery.html">智能时代交付说明</a><a href="../pages/v2-delivery.html">插件平台 v2 交付说明</a></div><div class="nav-group"><h4>▣ 开发档案</h4><a href="../pages/audit.html">不足总结与改进建议</a><a href="../pages/code-review.html">CODE REVIEW 代码审查</a><a href="../pages/fixlog.html">FIXLOG 修复记录</a><a href="../pages/backlog.html">新功能占位清单</a></div><div class="nav-group"><h4>⚙ 运维</h4><a href="../pages/ops-manual.html">站点部署与运维手册</a><a href="../pages/ticket-desk.html">智能 AI 工单站使用说明</a><a href="../pages/plugin-store.html">官方插件市场与插件清单</a></div><div class="nav-group"><h4>· 首页</h4><a href="../index.html">Wiki 首页</a></div>
+</aside>
+<main id="main">
+<div class="crumb"><a href="../index.html">首页</a> / <span>版本与交付</span> / CHANGELOG 变更记录</div>
+<article class="md"><p class="desc">各版本功能与修复明细</p><h1 id="changelog">CHANGELOG</h1>
+<blockquote>
+<p>作者 <strong>mrc-sk</strong> · 仓库 <a href="https://github.com/mrc-sk/nebula-drive">https://github.com/mrc-sk/nebula-drive</a></p>
+</blockquote>
+<hr />
+<h2 id="v26-111-2026-11-14">📌 V26-11.1 — 上线热修复（2026-11-14）· 当前最新 / 置顶</h2>
+<blockquote>
+<p>上线前终检发现 3 处"对外物料与答复准确性"问题，均为<strong>小修</strong>，不涉及网盘主程序、插件平台、AI 架构等大改，因此不需要重新编译主程序二进制。产品功能与部署形态不变。</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>类别</th>
+<th>问题</th>
+<th>修复</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>对外物料 · 安全</td>
+<td>4 分钟宣传片在「工单站 / Wiki」两镜的浏览器地址栏与「三站点」卡片中印出源站公网 IP <code>YOUR_SERVER_IP</code> 与内网端口 <code>8081/8082</code>；该片将对外投放，等于把绕过 Cloudflare 的源站地址公开</td>
+<td>画面地址栏改为站点功能名，卡片去除端口号；全片重新渲染</td>
+</tr>
+<tr>
+<td>2</td>
+<td>AI 答复 · 准确性</td>
+<td>本地小模型对「忘记密码」类工单会编造「客服电话 / 邮箱找回 / 找回密码」等本站不存在的功能（邮件服务未启用、无客服）</td>
+<td>工单站与模型网关注入「站点事实」硬约束（system.txt + SITE_FACTS），FAQ 密码条目同步纠正</td>
+</tr>
+<tr>
+<td>3</td>
+<td>版本口径</td>
+<td>片尾 / 播放页 / 发布文案仍标注 <code>V26-11.0</code></td>
+<td>全部统一为 <code>V26-11.1</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>置顶说明</strong>：本条目为当前最新发布版本；配套《V26-11.1 热修复公告》可直接用于 Release 正文、视频置顶评论与 Wiki 首页公告条。</p>
+<blockquote>
+<p>未变更（终检全绿、无需重做）：六个 systemd 服务（active + 开机自启）、每用户 1 GB 配额、注册关闭、插件市场 10 个官方插件与签名信任库、本地模型网关、Wiki 18 篇文档、工单站配置页 404 收敛、8083/8084 仅回环监听。</p>
+</blockquote>
+<hr />
+<h2 id="v26-110-2026-11-08">V26-11.0 — 智能时代（2026-11-08）</h2>
+<blockquote>
+<p>让网盘「智能化」，但不绑定任何模型厂商。核心思路沿用插件平台 v2：
+宿主内置永远可用的本地算法，站长可选配 OpenAI 兼容模型，社区插件可完全接管。</p>
+</blockquote>
+<h3 id="ai">🤖 三档 AI 能力</h3>
+<table>
+<thead>
+<tr>
+<th>档</th>
+<th>内容</th>
+<th>依赖</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>L0 本地算法</strong></td>
+<td>搜索联想、近期常用、热门、词法补全、提取式摘要与标签</td>
+<td>零配置、零出域、零成本，<strong>永远可用</strong></td>
+</tr>
+<tr>
+<td><strong>L1 AI 网关</strong></td>
+<td>后台可配 OpenAI 兼容端点（OpenAI / 智谱 / DeepSeek / Ollama / 自建），统一超时、温度、Token 上限、按用户限流、审计</td>
+<td>一个 <code>net/http</code> 客户端，无第三方 SDK</td>
+</tr>
+<tr>
+<td><strong>L3 插件接管</strong></td>
+<td>订阅 <code>onAIProviderResolve</code> 或注册 <code>kind=ai</code>，写 <code>handled</code>+<code>result</code> 即完全替换模型</td>
+<td>复用 v2 注册型扩展点</td>
+</tr>
+</tbody>
+</table>
+<p>顺序固定 <strong>插件 → 网关 → 本地</strong>，任一档不可用自动降级；没填 key 时功能不报错，只是「不那么聪明」。</p>
+<h3 id="v2-protocolversion">🧩 协议扩展（v2 内增量，<code>ProtocolVersion</code> 不变）</h3>
+<ul>
+<li>新增 <code>GroupAI</code> 分组与 <strong>9 个 AI 钩子</strong>：<code>onAIRequest</code>（可拦截外发 / 改写 prompt）、<code>onAIResponse</code>、<code>onAIProviderResolve</code>、<code>onAIComplete</code>、<code>onAIRecommend</code>、<code>onAISearch</code>、<code>onAISummary</code>、<code>onAIAsk</code>、<code>onAIConfigChange</code>。</li>
+<li>新增第 <strong>13 类</strong>注册型能力 <code>ai</code>，默认钩子 <code>onAIProviderResolve</code>。</li>
+<li>钩子总数 <strong>99 → 108</strong>，全部 <code>Wired=true</code>，静态扫描 <strong>0 个缺调用点</strong>；v1 插件零改动继续跑。</li>
+</ul>
+<h3 id="_1">✨ 功能</h3>
+<ul>
+<li><strong>全局智能搜索框</strong>：补齐了此前「后端有 10 维搜索 + 搜索历史接口、前端却根本没有搜索框也没调用」的缺口；下拉含联想词、搜索历史、近期常用、热门，<code>Ctrl/⌘+K</code> 聚焦。新增搜索结果页，支持关键词与自然语言双模式。</li>
+<li><strong>近期常用 / 热门</strong>：新增 <code>FileAccess</code> 埋点（预览 / 下载 / 编辑异步写入、60 秒去重、90 天保留），支持一键清空本人埋点。</li>
+<li><strong>AI 场景</strong>：自然语言搜文件、文件摘要与自动标签（带缓存，内容变更自动失效）、AI 助手侧边栏、代码补全增强。</li>
+<li><strong>代码空间</strong>（后台总开关<strong>默认关闭</strong>）：CodeMirror 6 在线编辑器，14 种语言高亮，L0 标识符补全 + 可选模型补全，<code>Ctrl/⌘+S</code> 保存、<code>Alt+/</code> 补全。保存走「新对象 + 版本归档 + 主记录更新 + 配额调整」同一事务，避免秒传共享文件被误改；只接受 ≤ 2 MB UTF-8 文本。编辑器是独立 lazy chunk，开关关闭时<strong>不加载</strong>。</li>
+<li><strong>后台 AI 设置</strong>：总开关、代码空间开关、baseURL / key（脱敏回显）/ 模型 / 超时 / Token / 温度 / 限流、5 个场景开关、连通性测试、用量概览与最近日志。</li>
+<li><strong>审计</strong>：<code>AIAuditLog</code> 只记长度、耗时、Token、成功/失败，<strong>不记录 prompt 正文</strong>。</li>
+</ul>
+<h3 id="_2">🔒 边界</h3>
+<p>按站长确认采用「配置即用」：填写密钥后，文件名与代码片段会发送给所选模型服务商，宿主不强制脱敏，但 <code>onAIRequest</code> 可改写 <code>ctx.prompt</code> 做插件侧脱敏，或直接 <code>deny</code> 阻止外发。不希望出域时只需不填 key，装一个本地模型插件即可。</p>
+<h3 id="_3">🛠 工具与验证</h3>
+<ul>
+<li>插件制作器（Python 桌面版 + HTML 版）钩子表同步到 <strong>108 条</strong>，<code>PROVIDER_KINDS</code> 同步到 <strong>13 类</strong>；21 套模板自检全绿。</li>
+<li><code>go build</code> / <code>go vet</code> / <code>go test ./... -count=1</code> 全绿（新增 AI 网关 10 项单测）；<code>npx tsc -b</code> / <code>npx vite build</code> 全绿。</li>
+<li>文档：《插件制作手册》新增第 13 章「AI 智能扩展」，《插件平台 v2 完全指南》新增第 14 章。</li>
+</ul>
+<hr />
+<h2 id="v26-100-d-beta2026-10-05">V26-10.0-d — Beta（2026-10-05）</h2>
+<blockquote>
+<p><strong>插件系统从「装饰品」变成真的能用。</strong> 此前管理后台的插件页看着挺完整，
+但装不了、启不动、扩展点数量是随机数 —— 因为后端压根没有加载第三方代码的能力。</p>
+</blockquote>
+<h3 id="json-rpc">✨ 插件热加载体系（独立子进程 + JSON-RPC）</h3>
+<p>插件以<strong>独立子进程</strong>运行，通过 stdin/stdout 上的 JSON-RPC 2.0 与宿主通信。
+<strong>启用 = 拉起进程，禁用 = 杀进程，主服务不重启。</strong></p>
+<p>选型说明：不用 Go 原生 <code>plugin.Open</code>（仅 Linux/macOS 且需 cgo，
+<strong>Windows 根本编译不了</strong>，而本项目日常在 Windows 开发、要打包给 Linux 朋友）；
+不用 WASM（需 CGO，Go host function 绑定成本过高）。</p>
+<ul>
+<li>
+<p><strong>协议层</strong> <code>pkg/plugin/manifest.go</code>
+  <code>plugin.json</code> 清单（name/version/entry/hooks/protocolVersion/permissions/license），
+  逐字段校验。<code>entry</code> <strong>禁止路径分隔符</strong> —— 否则 manifest 能让宿主执行
+  插件目录外的任意文件，等于开放任意代码执行。协议版本不匹配直接拒载。</p>
+</li>
+<li>
+<p><strong>宿主</strong> <code>pkg/plugin/host/</code>
+  子进程生命周期、RPC 编解码、调用超时（默认 2s）、崩溃指数退避自动重启
+  （连续 5 次停止并转人工）、环形日志缓冲（500 条）。
+  进程组隔离：Windows 用 <code>taskkill /T</code> 避免留孤儿进程，Unix 用 <code>kill(-pgid)</code>。</p>
+</li>
+<li>
+<p><strong>安装器</strong> <code>pkg/plugin/install/</code>
+  zip slip 防护、zip bomb 限额（解压 256MB / 单文件 64MB / 条目 2000）、
+  拒绝符号链接、拦截 Windows 保留名（<code>CON</code>/<code>NUL</code>/<code>COM1</code>…）。</p>
+</li>
+<li>
+<p><strong>示例插件</strong> <code>examples/plugins/referer-guard/</code>
+  独立 module（不 import 宿主），实现 <code>onAntiLeech</code> 的 Referer 白名单，
+  支持前缀 / <code>*.</code> 通配 / <code>re:</code> 正则三种写法，附下载审计日志。</p>
+</li>
+</ul>
+<h3 id="_4">🛡️ 插件协议与强制关卡</h3>
+<p>首次进入插件页会弹窗要求阅读<strong>插件协议</strong>（8 节，含权限风险、拦截语义、
+AGPL 合规要求）。两条硬约束：</p>
+<ul>
+<li><strong>必须滚动到底</strong>才能勾选同意 —— 一打开就能点同意等于没要求同意；</li>
+<li><strong>后端强制</strong>（<code>requireAgreement</code>），未同意时安装/启用接口直接 403。
+  只靠前端弹窗的话，直接调 API 就能绕过。</li>
+</ul>
+<p>协议正文硬编码在宿主内置（<code>pkg/plugin/agreement.go</code>），
+不从配置文件读 —— 从外部读意味着部署者能改掉管理员看到的内容。
+协议版本升级后需重新同意。</p>
+<h3 id="_5">🔧 修复</h3>
+<ul>
+<li>
+<p><strong>「启用/禁用」开关是装饰性的</strong>
+  <code>models.Plugin.Enabled</code> <strong>此前没有任何生产代码读取</strong> ——
+  <code>grep "Enabled" | grep -i plugin</code> 唯一命中是测试数据。
+  <code>TogglePlugin</code> 只翻转数据库布尔值，插件代码根本不读它。
+  现在启用会真正拉起子进程，并把 <code>status</code>/<code>pid</code>/运行错误返回给前端；
+  数据库说启用但进程没跑时，列表会<strong>显式提示这个矛盾</strong>。</p>
+</li>
+<li>
+<p><strong>扩展点数量是随机数</strong>
+  前端 <code>client.ts</code> <strong>没有 <code>pluginsHooks</code> 方法</strong>，代码 fallback 到同样不存在的
+  <code>api.get</code>，于是走进 mock 分支：<code>Math.random()</code> 生成 handler 数量。
+  页面上显示的数字每次刷新都变，与真实情况无关。现在接真实接口。</p>
+</li>
+<li>
+<p><strong>插件页的「安装」是 <code>alert()</code> 占位</strong>，商店拉取失败时一律返回空数组
+  （分不清"商店为空"还是"拉取失败"）。现在真实安装，失败给明确原因，
+  商店条目逐条校验（坏条目跳过并说明原因，不让一个坏条目打不开整个商店）。</p>
+</li>
+<li>
+<p><strong><code>Config</code> 字段带 <code>json:"-"</code></strong>，管理端根本拿不到插件配置，
+  插件作者无法配置任何东西。已放开。</p>
+</li>
+<li>
+<p><strong>宿主退出后插件变孤儿进程</strong>。新增 signal 处理，
+  退出前 <code>StopPlugins()</code> 清理；第二次信号恢复默认行为允许强杀。</p>
+</li>
+</ul>
+<h3 id="_6">⚙️ 其它</h3>
+<ul>
+<li><code>onRateLimit</code> 是异步钩子但限流中间件需要拦截决策。
+  新增 <code>RateLimitGate</code> / <code>Dispatcher.DispatchSync</code>：
+  钩子保持异步（不拖累另外 6 个不读结果的热路径），
+  仅在需要决策处强制同步等待。</li>
+<li>进程内 handler 加 panic recover 与 5s 超时；
+  <code>Fire</code> 改为先复制 handler 快照再释放读锁（锁内做 IPC 往返会卡死 <code>Register</code>）。</li>
+<li>新增 migration v6（插件表字段 + 存量数据补默认许可）。</li>
+<li>发版脚本扩展到 5 平台（新增 linux/arm64、darwin/arm64），
+  注入版本号（插件可据此做版本判断），生成 <code>SHA256SUMS.txt</code>。</li>
+</ul>
+<h3 id="_7">✅ 验证</h3>
+<ul>
+<li><code>go build ./...</code> / <code>go vet ./...</code> 全过</li>
+<li>交叉编译 5 平台：windows-amd64、linux-amd64、linux-arm64、darwin-arm64、darwin-amd64</li>
+<li><code>go test ./...</code> 全包通过（插件宿主 17 项：崩溃隔离、超时、20 路并发、
+  崩溃自动重启、init 失败拒绝、拦截语义）</li>
+<li>前端 <code>tsc -b</code> + <code>vite build</code> 通过，i18n 五语言门禁「全部 key 齐全」</li>
+<li>实机冒烟：真实启动二进制 → 装插件 → 启用 → 验证外站 Referer 被 403 拦截
+  → 禁用 → 验证拦截消失且<strong>主服务未重启</strong>、插件子进程已回收</li>
+</ul>
+<hr />
+<h2 id="v26-100-c-beta2026-10-04">V26-10.0-c — Beta（2026-10-04）</h2>
+<blockquote>
+<p><strong>分享页整条链路接通了。</strong> 此前下载按钮点不动、预览区全是假内容 —— 分享功能等于只有一个链接能打开。</p>
+</blockquote>
+<h3 id="_8">🐛 修复</h3>
+<ul>
+<li><strong>分享页的下载按钮是个纯装饰</strong>
+  <code>pages/Share.tsx</code> 里的下载按钮<strong>没有 <code>onClick</code></strong>，点了什么都不发生。
+  更根本的是后端根本没有可用的下载端点：分享接收方通常没登录，
+  而登录下载接口挂在 <code>Auth</code> 中间件后面 —— 整条链路是断的。</li>
+</ul>
+<p>新增 <code>GET /api/shares/:id/download</code>（挂在 <code>api</code> 组上，不带 <code>Auth</code>）：
+  校验过期 / 密码 / 提取码，可选 <code>?fileId=</code> 下载分享目录内的某个子文件，
+  用 <code>gorm.Expr</code> 在数据库侧自增 <code>downloads</code>（并发下载不会互相覆盖），
+  并记<code>share_download</code> 审计日志。</p>
+<ul>
+<li><strong>「预览」区显示的是硬编码的假内容</strong>
+  <code>Preview</code> 组件里图片用的是外部占位图 URL
+  （<code>trae-api-cn.mchost.guru/...text_to_image?prompt=Nebula cloud storage...</code>），
+  文本显示一段写死的假代码，视频音频只有一行字 —— 不管用户分享的是什么，都是这套内容。</li>
+</ul>
+<p>现按真实类型分别接真实内容：图片走 <code>&lt;img&gt;</code>、视频走 <code>&lt;video controls&gt;</code>、
+  音频走 <code>&lt;audio controls&gt;</code>、文本用 fetch 读取（超过 512KB 截断并在界面上说明截了多少）。
+  新增 <code>GET /api/shares/:id/preview</code>：与下载同一套鉴权，但用
+  <code>Content-Disposition: inline</code>（用 attachment 的话 <code>&lt;img src&gt;</code> 只会弹下载框），
+  且<strong>不计下载次数</strong> —— 预览不是下载。</p>
+<ul>
+<li>
+<p><strong><code>fileId</code> 可被构造成越权读取任意文件</strong>
+  下载端点接受客户端传的 <code>?fileId=</code>。如果不校验，任何人拿一个有效分享 ID
+  拼上 <code>?fileId=&lt;任意文件ID&gt;</code> 就能把别人账号下的文件拖走 ——
+  分享链接会变成一个越权读取入口。
+  现用 <code>fileWithinShare</code> 逐级向上验证祖先链：每层都必须
+  <code>owner_id == 分享所有者 &amp;&amp; 未删除</code>，最后落到分享根 ID，<code>maxDepth=64</code> 防parent 成环。
+  失败时不区分「不存在」与「越权」—— 告诉攻击者哪个 ID 存在本身就是信息泄露。</p>
+</li>
+<li>
+<p><strong>分享浏览次数永远慢一拍</strong>
+  <code>UpdateColumn("views", s.Views+1)</code> 之后直接读 <code>s.Views</code> 组 <code>meta.viewTimes</code>，
+  而下一步 <code>s.Views++</code> 在 <code>UpdateColumn</code> 已经写回新值之后又加了一次 ——
+  第一次访问显示 2、第二次显示 3。
+  改为 <code>gorm.Expr("views + ?", 1)</code> 数据库侧自增后单独回读 <code>views</code> 列。</p>
+</li>
+<li>
+<p><strong>数据库连不上时服务仍启动，随后每个请求都 panic</strong>
+  <code>bootstrap()</code> 里 <code>db.Init</code> 失败只打一条 <code>[WARN]</code> 就继续。
+  于是 <code>db.Get()</code> 返回 nil，之后<strong>每一个</strong> API 请求都在 handler 里空指针 panic，
+  由 gin Recovery 兜成 500。表现为「服务起来了但什么都不好用，日志里全是 panic」，
+  比启动失败难排查得多。现改为 <code>log.Fatalf</code> 直接退出。</p>
+</li>
+</ul>
+<p>最常见的触发原因是 sqlite 的 <code>file</code> 是相对路径，换个工作目录启动就打不开这个库，
+  且报错信息是极具误导性的 <code>out of memory (14)</code>。</p>
+<ul>
+<li><strong>中文文件名下载下来是乱码</strong>
+  <code>Content-Disposition</code> 只给了裸 <code>filename="中文名.txt"</code>，部分浏览器按 latin-1 解码。
+  现同时给出 RFC 5987 的 <code>filename*=UTF-8''...</code>，并对 ASCII 回退名做安全过滤
+  （挡 <code>../</code> 头部注入与引号/换行，同时保留扩展名）。</li>
+</ul>
+<h3 id="_9">♻️ 重构</h3>
+<ul>
+<li><strong><code>streamFile</code> 抽出共享</strong>：登录下载与分享下载共用同一套响应逻辑
+  （对象存储 302 / Range 206 / 普通流式），避免两边各写一份慢慢漂移。
+  <code>dispAttachment</code> / <code>dispInline</code> 两种模式区分「存盘」与「内联显示」。</li>
+</ul>
+<h3 id="_10">🧪 测试</h3>
+<p>新增 <code>TestIntegration_ShareDownloadAndPreview</code>（9 组断言）与
+<code>TestIntegration_ShareDetailViewsIncrements</code>（3 次连续访问逐次断言）。</p>
+<p>覆盖：未认证可下载、密码/提取码的query 与 Header 两种传法、
+密码与提取码并存时缺一即拒、跨用户 <code>fileId</code> 越权、同 owner 但分享子树外越权、
+预览 inline 且不计下载/浏览次数、Range 206、目录拒绝、根文件被删后404。</p>
+<p><strong>反向验证</strong>：把 <code>fileWithinShare</code> 的调用改成 <code>if false</code> 后，
+测试立刻报 <code>cross-user fileId: got 200, want 404</code> —— 确认断言真的在守这条边界。</p>
+<h3 id="_11">✅ 验证</h3>
+<ul>
+<li><code>go build ./...</code>、<code>go test ./... -count=1</code>（13 包全绿）、<code>npx tsc -b</code> 全通过</li>
+<li>i18n 五语言对称门禁通过（新增 7 个 key × 5 语言）</li>
+<li><strong>实机冒烟 14 项全通过</strong>（真跑二进制 + curl）：
+  未认证下载内容一致 / <code>attachment</code> / 预览 <code>inline</code> / Range 206 /
+  <code>downloads</code> 计数正确而 <code>preview</code> 不计 / 中文名 <code>filename*</code> 存在</li>
+<li><strong>浏览器 UI 实测 11 项全通过</strong>（系统 Edge + CDP）：
+  分享页未被路由守卫重定向、<code>img.src</code> 指向 preview 端点、
+  图片真的解码成功（<code>naturalWidth=64</code>）、文本页显示真实文件内容且不含旧的假代码</li>
+</ul>
+<p>过程中抓到并修掉一个自己引入的 bug：图片成功时「预览失败」提示也叠在图上
+  （原本用 <code>absolute inset-0</code> 常驻渲染，没默认 <code>hidden</code>），改为条件渲染。</p>
+<hr />
+<h2 id="v26-100-b-beta2026-10-03">V26-10.0-b — Beta（2026-10-03）</h2>
+<blockquote>
+<p>侧边栏三个入口修复 + 六项既有缺陷修复 + i18n 门禁。三平台单二进制（Windows / Linux / macOS）已重新打包。</p>
+</blockquote>
+<h3 id="_12">🐛 修复</h3>
+<ul>
+<li>
+<p><strong>侧边栏「分享列表 / 离线下载 / 回收站」点击无反应</strong>
+  根因：这三个路径在 <code>App.tsx</code> 里<strong>从未注册</strong>。React Router v6 遇到未匹配路径会命中
+  末尾的 <code>&lt;Route path="*" element={&lt;Navigate to="/" replace /&gt;} /&gt;</code>，被<strong>静默重定向回首页</strong> ——
+  不报错、不白屏，所以看起来就是「点了没反应」。
+  现补齐 <code>/share-list</code>、<code>/tasks</code>、<code>/trash</code> 三条路由，并新增 <code>pages/ShareList.tsx</code>、
+  <code>pages/TasksOffline.tsx</code>、<code>pages/Trash.tsx</code> 三个页面（均为路由级懒加载）。
+  影响面不止桌面侧栏：移动端底部 tabbar 的第二个入口同样指向 <code>/share-list</code>，此前也是死的。</p>
+</li>
+<li>
+<p><strong>管理员「用户管理」列表恒为空</strong>
+  <code>api/client.ts</code> 把返回类型声明成 <code>items</code>，而后端实际返回 <code>list</code>。
+  <code>u.data.items || []</code> 永远取到空数组 —— 管理员打开用户管理页看到的一直是空表。
+  同样错配的还有通知铃铛（<code>(r.data as any).items || r.data || []</code>），已一并修正。</p>
+</li>
+<li>
+<p><strong>侧栏「关于」在任何语言下都显示不出来</strong>
+  <code>MainLayout.tsx</code> 里写的是 <code>labelKey: '关于'</code>（中文字面量而非 key），
+  渲染时变成查 <code>ns_admin.关于</code>，必然查不到；且 <code>ns_admin.about</code> 这个 key 当时压根不存在。
+  现补上五语言的 <code>about</code> key 并修正引用。</p>
+</li>
+<li>
+<p><strong>任务状态显示成字面量 <code>task.1</code></strong>
+  后端 <code>Task.Status</code> 是 <strong>int</strong>（0 等待 / 1 进行 / 2 完成 / 3 失败），前端却写
+  <code>(tk.status || tk.state || 'pending') as TaskStatus</code> 把它硬转成字符串枚举。
+  <code>status=0</code> 因为是 falsy 恰好落到 <code>'pending'</code> 才显得正常，<code>status=1</code> 就直接渲染成 <code>task.1</code>。
+  这纯属巧合掩盖了类型错误。现补显式 int→枚举映射（<code>toStatus</code>），两条任务页共用。</p>
+</li>
+<li>
+<p><strong>任务「重试」按钮打 404</strong>
+  前端按钮调 <code>POST /api/tasks/:id/retry</code>，后端从未注册该路由。现补 <code>RetryTask</code>：
+  校验归属（非管理员只能操作自己的任务）、只允许终态任务重试（进行中重试会重复下载同一 URL）、
+  重置 <code>progress</code> 与 <code>error</code> 后复用与创建任务相同的下载分派逻辑。</p>
+</li>
+<li>
+<p><strong>Windows 下存储路径静默失效（数据错位隐患）</strong>
+  存储策略 config 此前用字符串拼接生成（<code>{"path":"C:\Users\..."}</code>），而反斜杠在 JSON 中
+  不是合法转义，<code>json.Unmarshal</code> 直接失败；代码又忽略了这个错误，于是配置路径为空后静默
+  回落到<strong>相对目录</strong> <code>uploads</code> —— 而相对路径按进程 CWD 解析。
+  结果：Windows 上所有上传都落到与配置声明无关的位置，文件错乱且极易丢失，<strong>全程不报错</strong>。
+  现改用 <code>json.Marshal</code> 正确转义生成配置；解析失败时优先回退到配置中的绝对上传目录并打日志，
+  仍拿不到才显式报错 —— 绝不静默落到相对目录。</p>
+</li>
+</ul>
+<h3 id="_13">🧹 重构</h3>
+<ul>
+<li><strong>抽出 <code>GuardedPage</code></strong>，消除 8 处重复手写的路由守卫三段式
+  （<code>installed === null</code>  loading / <code>!installed</code>  去 <code>/install</code> / <code>authBusy</code>  loading / <code>!user</code>  去 <code>/login</code>）。</li>
+<li><strong>抽出 <code>components/Modal.tsx</code> 与 <code>utils/format.ts</code></strong>，收敛原先分散在 <code>Files.tsx</code> 私有一份、
+  <code>admin/Users.tsx</code> 导出一份的重复实现。</li>
+<li><strong><code>CreateTask</code> 从 67 行缩到 27 行</strong>，并抽出 <code>startTask</code> 供创建与重试共用 ——
+  否则 aria2/net-http 的分派逻辑要写两遍，两边很容易各自漂移。</li>
+<li><strong>任务列表轮询改为按需</strong>：仅当存在等待/进行中任务时继续轮询，否则 <code>clearInterval</code>；
+  并加 <code>alive</code> 守卫避免组件卸载后 setState。</li>
+</ul>
+<h3 id="_14">🧪 测试</h3>
+<ul>
+<li><strong>新增全栈集成测试</strong>（<code>backend/routers/integration_test.go</code>）
+  启动完整引擎（含全部中间件、认证、安装守卫、WebDAV、REST 路由）以真实 HTTP 请求驱动，
+  走与生产完全一致的代码路径，CI 的 <code>-race</code> 可自动守住回归。覆盖：</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>用例</th>
+<th>守住的缺陷</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WebDAV 路径穿越</td>
+<td><code>/dav/../../../evil.txt</code> 只能落在用户根，绝不落到服务器根；无法读取服务器文件</td>
+</tr>
+<tr>
+<td>WebDAV PUT 覆盖</td>
+<td>覆盖写必须真实落盘，不能"返回成功但数据全丢"</td>
+</tr>
+<tr>
+<td>SSRF 防护</td>
+<td>环回 / 链路本地 / 私网 / 非 http(s) 协议全部拒绝，公共地址正常放行</td>
+</tr>
+<tr>
+<td>权限矩阵</td>
+<td>用户之间互相不可见、不可访问，越权一律 403</td>
+</tr>
+<tr>
+<td>文件生命周期</td>
+<td>上传 → 复制 → 软删 → 彻底删除，配额与物理文件始终一致</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>
+<p><strong>新增 <code>TestIntegration_TaskRetryAndTrashEndpoints</code></strong>（7 组断言）
+  锁死本轮三个入口所依赖的后端能力：未认证 401、<code>ListTasks</code> 的 <code>owner_id</code> 过滤不泄露他人任务、
+  Retry 他人任务 403、Retry 进行中任务 400、Retry 失败任务正确重置状态、
+  回收站软删→可见→他人不可见→还原的完整生命周期、Purge 他人文件 403。
+  同时验证 <code>DELETE /api/files/:id</code> 无 <code>X-Confirm-Password</code> 时确实被 <code>RequireConfirm</code> 拦下。</p>
+</li>
+<li>
+<p><strong>新增 i18n 对称性门禁</strong>（<code>frontend/check_i18n.py</code>，已接入 <code>frontend-ci.yml</code>）
+  五个语言文件必须逐命名空间、逐 key 完全一致，且页面引用的 key 都真实存在。
+  少一个 key 的表现是界面直接显示 <code>ns_mine.emptyTrash</code> 这种原始串，
+  <strong>tsc 与 vite 都发现不了</strong> —— 本轮新增 40 个 key 跨 5 语言，正是最需要这道门禁的场景。</p>
+</li>
+</ul>
+<h3 id="_15">📦 产物</h3>
+<p><code>NebulaDrive-V26-10.0-b-{windows,linux,darwin}-amd64</code>（各含 zip）。
+单文件二进制，前端已内嵌，无需安装 Go / Node / 数据库。</p>
+<ul>
+<li><strong>发布包补入 <code>LICENSE</code></strong>（<code>packaging/repack.py</code>）：AGPL-3.0 要求分发二进制时随附许可证声明，
+  原脚本漏掉了它，合规上站不住脚。</li>
+<li><strong>Linux / macOS 包补入 <code>stop.sh</code></strong>：<code>start.sh --daemon</code> 会写 <code>.nebula.pid</code> 并提示
+  「停止服务请执行 <code>./stop.sh</code>」，<code>试用说明.md</code> 也在教用户执行 <code>./stop.sh</code> ——
+  但原脚本只复制了 <code>start.sh</code>。用户按文档操作会直接吃到 <code>No such file or directory</code>。
+  <code>build-release.sh</code> 一直有复制它，只有 <code>repack.py</code> 漏了。</li>
+<li><strong>Linux 包补入 <code>Linux上手说明.md</code></strong>：跨平台的 <code>试用说明.md</code> 没覆盖 Linux 用户真正会卡的地方 ——
+  必须先解压不能直接跑压缩包、<code>chmod +x</code> 的时机、<code>uname -m</code> 确认架构、
+  <code>bad interpreter: /bin/sh^M</code> 的真实原因（说明文件被改坏，不是脚本问题）、
+  以及「纯静态链接（<code>CGO_ENABLED=0</code>）所以不挑 glibc，老发行版也能跑」这条实用信息。</li>
+<li>包内文本统一转 LF（仓库工作区的 <code>LICENSE</code> / <code>README.md</code> 是 CRLF，直接 copy 会带进包）。</li>
+<li>zip 条目统一带顶级目录前缀，避免解压后一堆散落文件覆盖用户同名文件。</li>
+<li>新增 <code>packaging/verify_release.py</code>：自动校验 zip CRC、平台魔数、权限位、行尾、
+  内嵌前端是否为新版，以及<strong>「文档里提到的文件是否真的在包里」</strong>
+  （<code>stop.sh</code> / <code>Linux上手说明.md</code> 断言），三平台全通过。</li>
+<li><code>repack.py</code> 的 <code>.sh</code> 自检从「只查启动脚本」改为<strong>遍历包内全部 <code>.sh</code></strong>，避免漏检。</li>
+</ul>
+<h3 id="_16">⚖️ 许可</h3>
+<ul>
+<li><strong>协议残留清理</strong>：仓库 <code>LICENSE</code> 与 <code>README.md</code> 早已是 AGPL-3.0，但前端关于页、插件页、
+  <code>backend/nfpm.yaml</code>、预告片工具等处仍残留 <strong>MIT</strong> 表述。现已全量统一为 <strong>AGPL-3.0</strong>。</li>
+<li><strong>同时废除「界面至少保留 3 处品牌名」附加条款</strong>：该条款原附在 MIT 之上（要求运行时展示署名），
+  与 MIT 第 1 条冲突、解释权不明；改用 AGPL-3.0 后本就不存在该要求。前端两处合规声明
+  已改写为 AGPL 的<strong>核心义务：网络服务同样需向使用者提供完整对应源码</strong>。</li>
+<li><code>nfpm.yaml</code> 的 <code>license</code> 用 SPDX 标识 <code>AGPL-3.0</code>；<code>version</code> 由过期的 <code>1.0.0</code> 校正为
+  <code>26.10.0</code>（<code>release: b</code>），<code>homepage</code> 校正为 <code>github.com/mrc-sk/nebula-drive</code>。</li>
+<li>前端产物已重建并同步 <code>backend/frontend_dist</code>（<code>go:embed</code> 内嵌，CI 有同步守卫）。</li>
+</ul>
+<h3 id="_17">🚑 侧边栏三个入口点了没反应（路由从未注册）</h3>
+<table>
+<thead>
+<tr>
+<th>入口</th>
+<th>路径</th>
+<th>原因</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>分享列表</td>
+<td><code>/share-list</code></td>
+<td><code>App.tsx</code> 只有 <code>/share/:id</code>（单页公开分享），从未注册 <code>/share-list</code></td>
+</tr>
+<tr>
+<td>离线下载</td>
+<td><code>/tasks</code></td>
+<td>只有一个 <code>/admin/tasks</code>（管理员），用户版从未注册</td>
+</tr>
+<tr>
+<td>回收站</td>
+<td><code>/trash</code></td>
+<td>回收站只在 <code>Files.tsx</code> 里做成了 <code>trashMode</code> 开关，没有独立路由</td>
+</tr>
+</tbody>
+</table>
+<p>三者都落进 <code>App.tsx</code> 的 catch-all <code>&lt;Route path="*" element={&lt;Navigate to="/" replace /&gt;} /&gt;</code>，
+被静默弹回文件页 —— 表现为「点了没反应」而不是报错。</p>
+<p><strong>修复</strong>：新增 <code>ShareList.tsx</code> / <code>TasksOffline.tsx</code> / <code>Trash.tsx</code> 三个页面并注册路由，
+守卫抽成 <code>GuardedPage</code> 组件（此前同样的 installed/authBusy/user 三段式在 8 处重复）。</p>
+<p><strong>回收站有一条必须让用户知道的行为</strong>：后端 <code>Restore</code> 每次都会新建一个
+「恢复的文件-YYYYMMDD-HHMMSS」目录把文件塞进去 —— 批量还原 10 个文件会得到 10 个时间戳目录。
+UI 上已就此给出提示，避免用户以为还原丢了文件。</p>
+<h3 id="_18">🐛 顺带修掉的既有缺陷</h3>
+<ul>
+<li><strong>管理员用户列表恒为空</strong>：<code>admin.ListUsers</code> 返回 <code>{total, list}</code>，<code>client.ts</code> 却声明成
+  <code>items</code>，<code>Users.tsx</code> 读 <code>u.data.items</code> 恒为 <code>undefined</code>。表格空白但页面不报错。
+  通知列表有同样的 <code>items</code>/<code>list</code> 错配（被 <code>|| r.data</code> 兜住了）。两处均已对齐。</li>
+<li><strong>管理员侧栏「关于」不翻译</strong>：<code>MainLayout.tsx</code> 的 <code>labelKey</code> 写的是中文 <code>'关于'</code>，
+  渲染时变成 <code>t('ns_admin.关于')</code>，任何语言下都显示不出正确文案；而 <code>ns_admin.about</code>
+  这个 key 压根不存在。已补齐 5 种语言的 <code>about</code> 并修正 labelKey。</li>
+<li><strong>任务状态显示错误</strong>：<code>Task.Status</code> 是 int（0/1/2/3），但页面写的是
+  <code>(tk.status || tk.state || 'pending') as TaskStatus</code> —— 把 int 硬转字符串枚举，
+  <code>status=1</code>（进行中）会渲染成字面量 <code>task.1</code>、徽章配色回落到灰色 pending。
+  <code>status=0</code> 恰好因 falsy 落到 <code>'pending'</code> 才显得正常，纯属巧合。现改为显式映射。</li>
+<li><strong>「重试」按钮必然 404</strong>：前端 <code>api.tasks.retry</code> 已封装并有按钮，但后端从未注册该路由，
+  前端还用 <code>(api.tasks as any).retry?.(id)</code> 静默吞掉。现<strong>已实现后端 <code>POST /api/tasks/:id/retry</code></strong>
+  （重置状态 + 复用创建时的分派逻辑），并抽出 <code>startTask</code> 供创建与重试共用。
+  进行中/等待中的任务返回 400 —— 否则会对同一 URL 重复下载。</li>
+<li><strong>任务页无条件 2s 轮询</strong>：即使全部任务已完成也一直打接口，且请求在途时卸载会 setState。
+  现仅在存在等待/进行中任务时继续轮询，并加 <code>alive</code> 守卫。</li>
+</ul>
+<h3 id="_19">🧹 已知遗留</h3>
+<ul>
+<li><code>V1-0.0.2-beta</code> / <code>V1-0.0.2.1-beta</code> / <code>V1-0.0.2.2-beta</code> / <code>V1-0.0.3-beta</code> 尚未补记条目。</li>
+<li>✅ ~~⚠️ <code>V26-10.0-b</code> 三平台产物<strong>打包于本次许可修正之前</strong>，二进制内嵌的仍是写着 MIT 的旧前端。
+  重新打包后方可对外分发。~~ <strong>已于 2026-10-03 重新打包解决</strong>（见下）。</li>
+</ul>
+<h4 id="2026-10-03">重新打包记录（2026-10-03）</h4>
+<p>原先的三平台产物内嵌 MIT 旧前端，已全部重建并替换：</p>
+<table>
+<thead>
+<tr>
+<th>平台</th>
+<th>大小</th>
+<th>文件头</th>
+<th>校验</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Windows amd64</td>
+<td>47,545,344 B</td>
+<td><code>4d5a</code> (PE)</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Linux amd64</td>
+<td>46,719,160 B</td>
+<td><code>7f454c46</code> (ELF)</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>macOS amd64</td>
+<td>47,807,712 B</td>
+<td><code>cffaedfe</code> (Mach-O)</td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>三个二进制内 <code>AGPL-3.0</code> 均出现 2 次，<code>MIT License</code> <strong>零残留</strong>；</li>
+<li>启动脚本行尾按平台转换：<code>start.bat</code> → CRLF，<code>start.sh</code> → LF（防 <code>bad interpreter: /bin/sh^M</code>）；</li>
+<li>zip 权限位：<code>nebula</code> / <code>*.sh</code> 置 0755，文档 0644；</li>
+<li>实跑验证：<code>/api/health</code> → <code>{"installed":false,"ok":true}</code>；
+  <code>/dot-motion-loader.js</code> → 200（证明 <code>go:embed</code> 前端确实可用）。</li>
+<li>打包脚本固化为 <code>packaging/repack.py</code>，避免每次手工处理行尾与权限位。</li>
+</ul>
+<hr />
+<h2 id="v1-001-beta2026-08-09">V1-0.0.1 — Beta（2026-08-09）</h2>
+<blockquote>
+<p>首个公开测试版。功能对标 Cloudreve Pro 正常版 + 增强版能力；但仍处于 Beta 阶段，部署用于生产环境前请充分测试，
+并及时在 Issue 反馈 Bug。</p>
+</blockquote>
+<h3 id="120">🎉 功能总览（共 <strong>120+</strong> 功能点，按模块归类）</h3>
+<h4 id="20">🗂️ 文件管理模块（20 项）</h4>
+<ul>
+<li>[x] 列表视图 / 网格视图，默认列表可切换</li>
+<li>[x] 面包屑导航栏右侧「全部展开 / 折叠」按钮</li>
+<li>[x] 拖拽上传：整个窗口四周脉冲发光呼吸边框</li>
+<li>[x] 鼠标跟随的多选上下文菜单（默认模式，可在个人设置切换为底部浮动条 / 右侧抽屉）</li>
+<li>[x] 批量操作：批量移动 / 批量复制 / 批量改存储策略 / 批量删除</li>
+<li>[x] 批量删除支持密码二次确认（X-Confirm-Password 头）</li>
+<li>[x] 文件版本控制：保留最近 <strong>10</strong> 个版本，数量后台可改</li>
+<li>[x] 版本历史：上传新版本 / 下载旧版本 / 恢复指定版本 / 删除单版本</li>
+<li>[x] 文件标签：自定义标签 + 颜色 + 聚合筛选 + 标签条 + 行内标签徽章</li>
+<li>[x] 秒传：相同 hash + 相同 owner + 相同文件直接命中，无需重传</li>
+<li>[x] 大文件分片上传：2 并发 × 20MB/片（可扩展参数）</li>
+<li>[x] 断点续传：<code>chunk-init / chunk-upload / chunk-merge</code> 三接口</li>
+<li>[x] 文件夹上传（webkitdirectory）+ 目录结构保留</li>
+<li>[x] 文件名/大小/修改时间/类型 表头排序</li>
+<li>[x] 搜索框按文件名模糊 + 标签精准筛选联合检索</li>
+<li>[x] 新建文件夹 + 重命名 + 移动 + 复制 + 删除到回收站</li>
+<li>[x] 回收站：软删除，保留 <strong>30</strong> 天后自动永久清理（天数后台可改）</li>
+<li>[x] 恢复策略：全部还原到根目录「恢复的文件-时间戳」隔离文件夹，不污染原位置</li>
+<li>[x] 在线预览：图片（含缩略图）/视频(plyr)/音频(plyr)/Office(mammoth+xlsx)/PDF/代码</li>
+<li>[x] 缩略图：本地缩略缓存 + OSS/COS 原生图片处理接口抽象</li>
+</ul>
+<h4 id="4-6">☁️ 多存储后端（4 家 + 6 项）</h4>
+<ul>
+<li>[x] <strong>本地存储</strong>（Local）：<code>filesystem/fs.go</code> Handler 抽象</li>
+<li>[x] <strong>AWS S3 / 兼容存储</strong>（MinIO / R2 / B2）：<code>aws-sdk-go-v2</code> 官方 SDK</li>
+<li>[x] <strong>阿里云 OSS</strong>：<code>aliyun-oss-go-sdk</code> 官方 SDK</li>
+<li>[x] <strong>腾讯云 COS</strong>：<code>cos-go-sdk-v5</code> 官方 SDK</li>
+<li>[x] 存储策略管理后台：CRUD + 测试连接 + 溢出菜单操作</li>
+<li>[x] 对象命名规则：<code>{year}/{month}/{day}/{ownerId}/{uuid8}.{ext}</code>，日期分层避免 S3 单目录性能瓶颈</li>
+</ul>
+<h4 id="webdav8-rfc-4918">🌐 WebDAV（8 项，RFC 4918）</h4>
+<ul>
+<li>[x] PROPFIND（列目录 / 读取属性）+ DEPTH 0/1/infinity</li>
+<li>[x] MKCOL（创建目录）</li>
+<li>[x] GET / HEAD（文件下载 + 元数据）</li>
+<li>[x] PUT（写文件）</li>
+<li>[x] DELETE（删除文件/目录）</li>
+<li>[x] COPY / MOVE（重命名 + 跨目录移动）</li>
+<li>[x] <code>Range</code> 部分下载（206 Partial Content）</li>
+<li>[x] 后台系统设置可自定义：WebDAV 路径前缀 + 全局开关 + 方法集勾选 + RFC4918 帮助文档链接</li>
+</ul>
+<h4 id="6">🚀 离线下载（6 项）</h4>
+<ul>
+<li>[x] HTTP / HTTPS 下载（内嵌 net/http 回退逻辑 + 进度实时更新）</li>
+<li>[x] BT 种子 / 磁力链接 下载（内嵌 <strong>aria2c</strong> 子进程 + JSON-RPC）</li>
+<li>[x] aria2 管理：优先连接系统已有 RPC，找不到则询问式内嵌启动（两种都支持）</li>
+<li>[x] 任务状态轮询（每 2s <code>tellStatus</code>）+ 下载完成自动创建 File 记录 + 发站内通知</li>
+<li>[x] 任务卡片毛玻璃进度条 + 速度 + 剩余时间 + 百分比</li>
+<li>[x] 任务管理：暂停 / 取消 / 继续 / 删除 + 任务毛玻璃卡片进度条</li>
+</ul>
+<h4 id="15">🔐 认证与安全（15 项）</h4>
+<ul>
+<li>[x] bcrypt 密码哈希（默认 cost 10）</li>
+<li>[x] JWT 令牌 + Session 模型 + 单设备登录（新 Session 使旧的失效）</li>
+<li>[x] <strong>2FA</strong> 两步验证（TOTP / Google Authenticator），用户可选 + 首次登录红点引导</li>
+<li>[x] 邮箱验证（邮件通知走 onEmail 钩子）</li>
+<li>[x] 记住登录：<strong>7</strong> 天 session 有效期，默认勾选</li>
+<li>[x] 密码强度策略：最少位数 + 大写字母 + 数字 + 特殊字符，<strong>全部后台可配</strong></li>
+<li>[x] 注册/改密码：实时显示密码强度条（弱/中/强）+ 条件满足清单</li>
+<li>[x] 人机验证码：hCaptcha / Turnstile 接入钩子，连续 3 次失败强制验证码</li>
+<li>[x] 敏感操作二次确认：永久删除 / 清空回收站 / 删除用户，请求头 <code>X-Confirm-Password</code> 校验</li>
+<li>[x] <strong>CSP</strong> Content-Security-Policy + X-Frame-Options + X-Content-Type-Options + HSTS 安全头</li>
+<li>[x] Referrer-Policy + X-XSS-Protection 中间件</li>
+<li>[x] IP 黑名单（手动添加）+ 自动封禁（5 分钟 10 次登录失败 → 封 1 小时）</li>
+<li>[x] 上传文件扩展名白名单（后台可改）+ <strong>魔术字节</strong> 校验（http.DetectContentType 前 512B）</li>
+<li>[x] 内存滑动窗口限流：登录 10/min、上传 60/min、其他 600/min（后台可调阈值 + 插件 blocked→403 扩展）</li>
+<li>[x] 签名 URL 防盗链：下载链接带 expires+sign，<strong>5</strong> 分钟有效</li>
+</ul>
+<h4 id="8">👥 用户、配额、组（8 项）</h4>
+<ul>
+<li>[x] 用户模型：用户名/邮箱/密码/状态/Storage 已用/2FA Secret/Avatar/NickName/IsAdmin + 软删除</li>
+<li>[x] 用户组模型：名称/存储限额/速度限制/权限</li>
+<li>[x] 注册策略：后台开关（开放 / 仅限邀请码 / 关闭），管理员可添加用户</li>
+<li>[x] 管理员创建新用户 → 自动发送「欢迎加入」站内信</li>
+<li>[x] 个人设置：昵称 / 头像 / 密码 / 彩蛋总开关 / 多选 UI 模式 / 2FA 管理 / 访问令牌 PAT</li>
+<li>[x] 用户列表：CRUD + 调整用户组 + 调整存储配额 + 封禁/解封</li>
+<li>[x] 用户组列表：CRUD + 配额 + 限速</li>
+<li>[x] 存储配额：超出后禁止上传，秒传不计配额</li>
+</ul>
+<h4 id="9">🔗 分享（9 项）</h4>
+<ul>
+<li>[x] 单文件 / 多文件打包 / 整个目录分享</li>
+<li>[x] <strong>双因子保护</strong>：提取码 + 密码两层验证，前端先输入提取码，再输入密码</li>
+<li>[x] 默认配置：公开 + 无密码 + 永不过期（可在创建时加限制）</li>
+<li>[x] 过期时间 / 最大访问次数 / 仅登录用户访问 / 指定用户白名单</li>
+<li>[x] 访问水印 / 单日限流（插件钩子扩展可叠加）</li>
+<li>[x] 公开详情页布局：左侧文件树 + 右侧预览区</li>
+<li>[x] 分享下载触发通知：分享所有者收到"你的分享被访问"通知</li>
+<li>[x] 访问审计日志（audit_logs）+ 30 天自动过期</li>
+<li>[x] 提取码在 URL <code>#hash</code> 中，密码走表单提交，两层分离</li>
+</ul>
+<h4 id="5">🤝 协作编辑（5 项）</h4>
+<ul>
+<li>[x] onCollabOpen / onCollabSave 插件钩子</li>
+<li>[x] OnlyOffice 文档服务器对接（插件实现，走 onCollabOpen 返回 URL 302 跳转）</li>
+<li>[x] MD / TXT 内置 <strong>Yjs CRDT</strong> 实时多人协作（WebSocket <code>/api/collab/ws/:docId</code>）</li>
+<li>[x] 保存协作内容 → 自动归档当前版本</li>
+<li>[x] docId→[]conn map 广播 update 消息</li>
+</ul>
+<h4 id="10">🧩 插件系统（10 项）</h4>
+<ul>
+<li>[x] 8 个官方扩展钩子：onEmail / onBackup / onRestore / onApiAuth / onDBMigrate / onRateLimit / onAntiLeech / onCLI</li>
+<li>[x] 新增协作钩子：onCollabOpen / onCollabSave（共 10 个）</li>
+<li>[x] <code>pkg/plugin</code> 插件引擎：Register / Fire / ListHooks</li>
+<li>[x] 后台插件页：<strong>卡片网格</strong> + 安装按钮 + 版本/作者/描述显示</li>
+<li>[x] 后台可配置 <strong>插件商店网址</strong>：默认 <code>com.json</code> 拉取目录</li>
+<li>[x] 插件商店 com.json：6 个示例插件（SMTP/备份/OnlyOffice/防盗链/hCaptcha/CLI）</li>
+<li>[x] 插件「设置」面板：每个插件可声明动态 schema + UI 表单</li>
+<li>[x] <strong>plugins 分支</strong>（公共插件库，完全独立），社区 PR 提交</li>
+<li>[x] 插件提交指南：目录结构 / plugin.json 模板 / 品牌署名保留要求</li>
+<li>[x] 插件命名规范 kebab-case</li>
+</ul>
+<h4 id="api8">🔑 开放 API（8 项）</h4>
+<ul>
+<li>[x] <strong>OAuth 2.0 Authorization Code</strong> 全流程：App CRUD → GET Authorize 确认 → POST Authorize 生成 code → /token code 换 access_token → /userinfo</li>
+<li>[x] 刷新令牌（Refresh Token）</li>
+<li>[x] <strong>Personal Access Token</strong>（PAT）：个人中心手动生成 + 只显示一次完整 token + 过期时间 + 作用域</li>
+<li>[x] PAT 前缀显示（<code>ndp_</code> 前缀）+ 最后使用时间</li>
+<li>[x] <code>/api/v1/*</code> 路由组 + APIAuth 中间件（先查 AccessToken 再查 PAT）</li>
+<li>[x] APIAuth 复用 CtxUserKey，共享 controllers.List / Upload / Download</li>
+<li>[x] onApiAuth 插件钩子（扩展 hCaptcha / 额外权限校验）</li>
+<li>[x] CORS：默认允许 *，可后台收紧</li>
+</ul>
+<h4 id="9_1">📊 后台仪表盘 &amp; 审计（9 项）</h4>
+<ul>
+<li>[x] 4 列等宽毛玻璃 KPI：用户总数 / 文件总数 / 存储已用 / 分享总数</li>
+<li>[x] <strong>ECharts 流量趋势折线图</strong>：最近 7/30/365 天，上传(蓝)下载(绿)双 Y 轴</li>
+<li>[x] <strong>ECharts 文件类型饼图</strong>：图片/视频/音频/文档/压缩包/其他，环形+扇区高亮</li>
+<li>[x] <strong>ECharts 活跃度热力图</strong>：GitHub 风格年度贡献日历</li>
+<li>[x] 最近用户表 / 最近文件表 / 最近分享表</li>
+<li>[x] 审计日志 <code>audit_logs</code> 9 个写入点：登录 / 上传 / 下载 / 分享创建删除 / 用户 CRUD / 组 CRUD / 策略 CRUD / 设置更新</li>
+<li>[x] 审计日志：按时间 / 操作人 / 类型 / 关键词过滤</li>
+<li>[x] 审计日志 <strong>30 天自动过期清理</strong></li>
+<li>[x] 版本化数据库迁移：<code>schema_migrations</code> 表 v1~v5 + onDBMigrate 钩子</li>
+</ul>
+<h4 id="10-tab">🛠️ 系统设置（10 个垂直 Tab 模块）</h4>
+<ul>
+<li>[x] 基本设置（站点名/域名/协议/默认语言/时区/备案号/页脚文本）</li>
+<li>[x] 邮件与缓存（onEmail 钩子配置 + Redis 连接）</li>
+<li>[x] 安全设置（密码策略/验证码/上传安全/IP 封禁/回收站天数/版本数）</li>
+<li>[x] 上传与 WebDAV（分片大小/并发数/秒传开关/回收站天数/最大版本数）</li>
+<li>[x] WebDAV 专页（路径前缀/开关/方法集勾选/RFC4918帮助链接）</li>
+<li>[x] 外观设置（站点名 / Logo 上传 / 主题色 6 预设 + 自定义 / ICP / 页脚 / 默认主题 / 自定义 CSS）</li>
+<li>[x] 插件页（商店 Tab / 已安装 Tab / Hooks 扩展点 Tab + 完整文档）</li>
+<li>[x] HTTPS / TLS：ACME 自动申请(Let's Encrypt) 与手动上传双模式</li>
+<li>[x] 限流参数（login/upload/default/minute）+ 插件扩展</li>
+<li>[x] 存储策略页（列表/新增/编辑/溢出菜单: 编辑 / 测试连接 / 删除）</li>
+</ul>
+<h4 id="ui18">🎨 前端 UI（18 项）</h4>
+<ul>
+<li>[x] 毛玻璃 <code>.glass</code> + 强毛玻璃 <code>.glass-strong</code> 两个基础类</li>
+<li>[x] 玻璃拟态微动画（透明度 + 模糊半径 + 轻微位移渐变）</li>
+<li>[x] 登录页动态三色流体背景（SVG/CSS 渐变流动）</li>
+<li>[x] 主题三态切换：浅色 / 深色 / 跟随系统（Tailwind <code>darkMode:class</code>）</li>
+<li>[x] 5 种语言：简体 / 繁體 / English / 日本語 / 한국어，右上角色球切换</li>
+<li>[x] 通知铃铛 + WebSocket 实时推：未读徽章 + 弹层面板 + 全部已读 + toast</li>
+<li>[x] plyr.js 视频播放器（倍速 0.5x~2x / 画中画 / 全屏）</li>
+<li>[x] plyr.js 音频播放器</li>
+<li>[x] Office 预览：docx(mammoth.js) / xlsx(sheet_to_html) / pptx(JSZip 解析)</li>
+<li>[x] 移动端响应式：&lt;768px 底部 4 Tab（首页/文件/分享/我的）</li>
+<li>[x] 侧边栏：汉堡点击折叠 240↔64px + 响应式自动变抽屉</li>
+<li>[x] 面包屑导航栏右侧「全部展开 / 折叠」按钮</li>
+<li>[x] 右下角浮动传输抽屉（上传下载双 Tab + 进度 + 速度）</li>
+<li>[x] 安装向导：5 步向导模式 + 右上角「高级模式」复选框切单页大表单</li>
+<li>[x] OAuth 授权确认页：/oauth/authorize?client_id=xxx + 授权/拒绝按钮</li>
+<li>[x] PAT 管理页（个人设置 Tab）：创建 / 撤销 / 只显示一次完整 token + 复制</li>
+<li>[x] 品牌白标签：站点名 / Logo 上传 / 主题色调色板 / ICP / 页脚</li>
+<li>[x] 密码强度提示：注册/改密码实时强度条 + 4 条件清单</li>
+<li>[x] 分享页双因子：先输入提取码 → 再输入密码</li>
+</ul>
+<h4 id="4">🥚 彩蛋系统（4 个，统一「彩蛋模式」总开关）</h4>
+<ul>
+<li>[x] Logo 彩蛋（老）：持续 10s/圈旋转，hover 暂停<strong>不回正</strong>，松开继续</li>
+<li>[x] 主题转盘彩蛋：输入 <code>imfeelinglucky</code>，6 色转盘 4~8s 减速停下 → 切换主题色</li>
+<li>[x] Konami 代码彩蛋：<code>↑↑↓↓←→←→BA</code> → 界面文字左右轻微摇摆 10s</li>
+<li>[x] 头像彩蛋：4 秒内连续点 10 次头像 → 头像变成 🌈 霓虹呼吸光环，再 10 点复原</li>
+</ul>
+<h4 id="6_1">⚡ 性能（6 项）</h4>
+<ul>
+<li>[x] Gzip 压缩（Gin gzip 中间件）</li>
+<li>[x] 静态资源 Cache-Control: max-age=31536000, immutable + ETag</li>
+<li>[x] 数据库连接池：MaxOpen=50 / MaxIdle=10 / ConnMaxLifetime=30min</li>
+<li>[x] GORM 慢查询日志（&gt;200ms warn）</li>
+<li>[x] sync.Pool 32KB buffer 复用池（上传下载路径）</li>
+<li>[x] 对象存储签名 URL 302 跳转：省服务器带宽，最快下载</li>
+</ul>
+<h4 id="4_1">🚢 部署（4 项）</h4>
+<ul>
+<li>[x] <strong>单二进制</strong>：Go embed 内嵌前端 dist，SPA fallback</li>
+<li>[x] <strong>多数据库</strong>：SQLite（默认）/ MySQL / PostgreSQL 三引擎</li>
+<li>[x] <strong>HTTPS</strong>：ACME 自动 + 手动上传证书双模式</li>
+<li>[x] <strong>nfpm 打包</strong>：deb + rpm 双系统包（systemd service + postinstall/preremove 脚本）</li>
+</ul>
+<h4 id="_20">✅ 测试与质量</h4>
+<ul>
+<li>[x] <code>go test ./... -cover</code>：整体覆盖率 <strong>42.2%</strong>（&gt;40% 验收要求）</li>
+<li>[x] middleware 87.6% / routers 93.8% / service 88.2% / pkg/util &amp; plugin 100% / pkg/jwt 87.5% / models 78.6% / conf 76.4% / pkg/db 73.9% / pkg/tls 61.4%</li>
+<li>[x] <code>npm run build</code>：tsc + vite build 双通过，2689 modules 18s</li>
+</ul>
+<hr />
+<h3 id="bug-beta-issue">🐛 已知 Bug &amp; 局限（Beta 期待改进，欢迎提 Issue）</h3>
+<h4 id="bug">高优先级 Bug</h4>
+<ol>
+<li><strong>大文件分片上传失败后重试断点续传元数据未持久化</strong>：当前断点续传状态只保存在内存 map，服务重启丢失（计划 v1.0.0-rc 修复，落盘到 <code>chunk_sessions</code> 表）。</li>
+<li><strong>移动端 &lt;420px 宽度下侧边栏部分中文被截断</strong>：因浏览器窗口视口太窄，侧栏 240px 固定宽度下文字溢出（计划增加 360~480px 断点下侧栏字号缩放）。</li>
+<li><strong>admin 关于页 Footer 合规卡品牌文字在深色主题下对比度略低</strong>：在最暗模式下蓝色文字与毛玻璃卡片背景只有 3.2:1（需 ≥4.5:1 WCAG AA）。</li>
+<li><strong>插件「安装」按钮目前只拉取 com.json，未实际解压并加载插件二进制</strong>：插件框架（Register/Fire/Hooks）完成，但 Go 插件加载（<code>plugin.Open</code>）需要 .so 动态库构建流程，当前只做 UI + 钩子。（计划 v1.0.0-rc 加入 <code>nebula plugin build</code> 命令把插件编译成 .so，或走 WASM）。</li>
+</ol>
+<h4 id="bug_1">中优先级 Bug / 局限</h4>
+<ol start="5">
+<li><strong>aria2 未安装时 BT/磁力任务返回失败提示，但「失败原因」toast 文案不统一</strong>：有的地方显示 "aria2 not installed"，有的地方是 "BT引擎未配置"（统一文案待做）。</li>
+<li><strong>MySQL 5.7 以下 JSON 字段兼容性</strong>：models.Notification.Meta 等用了 JSON 类型，MySQL 5.6 及以下会失败（用户手册中写了最低 MySQL 8.0，但实际 5.7 可用，需在文档中补充最低版本说明）。</li>
+<li><strong>Yjs CRDT 的 docId 只按 fileId 生成，未包含版本号</strong>：两个用户同时编辑同一个文件的不同版本会冲突（建议 v1.0.0 做 docId = <code>${fileId}-${version}</code>）。</li>
+<li><strong>S3 R2 环境中 UploadPart Copy 校验失败（Etag 引号问题）</strong>：aws-sdk-go-v2 CopyObject 返回的 ETag 带双引号，后续 UploadPart 去校验时未 strip，偶尔 ETag mismatch。</li>
+<li><strong>图片缩略图 Local 实现依赖 <code>imaging</code> 库的纯 Go 解码</strong>：在非常大的 PNG(&gt;20MB) 下会占用较多内存（建议加 size 限制 + lazy resize）。</li>
+<li><strong>ECharts 热力图目前走 mock 数据</strong>：<code>/api/admin/stats/activity</code> 路由存在但返回 mock 数据（还没真正聚合 audit_logs 表，后端真实聚合 SQL 待补）。</li>
+<li><strong>OAuth 2.0 PKCE 未启用</strong>：当前只有 Authorization Code，没有要求 code_challenge/code_verifier（移动 App / SPA 建议 PKCE，计划 v1.0.0 加）。</li>
+<li><strong>PAT 撤销后相关 Session 未立即失效</strong>：依赖下一次请求查 token 表才 401，期间内如果客户端缓存了 JWT 可能短暂有效（建议引入 Redis token 黑名单，或每次查 PAT 表时加一个版本号字段 + 版本缓存）。</li>
+<li><strong>密码强度规则「必须包含特殊字符」= false 时，前端仍会显示红色✕ + 提示</strong>：前端 UI 未正确读取 settings 动态配置，前端显示逻辑需从固定 4 条件改为按 settings 开关条件判断。</li>
+<li><strong>ACME 模式 DNS-01 校验未支持</strong>：当前只做了 HTTP-01 校验，需要用户 80 端口公网可访问（加 Cloudflare/阿里云 DNS 插件钩子是后续方向）。</li>
+</ol>
+<h4 id="bug_2">低优先级 / 非 Bug 改进建议</h4>
+<ol start="15">
+<li><strong>离线下载进度条当前只在 2s 轮询更新一次</strong>：aria2 有 <code>aria2.onDownloadProgress</code> 事件推送，可以改 WebSocket 事件订阅更实时。</li>
+<li><strong>plyr.js 播放器字幕轨道还没接</strong>（多语言 SRT/VTT 未解析展示，File 模型中也没字幕关联字段，后续加 <code>subtitles</code> 关联表）。</li>
+<li><strong>文件预览弹窗的「MD/TXT 协作编辑」入口还没按钮</strong>：UI 已预留 Tab，按钮需增加「开启多人协作」入口链接到 /collab/:id WebSocket。</li>
+<li><strong>IP 自动封禁记录后台未做列表页</strong>：有表 models.IPBan + 路由，但前端后台还没做「IP 封禁」管理 Tab。</li>
+<li><strong>分享访问限流 + 单日下载次数阈值没有 UI 配置入口</strong>：后端逻辑存在，settings key 有，前端系统设置 Tab 没加对应输入框。</li>
+<li><strong>nfpm 只是配置了 nfpm.yaml，deb/rpm 没有在 CI 中实际打包测试</strong>：下次 rc 版本前加 GitHub Actions 自动 nfpm。</li>
+</ol>
+<hr />
+<h3 id="_21">📦 本版本包含的发布产物</h3>
+<table>
+<thead>
+<tr>
+<th>产物</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nebula</code> (附加到 Release)</td>
+<td><strong>Linux amd64 单二进制</strong>。Go embed 已内嵌前端，<code>chmod +x &amp;&amp; ./nebula</code> 直接运行，默认监听 <code>:5212</code>。</td>
+</tr>
+<tr>
+<td>源码 Source code (zip / tar.gz)</td>
+<td>GitHub 自动生成。</td>
+</tr>
+</tbody>
+</table>
+<h3 id="beta">🚀 快速上手 Beta</h3>
+<pre><code class="language-bash">chmod +x nebula
+./nebula &amp;
+# 浏览器打开 http://localhost:5212/
+# 首次访问自动进入 5 步安装向导
+# 默认 SQLite + 默认管理员 admin / admin123
+# （向导中也可以切 MySQL / Postgres）
+</code></pre>
+<h3 id="beta_1">🧪 Beta 期反馈</h3>
+<p>请通过 GitHub Issues 提 Bug / 功能建议：
+<a href="https://github.com/mrc-sk/nebula-drive/issues">https://github.com/mrc-sk/nebula-drive/issues</a></p>
+<p>提 Issue 请附上：
+- 系统版本 + 部署方式（单二进制 / Docker / deb / rpm）
+- 复现步骤
+- 截图或控制台日志（尤其浏览器 Console + 后端 stdout）</p>
+<hr />
+<p>署名保留：Copyright (c) 2026 <strong>mrc-sk</strong> · Repository: <a href="https://github.com/mrc-sk/nebula-drive">https://github.com/mrc-sk/nebula-drive</a></p></article>
+<div class="foot">NebulaDrive Wiki · 由项目文档自动构建 · 最后生成 2026-11-14</div>
+</main>
+<script src="../assets/app.js"></script></body></html>

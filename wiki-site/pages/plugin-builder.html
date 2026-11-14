@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>可视化插件制作器使用说明 · NebulaDrive Wiki</title>
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<aside id="sidebar">
+<div class="brand">NebulaDrive Wiki<small>项目文档 · 部署运维 · 插件开发</small></div>
+<input id="search" placeholder="搜索文档…" autocomplete="off">
+<div id="searchResults"></div>
+<div class="nav-group"><h4>▶ 入门</h4><a href="../pages/overview.html">项目概览 README</a><a href="../pages/license.html">AGPL 许可通俗说明</a></div><div class="nav-group"><h4>◈ 插件开发</h4><a href="../pages/plugin-manual.html">插件制作手册</a><a href="../pages/plugin-v2-guide.html">插件平台 v2 完全指南</a><a href="../pages/plugin-system-guide.html">插件系统完全指南</a><a href="../pages/pbclus-spec.html">PBClus 格式规范</a><a href="../pages/plugin-hotload.html">插件热加载：进度与接续</a><a class="active" href="../pages/plugin-builder.html">可视化插件制作器使用说明</a></div><div class="nav-group"><h4>▤ 版本与交付</h4><a href="../pages/changelog.html">CHANGELOG 变更记录</a><a href="../pages/ai-era-delivery.html">智能时代交付说明</a><a href="../pages/v2-delivery.html">插件平台 v2 交付说明</a></div><div class="nav-group"><h4>▣ 开发档案</h4><a href="../pages/audit.html">不足总结与改进建议</a><a href="../pages/code-review.html">CODE REVIEW 代码审查</a><a href="../pages/fixlog.html">FIXLOG 修复记录</a><a href="../pages/backlog.html">新功能占位清单</a></div><div class="nav-group"><h4>⚙ 运维</h4><a href="../pages/ops-manual.html">站点部署与运维手册</a><a href="../pages/ticket-desk.html">智能 AI 工单站使用说明</a><a href="../pages/plugin-store.html">官方插件市场与插件清单</a></div><div class="nav-group"><h4>· 首页</h4><a href="../index.html">Wiki 首页</a></div>
+</aside>
+<main id="main">
+<div class="crumb"><a href="../index.html">首页</a> / <span>插件开发</span> / 可视化插件制作器使用说明</div>
+<article class="md"><p class="desc">Python 桌面版：拖拽控件、21 套模板、首次教程</p><h1 id="python">插件制作器 · Python 桌面版 使用说明</h1>
+<blockquote>
+<p>一个用 <strong>Python 标准库 tkinter</strong> 写的原生窗口程序。Windows / Linux / macOS 都能跑，
+不装第三方包、不联网、单文件。生成物对齐 NebulaDrive 插件协议 v2 三文件契约。</p>
+</blockquote>
+<hr />
+<h2 id="1">1. 怎么启动</h2>
+<table>
+<thead>
+<tr>
+<th>系统</th>
+<th>做法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Windows</td>
+<td>双击 <code>启动-Windows.bat</code>（或直接 <code>python 插件制作器.py</code>）</td>
+</tr>
+<tr>
+<td>Linux / macOS</td>
+<td><code>./启动-Linux.sh</code>（或直接 <code>python3 插件制作器.py</code>）</td>
+</tr>
+</tbody>
+</table>
+<p>依赖只有 <strong>Python 3.8+ 和 tkinter</strong>：</p>
+<ul>
+<li>Windows：官网安装包自带 tkinter，安装时勾选 <strong>Add Python to PATH</strong> 和 <strong>tcl/tk and IDLE</strong>。</li>
+<li>Linux：多数发行版预装；缺的话 <code>sudo apt install python3-tk</code>（Fedora 用 <code>python3-tkinter</code>，Arch 用 <code>tk</code>）。</li>
+</ul>
+<p><strong>第一次启动会自动弹出 6 步新手教程</strong>，看完点「开始使用」即可；以后从「帮助 → 新手教程」重看。
+想恢复首次体验，删掉用户主目录下的 <code>.nebuladrive_plugin_builder.json</code>。</p>
+<hr />
+<h2 id="2">2. 界面五个页签</h2>
+<table>
+<thead>
+<tr>
+<th>页签</th>
+<th>干什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>① 设计</td>
+<td>左侧控件库<strong>单击或拖拽</strong>到中间画布；点卡片在右侧改属性；↑↓ 排序、✕ 删除。顶部三个固定项：插件身份 / 运行时 / 目录布局</td>
+</tr>
+<tr>
+<td>② 代码</td>
+<td>直接编辑每个生成文件；改动自动写回工程。「重置为自动生成」「同步回设计」可双向切换</td>
+</tr>
+<tr>
+<td>③ 校验</td>
+<td>模拟宿主 <code>ParseManifest</code> / <code>ParseBegg</code> / <code>crossCheck</code> / <code>ValidateFiles</code>，红字会阻止构建</td>
+</tr>
+<tr>
+<td>④ 构建</td>
+<td>预览目录树和每个文件内容，导出 ZIP 或导出到目录</td>
+</tr>
+<tr>
+<td>⑤ 页面预览</td>
+<td>用原生控件模拟网盘里的插件页面（侧边栏 + 控件），也能在浏览器打开完整 HTML</td>
+</tr>
+</tbody>
+</table>
+<p><strong>两种画布</strong>：「结构画布」放页面 / 设置字段 / 主题 / 注册型能力 / 钩子订阅；「页面画布」放标题 / 卡片 / 统计 / 表格 / 按钮等页面控件。
+「钩子订阅」控件会打开 <strong>99 个钩子选择器</strong>，可搜索、可批量勾选。</p>
+<hr />
+<h2 id="3-21-15">3. 21 套内置模板（≥ 15 套要求）</h2>
+<table>
+<thead>
+<tr>
+<th>分组</th>
+<th>模板</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>入门 3</td>
+<td>空白最小工程、Hello 面板（PHP）、ASS/ 子目录布局</td>
+</tr>
+<tr>
+<td>页面与运行时 6</td>
+<td>Python 数据看板、Node.js 面板、Go 标准库 HTTP 服务、纯静态站点、外部 HTTPS 页面、后台管理控制台</td>
+</tr>
+<tr>
+<td>主题与 UI 2</td>
+<td>海洋蓝主题包、UI 全家桶</td>
+</tr>
+<tr>
+<td>钩子 / JSON-RPC 5</td>
+<td>上传守卫（决策型）、请求 WAF、全量审计日志、配额变换（ctxPatch）、Node.js 钩子插件</td>
+</tr>
+<tr>
+<td>注册型能力 3</td>
+<td>自定义存储后端、自定义通知渠道、备份与恢复扩展</td>
+</tr>
+<tr>
+<td>AI 场景 2</td>
+<td>AI 助手页面、AI 内容审核</td>
+</tr>
+</tbody>
+</table>
+<p>每套都能一键构建并被宿主装载。左上模板下拉或「模板库」菜单切换。</p>
+<hr />
+<h2 id="4">4. 三步做一个插件</h2>
+<ol>
+<li>选模板 → 在「设计」页拖控件、改属性（或在「代码」页写 PHP / Python）。</li>
+<li>「③ 校验」全绿 → 点右上「一键构建 ZIP」。</li>
+<li>解压到 <code>plugins/&lt;插件名&gt;/</code> → 后台开启<strong>全局总开关</strong>（勾选风险确认）→ 启用插件。</li>
+</ol>
+<blockquote>
+<p>插件默认关闭是刻意设计；宿主对 <code>/ext/*</code> 完全透传鉴权，插件页面必须自己鉴权。
+缺 PHP / Python / Node 等解释器时，宿主会在启用时明确报错，不静默降级。</p>
+</blockquote>
+<hr />
+<h2 id="5">5. 命令行自检（无桌面环境也能用）</h2>
+<pre><code class="language-bash">python3 插件制作器.py --selftest          # 21 套模板：生成 + 校验 + ZIP CRC + 导出目录
+python3 插件制作器.py --gui-check         # 虚拟显示器下跑 94 项 GUI 交互自检
+python3 插件制作器.py --build-all DIR     # 批量导出 21 套模板到 DIR，供联调
+python3 插件制作器.py --smoke             # 窗口冒烟，2 秒后自动退出
+</code></pre>
+<p><code>--selftest</code> 已覆盖 21/21 模板；产物另经宿主 Go 代码 <code>LoadContract</code>、<code>InstallFromDir</code>、<code>InstallFromZip</code> 全量验证 21/21 通过。</p>
+<hr />
+<h2 id="6">6. 三文件契约速记</h2>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plugin.json</code></td>
+<td>我是谁、我要什么（身份 / 钩子 / 页面 / 注册型能力）</td>
+</tr>
+<tr>
+<td><code>register.go</code></td>
+<td>把同样的话用 Go 字面量再说一遍，<strong>宿主只读不编译，服务器不用装 Go</strong></td>
+</tr>
+<tr>
+<td><code>co.BEGG</code></td>
+<td>怎么跑起来、长什么样（runtime / requires / home / pages / ui）</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>三个文件可在任意子目录（<code>ASS/</code> 也行），宿主递归定位，深度 ≤ 5。</li>
+<li><strong>路径基准是 <code>co.BEGG</code> 所在目录</strong>：<code>home</code> 写 <code>in.php</code>，不要写 <code>ASS/in.php</code>。</li>
+<li>三份声明互相核对（name / version / protocolVersion / hooks / runtime / home），不一致直接拒绝装载。</li>
+</ul>
+<hr />
+<h2 id="7-ai">7. 附录：让 AI 帮你写插件时的要求模板</h2>
+<p>如果你想把「做一个插件」这件事交给 AI，可以直接复制下面这段，避免它写出宿主装不上的东西：</p>
+<blockquote>
+<p>请帮我做一个 NebulaDrive v2 插件，要求：
+1. 必须包含 <code>plugin.json</code>、<code>register.go</code>、<code>co.BEGG</code> 三个文件；<code>register.go</code> 只是 Go 字面量声明，不要写需要编译的代码。
+2. <code>plugin.json</code> 的 <code>protocolVersion</code> 为 2，<code>hooks</code>/<code>pages</code>/<code>providers</code> 不可三者皆空；钩子名必须来自宿主 99 个钩子表。
+3. <code>register.go</code> 与 <code>plugin.json</code> 的 <code>Hooks</code> 集合、以及 <code>Name</code>/<code>Runtime</code>/<code>Home</code> 必须完全一致。
+4. <code>co.BEGG</code> 的 <code>runtime</code> 只能是 php/python/node/go/binary/external；<code>requires</code> 写明解释器；<code>home</code>/<code>static</code> 用相对 <code>co.BEGG</code> 所在目录的路径，不含 <code>..</code>。
+5. 目录形式不限，<code>ASS/</code> 子目录布局也可以；不要写 <code>ASS/in.php</code> 这种带前缀的路径。
+6. 订阅了钩子就要提供可执行的 <code>entry</code>（单个文件名），并给出 Python 或 Node 的 JSON-RPC over stdio 骨架，日志走 stderr。
+7. 插件页面自己鉴权（宿主对 <code>/ext/*</code> 完全透传），并把用到的 <code>NB_PLUGIN_*</code> 环境变量说明清楚。
+8. 附带 README：安装步骤（开全局总开关 → 启用单插件）、默认关闭说明、安全提醒。
+9. 优先参考现成模板：入门 / 页面与运行时 / 主题与 UI / 钩子 / 注册型能力 / AI 场景，共 21 套，选最接近的一套改。
+10. 生成后自查：JSON 严格字段白名单、无未知字段、home 文件真实存在、三文件交叉一致。</p>
+</blockquote>
+<hr />
+<h2 id="8">8. 常见问题</h2>
+<ul>
+<li><strong>装了插件没反应</strong>：先去后台开启全局总开关，再启用单个插件。</li>
+<li><strong>提示缺少解释器</strong>：服务器没装对应解释器，装上再启用；宿主不会自动安装。</li>
+<li><strong>Linux 下打不开窗口</strong>：缺 <code>python3-tk</code>，见第 1 节。</li>
+<li><strong>代码页改了没生效</strong>：改动会自动写回；想丢弃手工内容点「重置为自动生成」。</li>
+<li><strong>构建被阻止</strong>：去「③ 校验」看红字，最常见是 <code>home</code> 文件缺失或钩子两边不一致。</li>
+</ul></article>
+<div class="foot">NebulaDrive Wiki · 由项目文档自动构建 · 最后生成 2026-11-14</div>
+</main>
+<script src="../assets/app.js"></script></body></html>

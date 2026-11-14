@@ -1,0 +1,11 @@
+{
+  "title": "上传安全守卫",
+  "description": "拦截可执行文件、脚本与路径穿越文件名，并可限制单文件大小。",
+  "tags": [
+    "上传",
+    "安全",
+    "文件"
+  ],
+  "author": "NebulaDrive Official",
+  "license": "AGPL-3.0-only"
+}

@@ -1,0 +1,11 @@
+{
+  "title": "登录爆破抑制",
+  "description": "同一 IP / 账号短时间连续登录失败后临时锁定，抑制暴力破解。",
+  "tags": [
+    "登录",
+    "安全",
+    "限流"
+  ],
+  "author": "NebulaDrive Official",
+  "license": "AGPL-3.0-only"
+}

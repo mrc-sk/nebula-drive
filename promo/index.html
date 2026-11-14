@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NebulaDrive 产品宣传片 · 4 分钟</title>
+<style>
+:root{
+  --bg:#070a18; --bg2:#0f152e; --card:#141d3c; --line:#2a3560;
+  --purple:#9374ff; --cyan:#48d6ec; --orange:#ffb760; --green:#6ce0a8;
+  --text:#eef3ff; --muted:#92a0c6;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:radial-gradient(1100px 620px at 12% 0%,rgba(147,116,255,.20),transparent 60%),
+             radial-gradient(900px 560px at 90% 85%,rgba(72,214,236,.14),transparent 60%),
+             linear-gradient(160deg,var(--bg),var(--bg2));
+  color:var(--text); min-height:100vh; padding:44px 22px 70px;
+  font-family:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+}
+.wrap{max-width:1080px;margin:0 auto}
+.pin{display:flex;gap:12px;align-items:flex-start;border:1px solid rgba(108,224,168,.45);background:linear-gradient(90deg,rgba(108,224,168,.10),rgba(108,224,168,.02));border-radius:12px;padding:13px 16px;margin-bottom:26px;font-size:13.5px;line-height:1.75;color:#cfe9dc}
+.pin b{color:var(--green)}
+.pin .tag{flex:none;font-weight:800;color:var(--green);letter-spacing:.06em;white-space:nowrap}
+.eyebrow{font-size:13px;letter-spacing:.28em;color:var(--muted);font-weight:700}
+h1{font-size:clamp(30px,5vw,50px);margin:14px 0 10px;letter-spacing:.02em}
+h1 span{background:linear-gradient(90deg,var(--purple),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{color:var(--muted);font-size:16px;line-height:1.85;max-width:780px}
+.chips{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0 30px}
+.chip{font-size:13px;padding:7px 15px;border-radius:999px;border:1px solid var(--line);background:rgba(20,29,60,.7);color:var(--muted)}
+.chip b{color:var(--text);font-weight:700}
+.player{
+  border-radius:18px;overflow:hidden;border:1px solid var(--line);
+  box-shadow:0 30px 80px rgba(0,0,0,.55),0 0 0 1px rgba(147,116,255,.10);
+  background:#000;position:relative;
+}
+video{width:100%;display:block;aspect-ratio:16/9;background:#000}
+h2{font-size:20px;margin:38px 0 16px;display:flex;align-items:center;gap:10px}
+h2::before{content:"";width:4px;height:20px;border-radius:3px;background:linear-gradient(var(--purple),var(--cyan))}
+.timeline{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:9px}
+.item{
+  text-align:left;cursor:pointer;border:1px solid var(--line);border-radius:11px;
+  background:rgba(20,29,60,.62);padding:10px 12px;color:var(--muted);
+  font-family:inherit;font-size:13px;transition:.18s;
+}
+.item:hover,.item.on{border-color:var(--cyan);background:rgba(72,214,236,.10);color:var(--text);transform:translateY(-2px)}
+.item .t{font-variant-numeric:tabular-nums;font-size:11px;color:var(--cyan);letter-spacing:.06em;display:block;margin-bottom:4px}
+.item .n{font-size:13.5px;font-weight:700}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-top:14px}
+.box{border:1px solid var(--line);border-radius:14px;background:rgba(20,29,60,.55);padding:20px}
+.box h3{font-size:15px;margin-bottom:10px;color:var(--text)}
+.box p{font-size:13.5px;line-height:1.9;color:var(--muted)}
+.box .ic{font-size:22px;display:block;margin-bottom:10px}
+.actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:32px}
+.btn{
+  display:inline-flex;align-items:center;gap:9px;padding:12px 22px;border-radius:10px;
+  text-decoration:none;font-size:14px;font-weight:700;transition:.18s;
+}
+.btn.primary{background:linear-gradient(100deg,var(--purple),#6f8cff);color:#fff;box-shadow:0 10px 28px rgba(147,116,255,.28)}
+.btn.ghost{border:1px solid var(--line);color:var(--muted);background:rgba(20,29,60,.6)}
+.btn:hover{transform:translateY(-2px);filter:brightness(1.1)}
+footer{margin-top:44px;padding-top:22px;border-top:1px solid var(--line);color:#6b7aa5;font-size:12.5px;line-height:1.9}
+footer a{color:var(--cyan);text-decoration:none}
+@media(max-width:600px){body{padding:26px 14px 50px}.timeline{grid-template-columns:repeat(auto-fill,minmax(136px,1fr))}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="pin"><span class="tag">📌 置顶 · V26-11.1</span><span>当前为<b>上线热修复版</b>：对外物料已去除源站信息、AI 工单答复补充站点事实约束、版本口径统一。产品功能与部署零改动，主程序无需重装。<b>本片内容不含任何修复说明</b>，可正常投放。详见 <a href="V26-11.1-热修复公告.md" style="color:var(--cyan)">热修复公告</a>。</span></div>
+  <div class="eyebrow">NEBULADRIVE　·　PROMO FILM 2026　·　V2</div>
+  <h1>NebulaDrive <span>产品宣传片</span></h1>
+  <p class="lead">4 分钟完整版，30 个镜头每 8 秒一切，卡在 120 BPM 的鼓点上。每屏只讲一件事，把插件平台 v2、三文件契约、10 个官方插件、三档 AI 与本地小模型工单站讲透。片中界面均为真实站点实拍。</p>
+  <div class="chips">
+    <span class="chip">时长 <b>04:00</b></span>
+    <span class="chip">分辨率 <b>1280×720</b></span>
+    <span class="chip">帧率 <b>24 fps</b></span>
+    <span class="chip">编码 <b>H.264 / AAC</b></span>
+    <span class="chip">镜头 <b>30 个</b></span>
+    <span class="chip">配乐 <b>120 BPM 强节奏</b></span>
+    <span class="chip">实拍 <b>7 张真实站点</b></span>
+  </div>
+
+  <div class="player">
+    <video id="v" controls playsinline preload="metadata" poster="assets/poster.jpg">
+      <source src="NebulaDrive-Promo-2026.mp4" type="video/mp4">
+      你的浏览器不支持 HTML5 视频，请直接下载 MP4 播放。
+    </video>
+  </div>
+
+  <h2>章节导航（30 章，点击跳转）</h2>
+  <div class="timeline" id="tl"></div>
+
+  <h2>关于这支片子</h2>
+  <div class="grid">
+    <div class="box"><span class="ic">◈</span><h3>内容更足</h3><p>从技术底座、HTTPS 回源、三站点全景，到配额与准入、108 钩子、三档钩子、Provider 与 v1 兼容、三文件契约、任意语言、默认安全、制作器、插件市场、签名信任、AI 三档、本地工单站与 Wiki，共 30 个主题。</p></div>
+    <div class="box"><span class="ic">♪</span><h3>音乐更带感</h3><p>120 BPM 电子配乐：four-on-the-floor 底鼓、clap、16 分 hihat、律动 bass、sidechain pad、琶音与主旋律，按 Intro → Groove → Build → Drop → Break → Drop2 → Finale 分段推进，含 riser 与 impact 转场。</p></div>
+    <div class="box"><span class="ic">▣</span><h3>画面更利落</h3><p>信息密集的架构图与多要点面板全部减负；每屏只讲一件事，字号更大、留白更多。切镜改硬切 + 光扫，背景光晕、星点与进度条随鼓点脉冲，视听同步。</p></div>
+  </div>
+
+  <div class="actions">
+    <a class="btn primary" href="NebulaDrive-Promo-2026.mp4" download>↓　下载 MP4</a>
+    <a class="btn ghost" href="发布文案.md">发布文案（可直接复制）</a>
+    <a class="btn ghost" href="分镜脚本.md">分镜脚本</a>
+    <a class="btn ghost" href="https://cloud.berrywing.top/" target="_blank" rel="noopener">访问线上站点 ↗</a>
+  </div>
+
+  <footer>
+    NebulaDrive · V26-11.1　|　站点：<a href="https://cloud.berrywing.top/">cloud.berrywing.top</a>　|　成片文件：NebulaDrive-宣传片.mp4<br>
+    配乐与画面均为原创程序化生成，无外部素材与版权依赖；修改文案或时长请编辑 make_video.py 顶部的 SCENES 列表后重新运行。
+  </footer>
+</div>
+<script>
+const CH = [
+  [0,"序章"],[8,"定位"],[16,"技术底座"],[24,"已经上线"],[32,"HTTPS 与回源"],
+  [40,"三站点"],[48,"文件管理"],[56,"上传与分享"],[64,"WebDAV 与更多"],[72,"配额 1 GB"],
+  [80,"注册准入"],[88,"安全默认值"],[96,"插件平台 v2"],[104,"108 个钩子"],[112,"通知型"],
+  [120,"决策型"],[128,"变换型"],[136,"Provider 与兼容"],[144,"三文件契约"],[152,"任意语言"],
+  [160,"默认安全"],[168,"可视化制作器"],[176,"官方插件市场"],[184,"10 个官方插件"],[192,"签名与信任"],
+  [200,"AI 智能时代"],[208,"智能体验"],[216,"本地 AI 工单站"],[224,"项目 Wiki"],[232,"开始使用"]
+];
+const v=document.getElementById('v'), tl=document.getElementById('tl');
+CH.forEach(([s,n])=>{
+  const b=document.createElement('button');
+  b.className='item'; b.dataset.s=s;
+  const mm=String(Math.floor(s/60)).padStart(2,'0'), ss=String(s%60).padStart(2,'0');
+  b.innerHTML='<span class="t">'+mm+':'+ss+'</span><span class="n">'+n+'</span>';
+  b.onclick=()=>{v.currentTime=s;v.play();};
+  tl.appendChild(b);
+});
+v.addEventListener('timeupdate',()=>{
+  let cur=0;
+  CH.forEach(([s],i)=>{if(v.currentTime>=s)cur=i;});
+  [...tl.children].forEach((e,i)=>e.classList.toggle('on',i===cur));
+});
+</script>
+</body>
+</html>

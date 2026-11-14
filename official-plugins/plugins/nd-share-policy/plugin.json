@@ -1,0 +1,17 @@
+{
+  "name": "nd-share-policy",
+  "title": "分享链接策略",
+  "version": "1.0.0",
+  "author": "NebulaDrive Official",
+  "description": "强制分享链接设置密码与有效期，禁止无保护的永久公开链接。",
+  "entry": "plugin.py",
+  "protocolVersion": 2,
+  "hooks": [
+    "onShareCreateBefore"
+  ],
+  "permissions": [
+    "share:read"
+  ],
+  "license": "AGPL-3.0-only",
+  "homepage": "https://cloud.berrywing.top/"
+}

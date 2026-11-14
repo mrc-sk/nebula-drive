@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>插件平台 v2 交付说明 · NebulaDrive Wiki</title>
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<aside id="sidebar">
+<div class="brand">NebulaDrive Wiki<small>项目文档 · 部署运维 · 插件开发</small></div>
+<input id="search" placeholder="搜索文档…" autocomplete="off">
+<div id="searchResults"></div>
+<div class="nav-group"><h4>▶ 入门</h4><a href="../pages/overview.html">项目概览 README</a><a href="../pages/license.html">AGPL 许可通俗说明</a></div><div class="nav-group"><h4>◈ 插件开发</h4><a href="../pages/plugin-manual.html">插件制作手册</a><a href="../pages/plugin-v2-guide.html">插件平台 v2 完全指南</a><a href="../pages/plugin-system-guide.html">插件系统完全指南</a><a href="../pages/pbclus-spec.html">PBClus 格式规范</a><a href="../pages/plugin-hotload.html">插件热加载：进度与接续</a><a href="../pages/plugin-builder.html">可视化插件制作器使用说明</a></div><div class="nav-group"><h4>▤ 版本与交付</h4><a href="../pages/changelog.html">CHANGELOG 变更记录</a><a href="../pages/ai-era-delivery.html">智能时代交付说明</a><a class="active" href="../pages/v2-delivery.html">插件平台 v2 交付说明</a></div><div class="nav-group"><h4>▣ 开发档案</h4><a href="../pages/audit.html">不足总结与改进建议</a><a href="../pages/code-review.html">CODE REVIEW 代码审查</a><a href="../pages/fixlog.html">FIXLOG 修复记录</a><a href="../pages/backlog.html">新功能占位清单</a></div><div class="nav-group"><h4>⚙ 运维</h4><a href="../pages/ops-manual.html">站点部署与运维手册</a><a href="../pages/ticket-desk.html">智能 AI 工单站使用说明</a><a href="../pages/plugin-store.html">官方插件市场与插件清单</a></div><div class="nav-group"><h4>· 首页</h4><a href="../index.html">Wiki 首页</a></div>
+</aside>
+<main id="main">
+<div class="crumb"><a href="../index.html">首页</a> / <span>版本与交付</span> / 插件平台 v2 交付说明</div>
+<article class="md"><p class="desc">v2 改造范围、验证结论与文件清单</p><h1 id="v2">插件平台 v2 —— 交付说明</h1>
+<p>本次接续上一轮「钩子不够多，改得尽量多、完全够用」的任务，把<strong>后端收尾缺陷、前端 UI 扩展点、后台管理界面、测试与文档</strong>全部落地并跑通验证。所有改动都在本地 clone 中完成，<strong>没有提交到 GitHub</strong>。</p>
+<hr />
+<h2 id="1">1. 本轮实际做了什么</h2>
+<h3 id="a-8">A. 修掉 8 个真实缺陷（都是跑起来/测起来才暴露的）</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>缺陷</th>
+<th>修法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>pluginhttp.Serve</code> 每个请求都改写共享 <code>ReverseProxy.Director</code>：并发数据竞争，且每次把上次 Director 包一层闭包，闭包链无限增长</td>
+<td><code>Director</code> 在 <code>Start</code> 时一次性设置，路径通过 <code>request.Context()</code> 传入，零共享可变状态</td>
+</tr>
+<tr>
+<td>2</td>
+<td>PHP 页面 URL 把 <code>static</code> 目录重复拼进路径（<code>php -S -t ASS</code> 下请求 <code>/ASS/in.php</code> → 404）</td>
+<td>新增 <code>Begg.StaticDir()</code> / <code>PagePath()</code>；<code>Start</code> 用转换后的副本登记侧边栏 URL，<code>Serve</code> 用同一路径</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>install.InstallFromDir</code> 仍按根目录读 <code>plugin.json</code>，<code>findPluginRoot</code> 只看一级，装不了「<code>ASS/</code> 里放清单」的插件</td>
+<td>改用 <code>plugin.LoadContract</code> 递归定位、整体复制源目录（不裁层）、<code>findPluginRoot</code> 递归</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong><code>Manifest.Validate</code> 无条件要求 <code>entry</code></strong>，v2 纯页面插件在解析清单阶段就被拒，之前所有页面插件设计都落不了地</td>
+<td>增加 <code>purePageV2</code> 例外：不订阅 hooks + 声明 pages 时可省略 entry</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>「v1 自动兼容」没做到底</strong>：宿主握手硬下发 <code>HostProtocol=2</code>，示例插件 <code>referer-guard</code> 校验 <code>==1</code> 直接拒绝启动</td>
+<td>新增 <code>host.handshakeProtocol</code>：对声明 v1 的插件，握手时宿主表现为 v1，老插件零改动</td>
+</tr>
+<tr>
+<td>6</td>
+<td>进程内 Go 插件的 <code>CtxPatch</code> 被 <code>runHandler</code> 丢弃，「变换」档只对进程外插件生效</td>
+<td><code>runHandler</code> 回写返回 map，兼容直接 kv 与 <code>{"CtxPatch": {...}}</code> 两种写法</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>verifyEntry</code> 只认 <code>plugin.json</code> 的 pages，页面只写在 <code>co.BEGG</code> 的插件被误判缺 entry</td>
+<td>用 <code>contract.Begg.Pages</code> 一起判断</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>ValidateFiles</code> 把 JSON-RPC <code>entry</code> 当页面文件按 <code>BeggDir</code> 校验，误判「可执行文件在根、co.BEGG 在子目录」的合法布局</td>
+<td>只校验 <code>home</code> / <code>static</code>，<code>entry</code> 交由 <code>ExecPath</code> 按插件根目录解析</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>第 5 条是全量 <code>go test ./...</code> 才暴露的：之前只跑 <code>go build</code> 看不到。这也说明为什么这轮一定要把测试跑绿。</p>
+</blockquote>
+<h3 id="b-ui">B. 前端 UI 扩展点（用户点名要开放的部分）</h3>
+<table>
+<thead>
+<tr>
+<th>新增文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>frontend/src/store/pluginUI.ts</code></td>
+<td>拉取 <code>/api/plugins/ui</code>、归一化 URL（把后端给的 <code>127.0.0.1</code> 绝对地址收敛成同源相对路径）、应用主题 CSS 变量、广播刷新</td>
+</tr>
+<tr>
+<td><code>frontend/src/pages/PluginPage.tsx</code></td>
+<td><code>/ext-page/:plugin/:page</code> iframe 容器：刷新 / 新窗口 / 全屏 / 风险提示</td>
+</tr>
+<tr>
+<td><code>frontend/src/components/PluginThemePicker.tsx</code></td>
+<td>顶栏插件主题选择器（有插件主题才出现）</td>
+</tr>
+<tr>
+<td><code>frontend/src/components/PluginSettingsPanel.tsx</code></td>
+<td>用户菜单里的插件设置面板，按 <code>SettingField</code> 生成表单</td>
+</tr>
+<tr>
+<td><code>frontend/src/pages/admin/PluginV2Panels.tsx</code></td>
+<td>全局总开关卡片、开启前风险确认弹窗、三文件契约诊断弹窗、UI 扩展点总览</td>
+</tr>
+</tbody>
+</table>
+<p>改动文件：<code>api/client.ts</code>（新增类型与 5 个接口）、<code>layouts/MainLayout.tsx</code>（主/后台/移动侧边栏都渲染插件项 + lucide 图标白名单）、<code>App.tsx</code>（注册路由 + 登录后加载）、<code>pages/admin/Plugins.tsx</code>（新增「UI 扩展点」tab、每插件「诊断」按钮）、<code>i18n/zh-CN.ts</code> 与 <code>en.ts</code>（新增文案，其余 3 语言走 <code>fallbackLng</code>）。</p>
+<h3 id="c">C. 后台管理界面</h3>
+<ul>
+<li><strong>全局插件总开关</strong>：默认关闭，开启前强制免责弹窗（4 条风险 + 勾选确认），后端 <code>acknowledge=true</code> 二次校验。</li>
+<li><strong>协议/钩子概览</strong>：协议 v2、99 个钩子、已接入数、v1 兼容标记。</li>
+<li><strong>三文件契约诊断</strong>：每个插件一个「诊断」按钮，显示缺哪个文件、缺哪个解释器、声明哪里不一致。</li>
+<li><strong>UI 扩展点 tab</strong>：侧边栏项、主题包、设置面板、12 类注册型能力一览。</li>
+</ul>
+<h3 id="d">D. 测试与文档</h3>
+<ul>
+<li>新增 <code>pkg/plugin/plugin_v2_test.go</code>、<code>pkg/plugin/install/contract_v2_test.go</code>、<code>pkg/plugin/host/handshake_v1_test.go</code>。</li>
+<li>修正 2 个腐化的旧测试：<code>filesystem.TestLocalConfigJSONEscaping</code>（Linux 上拼不出畸形 JSON）与 <code>controllers.TestPluginHooksReturnsRealCounts</code>（写死 10 个钩子）。</li>
+<li>新增 <code>docs/插件平台v2-完全指南.md</code>（13 节：兼容策略、三文件契约、99 钩子、注册型能力、HTTP 页面、UI 扩展点、默认关闭、PHP/Python 完整示例、迁移、验证命令、已知限制）。</li>
+</ul>
+<hr />
+<h2 id="2">2. 验证结果</h2>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>go build ./...</code></td>
+<td>✅ 通过</td>
+</tr>
+<tr>
+<td><code>go vet ./...</code></td>
+<td>✅ 通过</td>
+</tr>
+<tr>
+<td><code>go test ./... -count=1</code></td>
+<td>✅ 全绿（含未修改的 referer-guard 端到端测试）</td>
+</tr>
+<tr>
+<td><code>npx tsc -b</code></td>
+<td>✅ 通过</td>
+</tr>
+<tr>
+<td><code>npx vite build</code></td>
+<td>✅ 通过，产物写入 <code>backend/frontend_dist/</code>（仅有既有的 chunk 体积警告）</td>
+</tr>
+<tr>
+<td>钩子接线静态检查</td>
+<td>✅ 99 个常量 / 0 个缺调用点</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3">3. 交付物</h2>
+<table>
+<thead>
+<tr>
+<th>路径</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/workspace/nebula-drive-plugin-v2/</code></td>
+<td><strong>完整可编译源码副本</strong>（含 <code>backend/frontend_dist</code> 当前前端产物，直接 <code>go build</code> 可用；已排除 <code>.git</code>、<code>node_modules</code>、运行数据）</td>
+</tr>
+<tr>
+<td><code>/workspace/nebula-plugin-v2.patch</code></td>
+<td>源码补丁，52 个文件、316 KB，可直接 <code>git apply</code>（<strong>不含前端构建产物</strong>，apply 后需跑一次 <code>npx vite build</code>）</td>
+</tr>
+<tr>
+<td><code>/workspace/插件平台v2-完全指南.md</code></td>
+<td>完整开发指南（副本也在仓库 <code>docs/</code> 内）</td>
+</tr>
+<tr>
+<td><code>/workspace/NebulaDrive-不足总结与改进建议.md</code></td>
+<td>上一阶段的评审报告（保留）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_1">应用方式二选一</h3>
+<pre><code class="language-bash"># 方式 A：直接用完整副本替换/覆盖你的工作副本
+cp -a /workspace/nebula-drive-plugin-v2/. &lt;你的仓库目录&gt;/
+
+# 方式 B：把补丁打到现有仓库
+cd &lt;你的仓库目录&gt;
+git apply /workspace/nebula-plugin-v2.patch
+cd frontend &amp;&amp; npm ci &amp;&amp; npx vite build   # 重新生成 frontend_dist
+cd ../backend &amp;&amp; go test ./... -count=1
+</code></pre>
+<hr />
+<h2 id="4">4. 使用提醒（重要）</h2>
+<ul>
+<li><strong>插件系统默认关闭</strong>：全局总开关 + 单插件双保险。开启总开关必须走免责弹窗，后端强制 <code>acknowledge=true</code>。</li>
+<li><strong><code>/ext/*</code> 完全透传鉴权</strong>：插件自负责登录与权限，宿主不注入 token、不设 iframe sandbox。插件页面与宿主同源（反代），理论上能读宿主 cookie —— 这是「开启即授信任」的一部分。</li>
+<li><strong><code>co.BEGG</code> 里的相对路径基准是 co.BEGG 所在目录</strong>，不是插件根目录。把 <code>co.BEGG</code> 和 <code>in.php</code> 一起放进 <code>ASS/</code>，<code>home</code> 写 <code>"in.php"</code> 即可；<code>register.go</code> 与 <code>co.BEGG</code> 的 <code>Home</code> / <code>home</code> 必须字面一致。</li>
+<li>缺解释器时<strong>装载阶段直接报错</strong>，不自动安装、不静默降级。</li>
+</ul>
+<hr />
+<h2 id="5">5. 仍未做 / 后续规划</h2>
+<ul>
+<li><strong>可视化插件制作器</strong>：你提的「正式版以后做」，本次未实现；当前靠三文件契约 + 后台诊断降低试错成本。</li>
+<li><code>/api/admin/stats/*</code> 三个统计接口（v1 遗留）仍未内置；<code>onStatsCollect</code> 钩子已就位，可交给社区插件补数据。</li>
+<li>i18n 的繁中 / 日 / 韩三种语言暂走 <code>fallbackLng: 'zh-CN'</code>，需要完整本地化时再补。</li>
+<li>插件进程没有沙箱 / 资源配额，权限等同主服务；这是已确认的取舍，若要收紧需单独做隔离层。</li>
+</ul></article>
+<div class="foot">NebulaDrive Wiki · 由项目文档自动构建 · 最后生成 2026-11-14</div>
+</main>
+<script src="../assets/app.js"></script></body></html>

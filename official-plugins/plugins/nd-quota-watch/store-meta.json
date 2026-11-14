@@ -1,0 +1,11 @@
+{
+  "title": "配额用量预警",
+  "description": "当用户存储用量接近配额上限时写入预警信息，便于提前扩容或提醒。",
+  "tags": [
+    "配额",
+    "运维",
+    "通知"
+  ],
+  "author": "NebulaDrive Official",
+  "license": "AGPL-3.0-only"
+}
