@@ -20,6 +20,7 @@ import (
 	"github.com/nebula-drive/nebula/pkg/util"
 	"github.com/nebula-drive/nebula/service"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 type loginReq struct {
@@ -397,29 +398,86 @@ func verifyCaptcha(token string) bool {
 // ---- 公开注册 ----
 
 type registerReq struct {
-	UserName string `json:"userName" binding:"required"`
-	Password string `json:"password" binding:"required"`
-	Email    string `json:"email"`
+	UserName   string `json:"userName" binding:"required"`
+	Password   string `json:"password" binding:"required"`
+	Email      string `json:"email"`
+	InviteCode string `json:"inviteCode"` // 注册邀请码（后台生成、未失效）
 }
 
-// Register 公开注册（需后台开启 security.allow_register）
+// Register 公开注册。
+//
+// 两条通路：
+//   - 自由注册：后台开启 security.allow_register 时，无需邀请码即可注册（沿用旧行为）。
+//   - 邀请码注册：提交后台已创建且未失效的邀请码即可注册；即使自由注册关闭也放行，
+//     这样站点可以「关闭自由注册、只凭邀请码进人」。
+//
+// 邀请码校验通过后，按该码绑定的套餐类型（RedemptionCode.PlanID）给新注册用户
+// 分配初始配额 / 套餐 / 订阅，累计使用次数、用尽自动停用、写审计日志与兑换流水，
+// 即「用完看该码类型做处理」。
+//
+// 注册表单字段通过 hooks.Gate 的 extras 透传给 onAuthRegisterBefore 钩子，
+// 让注册码类插件（如 nd-invite-code）也能读到 inviteCode 做二次校验。
 func Register(c *gin.Context) {
 	// [plugin-hook] HookAuthRegisterAfter（完成后）
 	defer hooks.Emit(plugin.HookAuthRegisterAfter, hooks.ReqCtx(c, nil))
-	// [plugin-hook] HookAuthRegisterBefore（决策/变换，可拦截）
-	if __ok, __why, _ := hooks.Gate(plugin.HookAuthRegisterBefore, c, nil); !__ok {
-		c.JSON(403, gin.H{"code": 403, "message": __why})
-		return
-	}
-	if !getSettingBool("security.allow_register", false) {
-		c.JSON(http.StatusForbidden, gin.H{"code": 1, "message": "未开放注册"})
-		return
-	}
+
 	var req registerReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
 		return
 	}
+
+	// [plugin-hook] HookAuthRegisterBefore（决策/变换，可拦截）
+	// 透传注册表单字段，供插件校验 / 变换；不把密码放进 ctx。
+	if __ok, __why, _ := hooks.Gate(plugin.HookAuthRegisterBefore, c, map[string]any{
+		"userName": req.UserName, "email": req.Email, "inviteCode": req.InviteCode,
+	}); !__ok {
+		c.JSON(403, gin.H{"code": 403, "message": __why})
+		return
+	}
+
+	inviteCode := strings.ToUpper(strings.TrimSpace(req.InviteCode))
+	requireInvite := getSettingBool("security.require_invite_code", false)
+	allowFree := getSettingBool("security.allow_register", false)
+
+	var invite *models.RedemptionCode
+	var plan *models.Plan
+	if inviteCode != "" {
+		var rc models.RedemptionCode
+		if err := db.Get().Where("code = ?", inviteCode).First(&rc).Error; err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "邀请码不存在"})
+			return
+		}
+		if !rc.IsActive {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "邀请码已失效"})
+			return
+		}
+		if rc.ExpiresAt != nil && rc.ExpiresAt.Before(time.Now()) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "邀请码已过期"})
+			return
+		}
+		if rc.MaxUses > 0 && rc.UsedCount >= rc.MaxUses {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "邀请码使用次数已达上限"})
+			return
+		}
+		var p models.Plan
+		if err := db.Get().Where("id = ? AND is_active = ?", rc.PlanID, true).First(&p).Error; err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "邀请码对应的套餐已下架，请联系管理员"})
+			return
+		}
+		invite, plan = &rc, &p
+	} else {
+		// 未填邀请码：要么强制需要邀请码，要么自由注册已开启，否则拒绝
+		if requireInvite {
+			c.JSON(http.StatusForbidden, gin.H{"code": 1, "message": "本站需凭邀请码注册，请填写有效邀请码"})
+			return
+		}
+		if !allowFree {
+			c.JSON(http.StatusForbidden, gin.H{"code": 1, "message": "未开放注册，请联系管理员获取邀请码"})
+			return
+		}
+	}
+
 	if err := validatePassword(req.Password); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
 		return
@@ -429,14 +487,83 @@ func Register(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "用户名已存在"})
 		return
 	}
+
 	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	u := models.User{
 		UserName: req.UserName, Email: req.Email, Password: string(hash),
 		GroupID: 1, NickName: req.UserName,
 	}
-	if err := db.Get().Create(&u).Error; err != nil {
+	// 用事务把「建用户 + 按码类型处理 + 累计次数」绑在一起，避免半途失败产生脏数据。
+	err := db.Get().Transaction(func(tx *gorm.DB) error {
+		if e := tx.Create(&u).Error; e != nil {
+			return e
+		}
+		if invite == nil || plan == nil {
+			return nil
+		}
+		now := time.Now()
+		end := now.AddDate(0, plan.DurationMonths, 0)
+		sub := models.Subscription{
+			UserID: u.ID, UserName: u.UserName, PlanID: plan.ID, PlanName: plan.DisplayName,
+			CodeID: invite.ID, Code: invite.Code, StartTime: now, EndTime: end, Status: "active",
+		}
+		if e := tx.Create(&sub).Error; e != nil {
+			return e
+		}
+		if e := tx.Model(&models.User{}).Where("id = ?", u.ID).Updates(map[string]any{
+			"plan_id": plan.ID, "plan_expire_at": end,
+		}).Error; e != nil {
+			return e
+		}
+		nextUsed := invite.UsedCount + 1
+		updates := map[string]any{"used_count": nextUsed}
+		if invite.MaxUses > 0 && nextUsed >= invite.MaxUses {
+			updates["is_active"] = false // 次数用尽自动失效
+		}
+		if e := tx.Model(&models.RedemptionCode{}).Where("id = ?", invite.ID).Updates(updates).Error; e != nil {
+			return e
+		}
+		if e := tx.Create(&models.RedemptionLog{
+			CodeID: invite.ID, Code: invite.Code, UserID: u.ID, UserName: u.UserName,
+			PlanID: plan.ID, PlanName: plan.DisplayName,
+			IP: c.ClientIP(), UA: c.Request.UserAgent(),
+		}).Error; e != nil {
+			return e
+		}
+		return tx.Create(&models.AuditLog{
+			UserID: u.ID, UserName: u.UserName, Action: "register_with_invite",
+			Target: "code=" + invite.Code,
+			IP:     c.ClientIP(), UA: c.Request.UserAgent(),
+			Detail: "plan=" + plan.DisplayName,
+		}).Error
+	})
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": u})
+}
+
+// RegisterMode 公开查询注册策略，供登录页决定是否显示「注册 / 邀请码」入口。
+// 无需登录，不泄露任何敏感配置。
+func RegisterMode(c *gin.Context) {
+	var plans []models.Plan
+	if db.Get() != nil {
+		db.Get().Where("is_active = ?", true).Order("sort_order asc, id asc").Find(&plans)
+	}
+	list := make([]gin.H, 0, len(plans))
+	for _, p := range plans {
+		list = append(list, gin.H{
+			"id": p.ID, "name": p.Name, "displayName": p.DisplayName,
+			"durationMonths": p.DurationMonths, "maxStorage": p.MaxStorage,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": gin.H{
+			"allowRegister":     getSettingBool("security.allow_register", false),
+			"requireInviteCode": getSettingBool("security.require_invite_code", false),
+			"plans":             list,
+		},
+	})
 }

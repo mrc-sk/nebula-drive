@@ -142,6 +142,7 @@ func Setup() *gin.Engine {
 		{
 			auth.POST("/login", middleware.RateLimit("login"), controllers.Login)
 			auth.POST("/register", controllers.Register)
+			auth.GET("/register-mode", controllers.RegisterMode)
 		}
 		authAuthed := api.Group("/auth", middleware.Auth(true))
 		{

@@ -356,6 +356,7 @@ export default {
     loading: '読み込み中…',
   },
   ns_admin: {
+    inviteCodes: '招待コード',
     webdav: 'WebDAV',
     noTrafficData: 'トラフィックデータなし',
     dashboard: 'ダッシュボード',

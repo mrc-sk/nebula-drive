@@ -527,11 +527,22 @@ func upsertSetting(key, value string) {
 	}
 }
 
+// forceSetSetting 无条件写入设置（用于版本号这类必须跟随二进制的字段）。
+func forceSetSetting(key, value string) {
+	var s models.Setting
+	if err := db.Get().Where("`key` = ?", key).First(&s).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		db.Get().Create(&models.Setting{Key: key, Value: value})
+	} else if err == nil && s.Value != value {
+		db.Get().Model(&s).Update("value", value)
+	}
+}
+
 // ensureBrandSettings 写入合规品牌默认设置（幂等）
 func ensureBrandSettings() {
 	upsertSetting("brand.name", "NebulaDrive")
 	upsertSetting("brand.author", "NebulaDrive Team")
-	upsertSetting("brand.version", "26-10.0-d")
+	// 版本号跟随二进制强制刷新，避免已安装库残留旧版本导致前后端 / 发版口径不一致。
+	forceSetSetting("brand.version", "26-11.2")
 	upsertSetting("trash.retention_days", "30")
 	upsertSetting("file.max_versions", "10")
 	// TLS

@@ -6,6 +6,7 @@ package pluginset
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -126,6 +127,24 @@ func LoadEnabledPlugins() {
 		okCount++
 	}
 	log.Printf("[INFO] 已启用插件 %d/%d 载入成功", okCount, len(list))
+}
+
+// LoadOneByName 供后台「热启用插件」调用：按名字从 DB 取记录并走与
+// 启动期完全相同的加载流程（契约校验 → 页面服务 → 按需 JSON-RPC 子进程）。
+//
+// 为什么需要它：EnablePlugin 早期直接调 host.Load，那条路径无条件
+// fork/exec Manifest.Entry；纯页面插件（pages 非空、hooks 为空、entry 省略）
+// 会被解析成「exec 插件目录」而报 permission denied。复用 loadOne 才能
+// 正确跳过 JSON-RPC 子进程、只拉起 HTTP 页面服务，并与重启后的行为一致。
+func LoadOneByName(name string) error {
+	if db.Get() == nil {
+		return fmt.Errorf("数据库未就绪")
+	}
+	var p models.Plugin
+	if err := db.Get().Where("name = ?", name).First(&p).Error; err != nil {
+		return fmt.Errorf("读取插件记录失败: %w", err)
+	}
+	return loadOne(p)
 }
 
 // loadOne 加载单个插件：先校验三文件契约（含解释器探测），

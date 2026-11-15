@@ -33,7 +33,7 @@ export default function About() {
           setBrand({
             name: d['brand.name'] || d.brandName || 'NebulaDrive',
             author: d['brand.author'] || d.brandAuthor || 'NebulaDrive Team',
-            version: d['brand.version'] || d.brandVersion || '26-10.0-d',
+            version: d['brand.version'] || d.brandVersion || '26-11.2',
           })
         }
       } catch {}

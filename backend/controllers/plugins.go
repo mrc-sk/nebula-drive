@@ -22,6 +22,7 @@ import (
 	"github.com/nebula-drive/nebula/pkg/plugin/host"
 	"github.com/nebula-drive/nebula/pkg/plugin/install"
 	"github.com/nebula-drive/nebula/pkg/plugin/pbclus"
+	"github.com/nebula-drive/nebula/pkg/pluginset"
 	"gorm.io/gorm"
 )
 
@@ -569,10 +570,20 @@ func EnablePlugin(c *gin.Context) {
 		}
 	}
 
-	if err := s.host.Load(host.LoadSpec{Name: name, Dir: dir, Manifest: man}); err != nil {
-		recordPluginError(name, err.Error())
+	// 纯页面插件（hooks 为空）只提供 HTTP 页面服务，没有 JSON-RPC 子进程。
+	// 走 pluginset.LoadOneByName（与启动期加载逻辑一致）拉起页面服务即可；
+	// 若仍调 host.Load，会因 entry 省略而把插件目录当可执行文件 exec 并报
+	// "permission denied"。其余插件维持原来的热加载路径。
+	var loadErr error
+	if len(man.Hooks) == 0 {
+		loadErr = pluginset.LoadOneByName(name)
+	} else {
+		loadErr = s.host.Load(host.LoadSpec{Name: name, Dir: dir, Manifest: man})
+	}
+	if loadErr != nil {
+		recordPluginError(name, loadErr.Error())
 		c.JSON(http.StatusBadRequest, gin.H{
-			"code": 400, "message": "启动插件失败: " + err.Error(),
+			"code": 400, "message": "启动插件失败: " + loadErr.Error(),
 		})
 		return
 	}
@@ -582,8 +593,14 @@ func EnablePlugin(c *gin.Context) {
 		"hooks": strings.Join(man.Hooks, ","),
 	})
 	auditPlugin(c, "plugin_enable", name, fmt.Sprintf("hooks=%v", man.Hooks))
+	// 纯页面插件没有 JSON-RPC 子进程实例，s.host.Get(name) 会是 nil；
+	// 只在真正拉起子进程的插件上读 PID，避免空指针。
+	pid := 0
+	if in := s.host.Get(name); in != nil {
+		pid = in.Status().PID
+	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
-		"name": name, "status": host.StatusRunning, "pid": s.host.Get(name).Status().PID,
+		"name": name, "status": host.StatusRunning, "pid": pid,
 	}})
 }
 
@@ -641,10 +658,18 @@ func RestartPlugin(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": err.Error()})
 		return
 	}
-	if err := s.host.Reload(host.LoadSpec{Name: name, Dir: dir, Manifest: man}); err != nil {
-		recordPluginError(name, err.Error())
+	// 纯页面插件没有 JSON-RPC 子进程，走与启动期一致的重载（内部会先
+	// Stop 旧页面服务再 Start 新的），避免 Reload 尝试 exec 目录报错。
+	var restartErr error
+	if len(man.Hooks) == 0 {
+		restartErr = pluginset.LoadOneByName(name)
+	} else {
+		restartErr = s.host.Reload(host.LoadSpec{Name: name, Dir: dir, Manifest: man})
+	}
+	if restartErr != nil {
+		recordPluginError(name, restartErr.Error())
 		c.JSON(http.StatusBadRequest, gin.H{
-			"code": 400, "message": "重启失败: " + err.Error(),
+			"code": 400, "message": "重启失败: " + restartErr.Error(),
 		})
 		return
 	}

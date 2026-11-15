@@ -18,6 +18,7 @@ const Dashboard = lazy(() => import('./pages/admin/Dashboard'))
 const Users = lazy(() => import('./pages/admin/Users'))
 const Groups = lazy(() => import('./pages/admin/Groups'))
 const Policies = lazy(() => import('./pages/admin/Policies'))
+const InviteCodes = lazy(() => import('./pages/admin/InviteCodes'))
 const Settings = lazy(() => import('./pages/admin/Settings'))
 const Tasks = lazy(() => import('./pages/admin/Tasks'))
 const Plugins = lazy(() => import('./pages/admin/Plugins'))
@@ -68,7 +69,7 @@ export interface BrandInfo {
 const DEFAULT_BRAND: BrandInfo = {
   name: 'NebulaDrive',
   author: 'NebulaDrive Team',
-  version: '26-10.0-d',
+  version: '26-11.2',
 }
 
 let globalBrand: BrandInfo = DEFAULT_BRAND
@@ -372,6 +373,7 @@ export default function App() {
           <Route path="users" element={<Users />} />
           <Route path="groups" element={<Groups />} />
           <Route path="policies" element={<Policies />} />
+          <Route path="invite-codes" element={<InviteCodes />} />
           <Route path="settings" element={<Settings />} />
           <Route path="tasks" element={<Tasks />} />
           <Route path="plugins" element={<Plugins />} />

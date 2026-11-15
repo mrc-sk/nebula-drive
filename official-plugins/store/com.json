@@ -47,6 +47,23 @@
     },
     {
       "author": "NebulaDrive Official",
+      "description": "后台侧边栏入口：随机生成注册邀请码、设置使用次数与有效期、按码类型（套餐）分配配额，可停用/删除/复制。数据全部走宿主接口，插件不落库、不暴露未鉴权配置页。",
+      "homepage": "https://cloud.berrywing.top/",
+      "license": "AGPL-3.0-only",
+      "name": "nd-invite-panel",
+      "tags": [
+        "注册",
+        "邀请码",
+        "授权",
+        "配额",
+        "官方"
+      ],
+      "title": "邀请码管理面板",
+      "url": "http://127.0.0.1:8084/nd-invite-panel.pbclus",
+      "version": "1.0.0"
+    },
+    {
+      "author": "NebulaDrive Official",
       "description": "同一 IP / 账号短时间连续登录失败后临时锁定，抑制暴力破解。",
       "homepage": "https://cloud.berrywing.top/",
       "license": "AGPL-3.0-only",

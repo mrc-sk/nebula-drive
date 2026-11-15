@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>邀请码管理 · NebulaDrive</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 22px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: transparent; color: #e6edf7; font-size: 14px; line-height: 1.5;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 19px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+  .sub { color: #93a4bd; font-size: 12px; margin: 0 0 18px; }
+  .card {
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10);
+    border-radius: 16px; padding: 18px; margin-bottom: 16px;
+  }
+  .card h2 { font-size: 14px; margin: 0 0 14px; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  label { display: block; }
+  label span { display: block; font-size: 12px; color: #a8b6cc; margin-bottom: 5px; }
+  input, select {
+    width: 100%; padding: 9px 11px; border-radius: 10px;
+    border: 1px solid rgba(255,255,255,.14); background: rgba(10,16,32,.45);
+    color: #eaf1ff; outline: none; font-size: 13px;
+  }
+  input:focus, select:focus { border-color: #22d3ee; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .btn {
+    cursor: pointer; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.08);
+    color: #eaf1ff; padding: 9px 16px; border-radius: 10px; font-size: 13px; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { background: rgba(255,255,255,.14); }
+  .btn-primary {
+    background: linear-gradient(135deg,#6366f1,#22d3ee); border: none; color: #fff;
+  }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .pill {
+    display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 11px;
+    border: 1px solid rgba(255,255,255,.16);
+  }
+  .pill.ok { color: #6ee7b7; border-color: rgba(110,231,183,.3); background: rgba(16,185,129,.10); }
+  .pill.off { color: #cbd5e1; background: rgba(148,163,184,.10); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid rgba(255,255,255,.07); }
+  th { color: #93a4bd; font-weight: 500; font-size: 11px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .5px; }
+  .link { color: #67e8f9; cursor: pointer; background: none; border: none; padding: 0; font: inherit; }
+  .link:hover { text-decoration: underline; }
+  .iconbtn { cursor: pointer; background: none; border: none; color: #a8b6cc; padding: 4px 6px; border-radius: 6px; }
+  .iconbtn:hover { background: rgba(255,255,255,.10); color: #fff; }
+  .msg { padding: 10px 13px; border-radius: 10px; font-size: 13px; margin-bottom: 14px; }
+  .msg.ok { background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.3); color: #6ee7b7; }
+  .msg.err { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.3); color: #fca5a5; }
+  .fresh { margin-top: 14px; padding: 13px; border: 1px solid rgba(16,185,129,.25); background: rgba(16,185,129,.06); border-radius: 12px; }
+  .fresh .codes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .fresh .codes button { font-family: ui-monospace, monospace; letter-spacing: .5px; }
+  .deny { text-align: center; padding: 60px 20px; }
+  .deny h2 { color: #fca5a5; }
+  .muted { color: #8595ac; }
+  .sp { height: 1px; }
+  .hide { display: none !important; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="gate" class="deny">
+    <h2>正在校验管理员身份…</h2>
+    <p class="muted">本页面需要管理员权限。</p>
+  </div>
+
+  <div id="app" class="hide">
+    <h1>🔑 邀请码管理</h1>
+    <p class="sub">随机生成注册邀请码，可设使用次数与有效期；邀请码类型 = 套餐档位，决定注册用户的初始配额与有效期。即使站点关闭自由注册，持有效邀请码也能注册。</p>
+
+    <div id="msg"></div>
+
+    <div class="card">
+      <h2>生成新邀请码</h2>
+      <div class="grid">
+        <label><span>邀请码类型（套餐）</span>
+          <select id="planId"><option value="0">加载中…</option></select>
+        </label>
+        <label><span>生成数量</span><input id="count" type="number" min="1" max="1000" value="1" /></label>
+        <label><span>每个码可用次数（0 = 不限）</span><input id="maxUses" type="number" min="0" value="1" /></label>
+        <label><span>有效期（天，0 = 永久）</span><input id="expireDays" type="number" min="0" value="30" /></label>
+        <label style="grid-column: 1 / -1"><span>备注（选填）</span><input id="note" placeholder="如：2026 内测 / 渠道 A" /></label>
+      </div>
+      <div class="row" style="margin-top:14px; justify-content:flex-end">
+        <button class="btn btn-primary" id="gen">🎲 随机生成</button>
+      </div>
+      <div id="freshWrap" class="fresh hide">
+        <div class="row" style="justify-content:space-between">
+          <span id="freshCount" class="muted"></span>
+          <button class="btn" id="copyAll">复制全部</button>
+        </div>
+        <div id="fresh" class="codes"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <h2 style="margin:0">已生成邀请码 <span id="total" class="muted" style="font-weight:400"></span></h2>
+        <button class="btn" id="reload">↻ 刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>邀请码</th><th>类型</th><th>次数</th><th>状态</th><th>有效期至</th><th>备注</th><th>操作</th>
+          </tr></thead>
+          <tbody id="rows"><tr><td colspan="7" class="muted">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <p class="muted" style="font-size:11px">本插件页面与站点同源，直接调用宿主后台接口；所有读写均需管理员登录态，由宿主校验。插件本身不存储任何数据。</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  var TOKEN_KEY = 'nebula_token';
+  var token = null;
+  var plans = [];
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function flash(type, text) {
+    $('msg').innerHTML = '<div class="msg ' + type + '">' + esc(text) + '</div>';
+    setTimeout(function () { $('msg').innerHTML = ''; }, 4500);
+  }
+  function fmtStorage(b) {
+    if (b < 0) return '无限';
+    var gb = b / 1073741824;
+    return (Number.isInteger(gb) ? gb : gb.toFixed(1)) + ' GB';
+  }
+  function fmtTime(s) {
+    if (!s) return '永久';
+    var d = new Date(s);
+    return isNaN(d.getTime()) ? esc(s) : d.toLocaleString('zh-CN', { hour12: false });
+  }
+
+  // 所有请求都带管理员 token，由宿主中间件校验；BASE 用相对同源路径。
+  function api(path, opts) {
+    opts = opts || {};
+    var headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    return fetch(path, {
+      method: opts.method || 'GET',
+      headers: headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    }).then(function (r) {
+      return r.text().then(function (t) {
+        var d = null; try { d = t ? JSON.parse(t) : null; } catch (e) { d = t; }
+        if (!r.ok) throw new Error((d && d.message) || r.statusText || ('HTTP ' + r.status));
+        return d;
+      });
+    });
+  }
+
+  function deny(msg) {
+    $('gate').innerHTML = '<h2>⛔ 无权访问</h2><p class="muted">' + esc(msg) + '</p>';
+  }
+
+  // 1) 先校验管理员身份，非管理员不渲染任何管理界面
+  function checkAdmin() {
+    token = localStorage.getItem(TOKEN_KEY);
+    if (!token) { deny('未检测到登录态，请先登录管理员账号。'); return; }
+    api('/api/auth/me').then(function (r) {
+      var u = r && r.data && (r.data.user || r.data);
+      if (r && r.code === 0 && u && u.isAdmin) {
+        $('gate').classList.add('hide');
+        $('app').classList.remove('hide');
+        loadPlans(); loadCodes();
+      } else {
+        deny('当前账号不是管理员，或登录已失效。');
+      }
+    }).catch(function (e) { deny('身份校验失败：' + e.message); });
+  }
+
+  function loadPlans() {
+    api('/api/admin/plans').then(function (r) {
+      plans = (r && r.data) || [];
+      var sel = $('planId');
+      if (!plans.length) { sel.innerHTML = '<option value="0">暂无套餐</option>'; return; }
+      sel.innerHTML = plans.map(function (p) {
+        return '<option value="' + p.id + '">' + esc(p.displayName) + ' · ' +
+          fmtStorage(p.maxStorage) + ' · ' + p.durationMonths + ' 个月</option>';
+      }).join('');
+    }).catch(function (e) { flash('err', '套餐加载失败：' + e.message); });
+  }
+
+  function loadCodes() {
+    $('rows').innerHTML = '<tr><td colspan="7" class="muted">加载中…</td></tr>';
+    api('/api/admin/codes?page=1&size=200').then(function (r) {
+      var data = (r && r.data) || {};
+      var list = data.list || [];
+      $('total').textContent = '（共 ' + (data.total || list.length) + ' 个）';
+      if (!list.length) { $('rows').innerHTML = '<tr><td colspan="7" class="muted">还没有邀请码，先在上方生成一批吧</td></tr>'; return; }
+      $('rows').innerHTML = list.map(function (c) {
+        var used = (c.usedCount || 0) + ' / ' + (c.maxUses > 0 ? c.maxUses : '∞');
+        var st = c.isActive
+          ? '<span class="pill ok">有效</span>'
+          : '<span class="pill off">已停用</span>';
+        var ops = (c.isActive
+            ? '<button class="iconbtn" title="停用" data-act="disable" data-id="' + c.id + '">🚫</button>'
+            : '') +
+          '<button class="iconbtn" title="删除" data-act="delete" data-id="' + c.id + '">🗑</button>';
+        return '<tr>' +
+          '<td><button class="link mono" data-act="copy" data-code="' + esc(c.code) + '">' + esc(c.code) + '</button></td>' +
+          '<td>' + esc(c.planName || ('#' + c.planId)) + '</td>' +
+          '<td>' + used + '</td>' +
+          '<td>' + st + '</td>' +
+          '<td class="muted">' + fmtTime(c.expiresAt) + '</td>' +
+          '<td class="muted">' + esc(c.note || '—') + '</td>' +
+          '<td>' + ops + '</td></tr>';
+      }).join('');
+    }).catch(function (e) { $('rows').innerHTML = '<tr><td colspan="7" style="color:#fca5a5">加载失败：' + esc(e.message) + '</td></tr>'; });
+  }
+
+  function copy(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { flash('ok', '已复制 ' + text); })
+        .catch(function () { flash('err', '复制失败，请手动选择'); });
+    } else { flash('err', '当前环境不支持一键复制'); }
+  }
+
+  function generate() {
+    var planId = Number($('planId').value);
+    var count = Number($('count').value);
+    var maxUses = Number($('maxUses').value);
+    var days = Number($('expireDays').value);
+    if (!planId) { flash('err', '请先选择邀请码类型（套餐）'); return; }
+    if (!(count >= 1 && count <= 1000)) { flash('err', '生成数量需在 1–1000 之间'); return; }
+    var body = { planId: planId, count: count, maxUses: Math.max(0, maxUses), note: $('note').value.trim() };
+    if (days > 0) body.expireAt = new Date(Date.now() + days * 86400000).toISOString();
+    var btn = $('gen'); btn.disabled = true; btn.textContent = '生成中…';
+    api('/api/admin/codes/generate', { method: 'POST', body: body }).then(function (r) {
+      var codes = (r && r.data) || [];
+      $('freshCount').textContent = '本次生成 ' + codes.length + ' 个（点击单个可复制）';
+      $('fresh').innerHTML = codes.map(function (c) {
+        return '<button class="btn mono" data-act="copy" data-code="' + esc(c) + '">' + esc(c) + '</button>';
+      }).join('');
+      $('freshWrap').classList.remove('hide');
+      flash('ok', '已生成 ' + codes.length + ' 个邀请码');
+      loadCodes();
+    }).catch(function (e) { flash('err', '生成失败：' + e.message); })
+      .then(function () { btn.disabled = false; btn.textContent = '🎲 随机生成'; });
+  }
+
+  function disable(id) {
+    api('/api/admin/codes/' + id + '/disable', { method: 'PUT' })
+      .then(function () { flash('ok', '已停用'); loadCodes(); })
+      .catch(function (e) { flash('err', e.message); });
+  }
+  function remove(id) {
+    if (!window.confirm('确定删除这个邀请码？删除后不可恢复。')) return;
+    api('/api/admin/codes/' + id, { method: 'DELETE' })
+      .then(function () { flash('ok', '已删除'); loadCodes(); })
+      .catch(function (e) { flash('err', e.message); });
+  }
+
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest('[data-act]');
+    if (!el) return;
+    var act = el.getAttribute('data-act');
+    if (act === 'copy') copy(el.getAttribute('data-code'));
+    else if (act === 'disable') disable(el.getAttribute('data-id'));
+    else if (act === 'delete') remove(el.getAttribute('data-id'));
+  });
+  $('gen').addEventListener('click', generate);
+  $('reload').addEventListener('click', loadCodes);
+  $('copyAll').addEventListener('click', function () {
+    var codes = Array.prototype.map.call($('fresh').querySelectorAll('[data-code]'), function (b) {
+      return b.getAttribute('data-code');
+    });
+    if (codes.length) copy(codes.join('\n'));
+  });
+
+  checkAdmin();
+})();
+</script>
+</body>
+</html>

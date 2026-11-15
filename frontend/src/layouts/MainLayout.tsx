@@ -36,6 +36,7 @@ import {
   Link2,
   Sparkles,
   SlidersHorizontal,
+  KeyRound,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { LANGUAGES } from '../i18n'
@@ -81,6 +82,7 @@ const ADMIN_SUB = [
   { to: '/admin/users', key: 'users', Icon: Users, labelKey: 'users' },
   { to: '/admin/groups', key: 'groups', Icon: Users2, labelKey: 'groups' },
   { to: '/admin/policies', key: 'policies', Icon: Database, labelKey: 'policies' },
+  { to: '/admin/invite-codes', key: 'inviteCodes', Icon: KeyRound, labelKey: 'inviteCodes' },
   { to: '/admin/plugins', key: 'plugins', Icon: Puzzle, labelKey: 'plugins' },
   { to: '/admin/settings', key: 'settings', Icon: Settings, labelKey: 'settings' },
   { to: '/admin/ai', key: 'aiSettings', Icon: Sparkles, labelKey: 'aiSettings' },
@@ -199,8 +201,8 @@ export default function MainLayout(props: MainLayoutProps) {
     () => (pluginData?.sidebar.admin || []).slice().sort(byOrder),
     [pluginData],
   )
-  // 版本默认值与发布名 V26-10.0-d 对齐（后端 brand.version 同源，见 52c70a8）
-  const [brand, setBrand] = useState({ name: 'NebulaDrive', author: 'NebulaDrive Team', version: '26-10.0-d' })
+  // 版本默认值与发布名 V26-11.2 对齐（后端 brand.version 同源，见 52c70a8）
+  const [brand, setBrand] = useState({ name: 'NebulaDrive', author: 'NebulaDrive Team', version: '26-11.2' })
   // 智能时代入口按后台开关动态显示：AI 总开关 → AI 助手，代码空间开关 → 代码空间。
   // 没开启时不渲染入口，也不加载对应 chunk（App.tsx 里是 lazy 路由）。
   const [aiStatus, setAiStatus] = useState<AIStatus | null>(null)
@@ -255,7 +257,7 @@ export default function MainLayout(props: MainLayoutProps) {
           setBrand({
             name: d['brand.name'] || d.brandName || 'NebulaDrive',
             author: d['brand.author'] || d.brandAuthor || 'NebulaDrive Team',
-            version: d['brand.version'] || d.brandVersion || '26-10.0-d',
+            version: d['brand.version'] || d.brandVersion || '26-11.2',
           })
         }
       } catch {}

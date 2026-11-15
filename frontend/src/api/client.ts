@@ -565,6 +565,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  // 公开查询注册策略（无需登录）：是否显示注册入口 / 是否强制邀请码 / 可用码类型。
+  registerMode: () =>
+    request<ApiResult<{
+      allowRegister: boolean
+      requireInviteCode: boolean
+      plans: { id: number; name: string; displayName: string; durationMonths: number; maxStorage: number }[]
+    }>>('/api/auth/register-mode'),
+  // 公开注册：可带 inviteCode（后台生成、未失效的邀请码）。
+  register: (body: { userName: string; password: string; email?: string; inviteCode?: string }) =>
+    request<ApiResult<any>>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   logout: () => request<ApiResult>('/api/auth/logout', { method: 'POST', headers: authHeaders() }),
   changePassword: (oldPassword: string, newPassword: string) =>
     request<ApiResult>('/api/auth/change-password', {
@@ -779,6 +792,21 @@ export const api = {
         body: JSON.stringify(body),
       }),
     dashboard: () => request<ApiResult<any>>('/api/admin/dashboard'),
+    // ---- 注册邀请码（复用兑换码 / 套餐体系；套餐即「码类型」）----
+    plans: () => request<ApiResult<any[]>>('/api/admin/plans'),
+    codes: (page = 1, size = 20, planId?: number) =>
+      request<ApiResult<{ total: number; list: any[] }>>(
+        `/api/admin/codes?page=${page}&size=${size}${planId ? `&planId=${planId}` : ''}`,
+      ),
+    generateCodes: (body: { planId: number; count: number; maxUses: number; note?: string; expireAt?: string }) =>
+      request<ApiResult<string[]> & { generated?: number }>('/api/admin/codes/generate', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    disableCode: (id: number) =>
+      request<ApiResult>(`/api/admin/codes/${id}/disable`, { method: 'PUT' }),
+    deleteCode: (id: number) =>
+      request<ApiResult>(`/api/admin/codes/${id}`, { method: 'DELETE' }),
     trafficStats: (days: number) =>
       request<ApiResult<any[]>>(`/api/admin/stats/traffic?days=${days}`),
     fileTypeStats: () => request<ApiResult<any[]>>('/api/admin/stats/file-types'),

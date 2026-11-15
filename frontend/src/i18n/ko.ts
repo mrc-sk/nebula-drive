@@ -356,6 +356,7 @@ export default {
     loading: '로딩 중…',
   },
   ns_admin: {
+    inviteCodes: '초대 코드',
     webdav: 'WebDAV',
     noTrafficData: '트래픽 데이터 없음',
     dashboard: '대시보드',

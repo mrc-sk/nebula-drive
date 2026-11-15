@@ -356,6 +356,7 @@ export default {
     loading: '加载中…',
   },
   ns_admin: {
+    inviteCodes: '注册邀请码',
     webdav: 'WebDAV',
     noTrafficData: '暂无流量数据',
     dashboard: '仪表盘',
