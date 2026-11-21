@@ -486,23 +486,64 @@ export async function fetchShareBlob(url: string, signal?: AbortSignal): Promise
   return res.blob()
 }
 
-/** 分片读取大文件并以 spark-md5 计算 MD5 */
-export function computeMD5(file: File): Promise<string> {
+/**
+ * 计算文件的 MD5（秒传检测用）。
+ *
+ * 放在 Web Worker 里分片算：旧实现一次性 readAsArrayBuffer 整个文件 + 主线程
+ * SparkMD5.append，几百 MB 的文件会把 UI 卡死十几秒，用户看到的就是
+ * “进度条停在 hashing 不动”。Worker 版内存恒定 2MB、不阻塞主线程。
+ *
+ * onProgress 可选：返回 0-100 的 hashing 进度。
+ */
+export function computeMD5(file: File, onProgress?: (pct: number) => void): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let worker: Worker | null = null
+    try {
+      worker = new Worker(new URL('./md5.worker.ts', import.meta.url), { type: 'module' })
+    } catch {
+      worker = null
+    }
+    if (!worker) {
+      // Fallback：Worker 不可用时退回主线程（行为同旧版，保证功能可用）。
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        try {
+          const result = e.target?.result
+          if (!(result instanceof ArrayBuffer)) { reject(new Error('read failed')); return }
+          const spark = new SparkMD5.ArrayBuffer()
+          spark.append(result)
+          resolve(spark.end())
+        } catch (err) { reject(err) }
+      }
+      reader.onerror = () => reject(reader.error || new Error('read failed'))
+      reader.readAsArrayBuffer(file)
+      return
+    }
+    worker.onmessage = (e: MessageEvent<{ hash?: string; progress?: number; error?: string }>) => {
+      const d = e.data
+      if (d.error) { worker?.terminate(); reject(new Error(d.error)); return }
+      if (typeof d.progress === 'number') { onProgress?.(d.progress); return }
+      if (d.hash) { worker?.terminate(); resolve(d.hash) }
+    }
+    worker.onerror = () => {
+      // Worker 运行时出错也回退到主线程，不让上传整个失败。
+      worker?.terminate()
+      computeMD5Fallback(file).then(resolve, reject)
+    }
+    worker.postMessage({ file })
+  })
+}
+
+/** Worker 不可用/出错时的主线程兜底。 */
+function computeMD5Fallback(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = (e) => {
-      try {
-        const result = e.target?.result
-        if (!(result instanceof ArrayBuffer)) {
-          reject(new Error('read failed'))
-          return
-        }
-        const spark = new SparkMD5.ArrayBuffer()
-        spark.append(result)
-        resolve(spark.end())
-      } catch (err) {
-        reject(err)
-      }
+      const result = e.target?.result
+      if (!(result instanceof ArrayBuffer)) { reject(new Error('read failed')); return }
+      const spark = new SparkMD5.ArrayBuffer()
+      spark.append(result)
+      resolve(spark.end())
     }
     reader.onerror = () => reject(reader.error || new Error('read failed'))
     reader.readAsArrayBuffer(file)
@@ -722,7 +763,7 @@ export const api = {
 
   shares: {
     list: () => request<ApiResult<ShareItem[]>>('/api/shares'),
-    create: (fileId: number, password?: string, expireAt?: string, extractCode?: string) =>
+    create: (fileId: number, password?: string, expireAt?: string, extractCode?: string, maxDownloads?: number) =>
       request<ApiResult<ShareItem>>('/api/shares', {
         method: 'POST',
         body: JSON.stringify({
@@ -730,6 +771,7 @@ export const api = {
           password: password || undefined,
           expireAt: expireAt ? new Date(expireAt).toISOString() : undefined,
           extractCode: extractCode || undefined,
+          maxDownloads: maxDownloads && maxDownloads > 0 ? maxDownloads : undefined,
         }),
       }),
     remove: (id: number) => request<ApiResult>(`/api/shares/${id}`, { method: 'DELETE' }),

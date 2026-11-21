@@ -208,6 +208,9 @@ func Setup() *gin.Engine {
 			admin.DELETE("/policies/:id", controllers.DeletePolicy)
 			admin.GET("/settings", controllers.GetSettings)
 			admin.POST("/settings", controllers.SaveSettings)
+			// 前端 api.admin.saveSettings 用的是 PUT；历史上这里只注册了 POST，
+			// 导致后台设置保存一律 404。两个方法都保留，避免已有调用方被破坏。
+			admin.PUT("/settings", controllers.SaveSettings)
 			// 智能时代：AI 网关配置 / 连通性测试 / 用量与日志
 			admin.GET("/ai/config", controllers.GetAIConfig)
 			admin.POST("/ai/config", controllers.SaveAIConfig)
@@ -313,6 +316,10 @@ func Setup() *gin.Engine {
 		// preview 与 download 分开：前者 inline 且不计下载次数，后者 attachment 且计数。
 		api.GET("/shares/:id/download", controllers.DownloadShare)
 		api.GET("/shares/:id/preview", controllers.PreviewShare)
+
+		// CDN 回源端点：免登录（CDN 不带 Bearer），靠短时效 HMAC 签名鉴权。
+		// 未配置 CDN 时该路由恒 404，不会成为公开文件通道。
+		api.GET("/cdn/files/:id", controllers.CDNOrigin)
 
 		tasks := api.Group("/tasks", middleware.Auth(true))
 		{

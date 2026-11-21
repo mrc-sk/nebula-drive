@@ -58,6 +58,7 @@ go build -o notify-webhook.exe .
 | `webhooks[].url` | 必填，只允许 `http://` 或 `https://`。可以包含基本认证信息。 |
 | `webhooks[].format` | `generic` / `slack` / `feishu` / `dingtalk` / `discord`。留空按 `generic` 处理，未知值只跳过该目标。 |
 | `webhooks[].headers` | 可选，附加到该目标的请求头，例如 `Authorization`。值不会出现在日志中。 |
+| `webhooks[].secret` | 可选，飞书/钉钉机器人的**加签密钥**（机器人开启“签名校验”时填）。只对 `format=feishu`/`dingtalk` 生效，留空则不签名。这是凭据，不会出现在日志中。 |
 | `webhooks[].timeoutSeconds` | 单次 HTTP 尝试超时，默认 5 秒。重试一次时总耗时最多约为它的两倍。 |
 | `includeBody` | 是否携带通知正文，默认 `true`。显式写 `false` 可关闭。 |
 | `maxBodyChars` | 正文字符上限（Unicode 字符，不是字节），默认 2000。超长会在预算内截断并追加 `…（正文已截断）`。 |
@@ -70,10 +71,13 @@ go build -o notify-webhook.exe .
   路径里的 token 泄露等于任何人都能往频道发消息。
 - **飞书**：群设置 → 群机器人 → 添加自定义机器人，复制
   `https://open.feishu.cn/open-apis/bot/v2/hook/...`。如果机器人开启了
-  “签名校验”，本插件不实现签名，请改用关键词或 IP 白名单，或关闭签名校验。
+  “签名校验”，把校验用的密钥填进该目标的 `secret` 字段，插件会自动在载荷里
+  附加 `timestamp` 与 `sign`（HMAC-SHA256，纯标准库实现）。不想用签名时
+  留空 `secret`，改用关键词或 IP 白名单也可以。
 - **钉钉**：群设置 → 智能群助手 → 添加机器人 → 自定义，复制
-  `https://oapi.dingtalk.com/robot/send?access_token=...`。安全设置建议至少启用
-  “自定义关键词”（例如 `NebulaDrive`），因为本插件不支持加签。
+  `https://oapi.dingtalk.com/robot/send?access_token=...`。若安全设置选了
+  “加签”，把 `SEC` 开头的密钥填进该目标的 `secret` 字段，插件会在 URL 上
+  自动附加 `timestamp`（毫秒）与 `sign`。也可以继续用“自定义关键词”。
 - **Discord**：频道设置 → 整合 → Webhook → 复制 Webhook URL，
   形如 `https://discord.com/api/webhooks/<id>/<token>`。
 - **通用**：任何接受 `POST application/json` 的 HTTP(S) 端点。
@@ -166,8 +170,11 @@ notify-webhook 自测：成功 1 个，失败 1 个
 - **没有持久化队列。** 插件进程退出时，尚未完成的投递会丢失；重启后也不会补发。
 - **投递在 fire 处理中同步完成**（各 webhook 之间并发）。因此一个很慢的端点会
   延迟该插件后续 RPC 的处理；宿主侧异步超时不会取消已经发出的 HTTP 请求。
-- **不做平台签名。** 飞书/钉钉的加签、Slack 的签名校验都不实现；请使用关键词、
-  IP 白名单或网络边界。自定义 `Authorization` 头可直接配置，但不会自动刷新 OAuth。
+- **平台签名只覆盖飞书/钉钉。** 配置了 `secret` 时，飞书在载荷里附加
+  `timestamp`+`sign`、钉钉在 URL 上附加 `timestamp`+`sign`（均为 HMAC-SHA256，
+  纯标准库实现）。Slack 的 signing secret 校验仍不实现（Slack 用的是另一种
+  header 签名机制），请用关键词、IP 白名单或网络边界；自定义 `Authorization`
+  头可直接配置，但不会自动刷新 OAuth。
 - **4xx 与 3xx 不重试**，包括 429。收到 429 时应调整上游发送频率。
 - **只按前 10 个配置项发送**，超出的 10 个之后的目标既不发送也不出现在逐条结果里。
 - **没有出站 IP 限制。** URL 由管理员配置，插件允许访问内网地址（自建 webhook

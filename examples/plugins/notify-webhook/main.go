@@ -20,6 +20,8 @@
 //     重试只会放大无效流量；无限重试则会拖住整个插件。
 //   - **最多处理 10 个 webhook。** 配置写错（比如复制出上百条）时，
 //     不能让一条站内通知打出上千个外发请求。
+//   - **飞书/钉钉支持平台加签（HMAC-SHA256，仅标准库）。** 配置了 secret
+//     才签，不配置则保持原行为。签名用的 secret 只参与计算，绝不进日志。
 //
 // # 配置
 //
@@ -30,6 +32,11 @@
 //	      "format": "slack",
 //	      "headers": {"X-Custom": "value"},
 //	      "timeoutSeconds": 5
+//	    },
+//	    {
+//	      "url": "https://oapi.dingtalk.com/robot/send?access_token=...",
+//	      "format": "dingtalk",
+//	      "secret": "SEC..."   // 钉钉/飞书机器人开启加签时填，留空则不签
 //	    }
 //	  ],
 //	  "includeBody": true,
@@ -46,6 +53,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,6 +63,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -167,6 +178,9 @@ type WebhookConfig struct {
 	Headers map[string]string `json:"headers"`
 	// TimeoutSeconds 单次 HTTP 尝试的超时，默认 5 秒。
 	TimeoutSeconds int `json:"timeoutSeconds"`
+	// Secret 飞书/钉钉机器人的加签密钥。仅对 format=feishu/dingtalk 生效，
+	// 留空则不签名（保持旧行为）。这是凭据，任何日志都不会回显它。
+	Secret string `json:"secret"`
 }
 
 func defaultConfig() Config {
@@ -222,6 +236,7 @@ type webhookTarget struct {
 	format  string
 	headers map[string]string
 	timeout time.Duration
+	secret  string // 飞书/钉钉加签密钥；只参与计算，不进 display/日志
 }
 
 // target 校验并规范化单个 webhook。
@@ -274,6 +289,7 @@ func (w WebhookConfig) target() (webhookTarget, error) {
 		format:  format,
 		headers: w.Headers,
 		timeout: time.Duration(timeout) * time.Second,
+		secret:  strings.TrimSpace(w.Secret),
 	}, nil
 }
 
@@ -323,8 +339,10 @@ type textContent struct {
 }
 
 type feishuPayload struct {
-	MsgType string      `json:"msg_type"`
-	Content textContent `json:"content"`
+	MsgType   string      `json:"msg_type"`
+	Content   textContent `json:"content"`
+	Timestamp string      `json:"timestamp,omitempty"` // 加签时填 Unix 秒
+	Sign      string      `json:"sign,omitempty"`      // 加签时填 HMAC-SHA256 base64
 }
 
 type dingtalkText struct {
@@ -343,8 +361,9 @@ type discordPayload struct {
 // buildPayload 生成某个格式的 JSON 请求体。
 //
 // at 由调用方传入而不是在这里取 time.Now()，这样同一次通知发往多个
-// webhook 时携带的是同一个时间点。
-func buildPayload(format string, msg notification, includeBody bool, maxBodyChars int, at time.Time) ([]byte, error) {
+// webhook 时携带的是同一个时间点。secret 仅用于飞书加签（写进 JSON 顶层的
+// timestamp/sign）；钉钉的签名在 URL 上，由 signedURL 处理，这里忽略 secret。
+func buildPayload(format string, msg notification, includeBody bool, maxBodyChars int, at time.Time, secret string) ([]byte, error) {
 	body := msg.Body
 	if !includeBody {
 		body = ""
@@ -363,10 +382,18 @@ func buildPayload(format string, msg notification, includeBody bool, maxBodyChar
 	case "slack":
 		return json.Marshal(slackPayload{Text: msg.Subject + "\n" + body})
 	case "feishu":
-		return json.Marshal(feishuPayload{
+		p := feishuPayload{
 			MsgType: "text",
 			Content: textContent{Text: msg.Subject + "\n" + body},
-		})
+		}
+		if secret != "" {
+			// 飞书加签：stringToSign = timestamp + "\n" + ""，
+			// HMAC-SHA256(key=secret) 后 base64。timestamp 是秒。
+			ts := strconv.FormatInt(at.Unix(), 10)
+			p.Timestamp = ts
+			p.Sign = hmacSHA256Base64(secret, ts+"\n")
+		}
+		return json.Marshal(p)
 	case "dingtalk":
 		return json.Marshal(dingtalkPayload{
 			MsgType: "text",
@@ -377,6 +404,35 @@ func buildPayload(format string, msg notification, includeBody bool, maxBodyChar
 	default:
 		return nil, fmt.Errorf("不支持的 format %q", format)
 	}
+}
+
+// hmacSHA256Base64 计算 HMAC-SHA256(secret, data) 的 base64 编码。
+// 飞书与钉钉的加签都基于它，只是待签字符串和送达位置不同。
+func hmacSHA256Base64(secret, data string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(data))
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// signedURL 给钉钉 webhook 加上加签参数。
+//
+// 钉钉算法：stringToSign = timestamp(毫秒) + "\n" + secret，
+// HMAC-SHA256(key=secret) 后 base64，再按 URL 规则转义写进 query。
+// 没配 secret 或非钉钉格式时原样返回目标 URL（保持旧行为）。
+//
+// 关键：必须复制 URL 再改 query，绝不能原地改 target.url —— 那个对象在
+// 多次通知间复用，且 display 字段已按无 query 的形式算好用于日志脱敏。
+func signedURL(target webhookTarget, at time.Time) *url.URL {
+	if target.secret == "" || target.format != "dingtalk" {
+		return target.url
+	}
+	u := *target.url // 浅拷贝：url.URL 的字段都是值或可共享的指针，改 query 用新 map
+	q := u.Query()
+	ts := strconv.FormatInt(at.UnixMilli(), 10)
+	q.Set("timestamp", ts)
+	q.Set("sign", hmacSHA256Base64(target.secret, ts+"\n"+target.secret))
+	u.RawQuery = q.Encode()
+	return &u
 }
 
 // truncateBody 按 Unicode 字符截断，并在字符预算内追加说明。
@@ -477,17 +533,19 @@ func (n *notifier) sendAll(ctx context.Context, msg notification) []deliveryResu
 		results[i].Format = target.format
 
 		payload, err := buildPayload(target.format, msg, n.cfg.IncludeBody,
-			n.cfg.MaxBodyChars, at)
+			n.cfg.MaxBodyChars, at, target.secret)
 		if err != nil {
 			results[i].Err = err.Error()
 			logf("warn", "webhook %s 载荷生成失败: %v", target.display, err)
 			continue
 		}
+		// 钉钉加签写进 URL query；用本地副本，不动 target.url。
+		sendURL := signedURL(target, at)
 
 		wg.Add(1)
-		go func(i int, target webhookTarget, payload []byte) {
+		go func(i int, target webhookTarget, payload []byte, sendURL *url.URL) {
 			defer wg.Done()
-			attempts, err := postWebhook(ctx, target, payload)
+			attempts, err := postWebhook(ctx, target, sendURL, payload)
 			results[i].Attempts = attempts
 			if err != nil {
 				results[i].Err = err.Error()
@@ -498,7 +556,7 @@ func (n *notifier) sendAll(ctx context.Context, msg notification) []deliveryResu
 			results[i].OK = true
 			logf("info", "webhook %s（format=%s）发送成功，尝试 %d 次",
 				target.display, target.format, attempts)
-		}(i, target, payload)
+		}(i, target, payload, sendURL)
 	}
 	wg.Wait()
 	return results
@@ -509,12 +567,12 @@ func (n *notifier) sendAll(ctx context.Context, msg notification) []deliveryResu
 // 4xx 不重试：认证失败、载荷格式错、webhook 被删除，重试都只会得到
 // 同样的结果，还会把限流配额打光。3xx 也不重试，因为重定向被禁用了
 // （见 newHTTPClient），它在这里就是一个配置错误。
-func postWebhook(ctx context.Context, target webhookTarget, payload []byte) (int, error) {
+func postWebhook(ctx context.Context, target webhookTarget, sendURL *url.URL, payload []byte) (int, error) {
 	client := newHTTPClient(target.timeout)
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			target.url.String(), bytes.NewReader(payload))
+			sendURL.String(), bytes.NewReader(payload))
 		if err != nil {
 			// 构造失败通常是 URL 本身有问题，重试没有意义。
 			return attempt, fmt.Errorf("构造请求失败: %s", safeErrorText(err, target.url))

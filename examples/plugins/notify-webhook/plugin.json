@@ -1,9 +1,9 @@
 {
   "name": "notify-webhook",
   "title": "通知 Webhook 转发",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "NebulaDrive",
-  "description": "把站内通知转发到 Slack、飞书、钉钉、Discord 或任意通用 webhook。URL 日志脱敏，单请求超时，网络错误与 5xx 自动重试一次。",
+  "description": "把站内通知转发到 Slack、飞书、钉钉、Discord 或任意通用 webhook。URL 日志脱敏，单请求超时，网络错误与 5xx 自动重试一次；飞书/钉钉支持平台加签。",
   "entry": "notify-webhook",
   "args": [],
   "protocolVersion": 1,

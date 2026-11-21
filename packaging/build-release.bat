@@ -26,8 +26,11 @@ for /f "tokens=2 delims==" %%v in ('git describe --tags --abbrev=0 2^>nul') do s
 if not defined VER set "VER=dev"
 
 rem -trimpath 去掉本机路径（可复现构建）；-ldflags="-s -w" 剥离符号表与调试信息
+rem -X main.buildVersion 注入版本号：插件宿主把它作为 HostVersion 传给插件，
+rem 缺了它 Windows 版二进制里的 buildVersion 恒为 "dev"，插件无法按版本判断。
+rem 与 build-release.sh 的 LDFLAGS 保持一致。
 rem 前端已通过 go:embed 内嵌进二进制，所以不需要 Node。
-set "LDFLAGS=-s -w"
+set "LDFLAGS=-s -w -X main.buildVersion=%VER%"
 
 rem ---------- 产物 1：Windows ----------
 set "OUT=release\NebulaDrive-%VER%-windows-amd64"

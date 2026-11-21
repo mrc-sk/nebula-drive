@@ -387,6 +387,47 @@ export default function Settings() {
                   <input type="number" className="glass-input" value={data.uploadConcurrency || 5} onChange={(e) => set('uploadConcurrency', Number(e.target.value))} />
                 </Field>
               </div>
+
+              <div className="rounded-lg border border-white/10 bg-white/5 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium">CDN 加速</div>
+                    <div className="mt-0.5 text-xs text-slate-400">文件下载经短时效签名跳转到 CDN，由 CDN 回源本站取内容。预览与缩略图不加速。</div>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={data['cdn.enabled'] === 'true' || data['cdn.enabled'] === true}
+                      onChange={(e) => set('cdn.enabled', e.target.checked ? 'true' : 'false')}
+                      className="h-4 w-4 accent-nebula-500"
+                    />
+                    启用
+                  </label>
+                </div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Field label="CDN 域名">
+                    <input
+                      className="glass-input"
+                      placeholder="https://cdn.example.com"
+                      value={data['cdn.domain'] || ''}
+                      onChange={(e) => set('cdn.domain', e.target.value)}
+                    />
+                  </Field>
+                  <Field label="签名密钥">
+                    <input
+                      type="password"
+                      className="glass-input"
+                      placeholder="至少 16 位"
+                      value={data['cdn.secret'] || ''}
+                      onChange={(e) => set('cdn.secret', e.target.value)}
+                    />
+                  </Field>
+                </div>
+                <p className="mt-3 text-xs leading-relaxed text-slate-400">
+                  配置要求：CDN 回源地址必须是真实源站（不能是 CDN 自身，否则死循环）；CDN 缓存时间不要超过签名有效期 5 分钟；
+                  签名 URL 属于临时授权，拿到链接的人 5 分钟内可读取对应文件。密钥留空时 CDN 自动失效。
+                </p>
+              </div>
             </div>
           )}
 

@@ -125,6 +125,9 @@ type Share struct {
 	ExtractCode string         `gorm:"size:32;index" json:"extractCode"`
 	Downloads   int            `gorm:"default:0" json:"downloads"`
 	Views       int            `gorm:"default:0" json:"views"`
+	// MaxDownloads 下载次数上限。0 表示不限（默认，兼容存量分享）。
+	// 达到上限后分享仍存在、仍可预览，但下载被拒绝（见 serveShareFile）。
+	MaxDownloads int        `gorm:"default:0" json:"maxDownloads"`
 	ExpireAt    *time.Time     `json:"expireAt"`
 	IsDir       bool           `json:"isDir"`
 	CreatedAt   time.Time      `json:"createdAt"`

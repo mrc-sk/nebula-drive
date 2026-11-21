@@ -21,6 +21,7 @@ type shareReq struct {
 	Password    string     `json:"password"`
 	ExtractCode string     `json:"extractCode"`
 	ExpireAt    *time.Time `json:"expireAt"`
+	MaxDownloads int       `json:"maxDownloads"`
 }
 
 type shareAccessReq struct {
@@ -92,6 +93,7 @@ func CreateShare(c *gin.Context) {
 	s := models.Share{
 		FileID: req.FileID, OwnerID: u.ID, Password: req.Password,
 		ExtractCode: req.ExtractCode, ExpireAt: req.ExpireAt, IsDir: f.IsDir,
+		MaxDownloads: req.MaxDownloads,
 	}
 	db.Get().Create(&s)
 
@@ -247,6 +249,13 @@ func serveShareFile(c *gin.Context, disp string) {
 	}
 	if s.ExtractCode != "" && s.ExtractCode != extract {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": 3, "message": "需要提取码", "requireExtractCode": true})
+		return
+	}
+	// 下载次数上限：只拦下载，预览仍可用（预览不消耗次数）。
+	// 计数用 DB 侧原子递增，这里的检查是"下一次请求"才生效，
+	// 极端并发下可能多放几次，但分享限速不需要金融级精确。
+	if disp == dispAttachment && s.MaxDownloads > 0 && s.Downloads >= s.MaxDownloads {
+		c.JSON(http.StatusForbidden, gin.H{"code": 4, "message": "分享下载次数已用尽"})
 		return
 	}
 

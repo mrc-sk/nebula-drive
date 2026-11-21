@@ -412,6 +412,7 @@ function ShareModal({ file, onClose }: any) {
   const [password, setPassword] = useState('')
   const [extractCode, setExtractCode] = useState('')
   const [expireAt, setExpireAt] = useState('')
+  const [maxDownloads, setMaxDownloads] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [link, setLink] = useState('')
@@ -433,7 +434,7 @@ function ShareModal({ file, onClose }: any) {
   const submit = async () => {
     setBusy(true); setErr('')
     try {
-      const r = await api.shares.create(file.id, usePwd ? password : undefined, expireAt, useExtract ? extractCode : undefined)
+      const r = await api.shares.create(file.id, usePwd ? password : undefined, expireAt, useExtract ? extractCode : undefined, maxDownloads ? Number(maxDownloads) : undefined)
       if (r.code === 0 && r.data) setLink(`${location.origin}/#/share/${r.data.id}`)
       else setErr(r.message || 'error')
     } catch (e: any) { setErr(e?.message || 'error') } finally { setBusy(false) }
@@ -512,6 +513,17 @@ function ShareModal({ file, onClose }: any) {
       <label className="mt-3 block">
         <span className="mb-1.5 block text-xs text-slate-300">{t('expireTime')}（可选）</span>
         <input className="glass-input" type="datetime-local" value={expireAt} onChange={(e) => setExpireAt(e.target.value)} />
+      </label>
+      <label className="mt-3 block">
+        <span className="mb-1.5 block text-xs text-slate-300">下载次数上限（可选，0 或留空表示不限）</span>
+        <input
+          className="glass-input"
+          type="number"
+          min={0}
+          placeholder="不限"
+          value={maxDownloads}
+          onChange={(e) => setMaxDownloads(e.target.value.replace(/[^0-9]/g, ''))}
+        />
       </label>
       <div className="mt-2 truncate text-xs text-slate-400">{file.name}</div>
       {err && <div className="mt-3 flex items-center gap-2 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300"><AlertCircle className="h-3.5 w-3.5" /><span>{err}</span></div>}
@@ -948,20 +960,29 @@ export default function Files() {
       name: f.name, size: f.size, status: 'hashing', progress: 0,
     }))
     setUploads((u) => [...u, ...tasks])
+    // 并发上传：旧版 for 循环里 await 导致多文件完全串行，传 10 个文件要
+    // 一个传完才轮到下一个。改成并发池（默认 3），总耗时大幅下降。
     void (async () => {
-      for (let i = 0; i < arr.length; i++) {
-        const file = arr[i]
-        const taskId = tasks[i].id
-        try {
-          const hash = await computeMD5(file)
-          const rapid = await api.files.rapid(hash, file.name, currentParent, file.size)
-          if (rapid.code === 0) { updateTask(taskId, { status: 'rapid', progress: 100 }); continue }
-          updateTask(taskId, { status: 'uploading', progress: 0 })
-          const res = await uploadWithProgress(file, currentParent, hash, (p) => updateTask(taskId, { progress: p }))
-          if (res.code === 0) updateTask(taskId, { status: res.rapid ? 'rapid' : 'done', progress: 100 })
-          else updateTask(taskId, { status: 'error', error: res.message })
-        } catch (e: any) { updateTask(taskId, { status: 'error', error: e?.message || 'error' }) }
+      const CONCURRENCY = 3
+      let next = 0
+      const runOne = async () => {
+        while (next < arr.length) {
+          const i = next++
+          const file = arr[i]
+          const taskId = tasks[i].id
+          try {
+            // hashing 进度单独显示，用户能看到进度而不是卡在“计算中”
+            const hash = await computeMD5(file, (p) => updateTask(taskId, { status: 'hashing', progress: Math.round(p * 0.1) }))
+            const rapid = await api.files.rapid(hash, file.name, currentParent, file.size)
+            if (rapid.code === 0) { updateTask(taskId, { status: 'rapid', progress: 100 }); continue }
+            updateTask(taskId, { status: 'uploading', progress: 0 })
+            const res = await uploadWithProgress(file, currentParent, hash, (p) => updateTask(taskId, { progress: p }))
+            if (res.code === 0) updateTask(taskId, { status: res.rapid ? 'rapid' : 'done', progress: 100 })
+            else updateTask(taskId, { status: 'error', error: res.message })
+          } catch (e: any) { updateTask(taskId, { status: 'error', error: e?.message || 'error' }) }
+        }
       }
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, arr.length) }, () => runOne()))
       await loadAll()
     })()
   }
@@ -980,6 +1001,26 @@ export default function Files() {
       setDownloads((d) => d.map((x) => x.id === id ? { ...x, status: 'error', error: e?.message, progress: 0 } : x))
       setError(e?.message || 'download failed')
     }
+  }
+
+  // 导出当前目录的文件清单为 CSV（前端生成，不经后端）。
+  // CSV 里对含逗号/引号/换行的名字做转义，避免表格错位。
+  const exportList = () => {
+    const esc = (v: any) => {
+      const s = String(v ?? '')
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const rows = [
+      ['名称', '类型', '大小(字节)', '修改时间', 'MIME'].join(','),
+      ...files.map((f) => [esc(f.name), f.isDir ? '目录' : '文件', f.size, esc(f.updatedAt), esc(f.mimeType)].join(',')),
+    ]
+    const blob = new Blob(['\ufeff' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' }) // BOM 让 Excel 正确识别中文
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `NebulaDrive-清单-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1500)
   }
 
   const handleMkdir = async (name: string) => { await api.files.mkdir(name, currentParent) }
@@ -1051,6 +1092,9 @@ export default function Files() {
           </button>
           <button type="button" className="btn-ghost" onClick={() => fileInputRef.current?.click()}>
             <Upload className="h-4 w-4" /><span className="hidden sm:inline">{t('uploadFile')}</span>
+          </button>
+          <button type="button" className="btn-ghost" onClick={exportList} title="导出当前目录清单 CSV">
+            <Download className="h-4 w-4" /><span className="hidden sm:inline">导出清单</span>
           </button>
           <button type="button" className="btn-ghost" onClick={() => { setAllExpanded(false); setTrashMode(true) }}>
             <Trash2 className="h-4 w-4" /><span className="hidden sm:inline">{t('recycle')}</span>

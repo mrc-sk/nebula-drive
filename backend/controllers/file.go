@@ -500,6 +500,12 @@ const (
 // （公开分享，需校验密码/提取码/祖先链）都要这套响应逻辑，
 // 各自写一份的话对象存储跳转与 Range 支持很容易只改一处。
 func streamFile(c *gin.Context, f *models.File, h filesystem.Handler, disp string) {
+	// CDN 加速：配置启用时 302 到短时效签名 URL，由 CDN 回源取内容。
+	// 放在所有鉴权之后、任何字节写出之前，复用既有安全边界。
+	if maybeCDNRedirect(c, f, disp) {
+		return
+	}
+
 	// 对象存储：优先签名 URL 302 跳转，避免服务器代理
 	var p models.Policy
 	policyType := ""

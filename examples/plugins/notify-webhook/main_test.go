@@ -3,11 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +19,14 @@ import (
 	"time"
 	"unicode/utf8"
 )
+
+// independentSign 在测试里独立算一遍 HMAC-SHA256，不复用被测的
+// hmacSHA256Base64 —— 否则"用自己的实现对自己的结果"没有验证意义。
+func independentSign(secret, data string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(data))
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
 
 // 这些测试用 httptest.NewServer 做真实的 HTTP 往返，而不是 mock
 // http.Client：
@@ -25,10 +37,11 @@ import (
 //   - 日志脱敏必须真的捕获 stderr，不能只信“代码里看起来没打印 URL”。
 
 type capturedRequest struct {
-	Method string
-	Path   string
-	Header http.Header
-	Body   []byte
+	Method   string
+	Path     string
+	RawQuery string
+	Header   http.Header
+	Body     []byte
 }
 
 type capture struct {
@@ -41,10 +54,11 @@ func (c *capture) add(r *http.Request) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.reqs = append(c.reqs, capturedRequest{
-		Method: r.Method,
-		Path:   r.URL.Path,
-		Header: r.Header.Clone(),
-		Body:   body,
+		Method:   r.Method,
+		Path:     r.URL.Path,
+		RawQuery: r.URL.RawQuery,
+		Header:   r.Header.Clone(),
+		Body:     body,
 	})
 }
 
@@ -575,5 +589,125 @@ func TestInitConfigParseFailureStartsEmpty(t *testing.T) {
 	}
 	if !resp.Result.OK {
 		t.Fatal("配置解析失败不应阻止插件启动")
+	}
+}
+
+// newSignedNotifier 构造一个带 secret 的单目标 notifier。
+func newSignedNotifier(srvURL, format, secret string) *notifier {
+	return newNotifier(Config{
+		Webhooks: []WebhookConfig{{
+			URL:            srvURL,
+			Format:         format,
+			Secret:         secret,
+			TimeoutSeconds: 2,
+		}},
+		IncludeBody:  true,
+		MaxBodyChars: 2000,
+	})
+}
+
+// TestFeishuSignature 验证飞书加签：timestamp/sec + sign 写进 payload 顶层，
+// 且签名能被独立实现按官方算法复算出来。
+func TestFeishuSignature(t *testing.T) {
+	const secret = "feishu-test-secret"
+	srv, cap := newCaptureServer(t, 200)
+	n := newSignedNotifier(srv.URL, "feishu", secret)
+
+	before := time.Now().Unix()
+	n.sendAll(context.Background(), notification{To: "u@example.com", Subject: "签名测试", Body: "内容"})
+	after := time.Now().Unix()
+
+	req := cap.one(t)
+	var payload struct {
+		MsgType   string `json:"msg_type"`
+		Timestamp string `json:"timestamp"`
+		Sign      string `json:"sign"`
+	}
+	if err := json.Unmarshal(req.Body, &payload); err != nil {
+		t.Fatalf("payload 不是合法 JSON: %v", err)
+	}
+	if payload.MsgType != "text" {
+		t.Errorf("msg_type = %q, want text", payload.MsgType)
+	}
+	ts, err := strconv.ParseInt(payload.Timestamp, 10, 64)
+	if err != nil || ts < before || ts > after {
+		t.Fatalf("timestamp = %q, want 落在 [%d,%d]", payload.Timestamp, before, after)
+	}
+	// 飞书：stringToSign = timestamp + "\n" + ""（空字符串）
+	want := independentSign(secret, payload.Timestamp+"\n")
+	if payload.Sign != want {
+		t.Errorf("sign = %q, want %q", payload.Sign, want)
+	}
+}
+
+// TestDingtalkSignature 验证钉钉加签：timestamp(ms)/sign 写进 URL query，
+// 签名按 timestamp + "\n" + secret 计算，且 body 里不含签名字段。
+func TestDingtalkSignature(t *testing.T) {
+	const secret = "dingtalk-test-secret"
+	srv, cap := newCaptureServer(t, 200)
+	n := newSignedNotifier(srv.URL, "dingtalk", secret)
+
+	before := time.Now().UnixMilli()
+	n.sendAll(context.Background(), notification{To: "u@example.com", Subject: "签名测试", Body: "内容"})
+	after := time.Now().UnixMilli()
+
+	req := cap.one(t)
+	q, err := url.ParseQuery(req.RawQuery)
+	if err != nil {
+		t.Fatalf("query 解析失败: %v", err)
+	}
+	ts := q.Get("timestamp")
+	ms, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil || ms < before || ms > after {
+		t.Fatalf("timestamp = %q, want 毫秒落在 [%d,%d]", ts, before, after)
+	}
+	want := independentSign(secret, ts+"\n"+secret)
+	if got := q.Get("sign"); got != want {
+		t.Errorf("sign = %q, want %q", got, want)
+	}
+	// 钉钉签名只在 URL，body 不应出现 sign/timestamp 字段
+	var body map[string]any
+	if err := json.Unmarshal(req.Body, &body); err != nil {
+		t.Fatalf("body 不是合法 JSON: %v", err)
+	}
+	if _, ok := body["sign"]; ok {
+		t.Error("钉钉 payload 不应含 sign 字段（应在 URL query）")
+	}
+}
+
+// TestNoSignatureWithoutSecret 未配 secret 时保持旧行为：飞书 payload 无
+// timestamp/sign，钉钉 URL 无签名参数。
+func TestNoSignatureWithoutSecret(t *testing.T) {
+	for _, format := range []string{"feishu", "dingtalk"} {
+		t.Run(format, func(t *testing.T) {
+			srv, cap := newCaptureServer(t, 200)
+			n := testNotifier(srv.URL, format) // 无 secret
+			n.sendAll(context.Background(), notification{Subject: "无签名", Body: "x"})
+
+			req := cap.one(t)
+			if strings.Contains(req.RawQuery, "sign=") || strings.Contains(req.RawQuery, "timestamp=") {
+				t.Errorf("未配 secret 却出现签名 query: %s", req.RawQuery)
+			}
+			var body map[string]any
+			json.Unmarshal(req.Body, &body)
+			if _, ok := body["sign"]; ok {
+				t.Error("未配 secret 却出现 sign 字段")
+			}
+			if _, ok := body["timestamp"]; ok {
+				t.Error("未配 secret 却出现 timestamp 字段")
+			}
+		})
+	}
+}
+
+// TestSecretNeverLogged 验证签名密钥不会泄漏到日志（管理端可见）。
+func TestSecretNeverLogged(t *testing.T) {
+	const secret = "TOP-SECRET-SHOULD-NOT-LEAK"
+	logs := captureLogs(t)
+	srv, _ := newCaptureServer(t, 200)
+	n := newSignedNotifier(srv.URL, "feishu", secret)
+	n.sendAll(context.Background(), notification{Subject: "s", Body: "b"})
+	if strings.Contains(logs.String(), secret) {
+		t.Errorf("日志泄漏了 secret: %s", logs.String())
 	}
 }

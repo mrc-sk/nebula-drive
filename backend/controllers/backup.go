@@ -80,25 +80,25 @@ func liveDBPath() string {
 
 // backupManifest 备份包里的清单。
 type backupManifest struct {
-	Version   string    `json:"version"`
-	CreatedAt time.Time `json:"createdAt"`
-	DBType    string    `json:"dbType"`
-	DBFile    string    `json:"dbFile"`
-	DBIncluded bool     `json:"dbIncluded"`
-	FileCount int64     `json:"fileCount"`
-	Truncated bool      `json:"truncated"`
-	Files     []gaugedFile `json:"files"`
+	Version    string       `json:"version"`
+	CreatedAt  time.Time    `json:"createdAt"`
+	DBType     string       `json:"dbType"`
+	DBFile     string       `json:"dbFile"`
+	DBIncluded bool         `json:"dbIncluded"`
+	FileCount  int64        `json:"fileCount"`
+	Truncated  bool         `json:"truncated"`
+	Files      []gaugedFile `json:"files"`
 }
 
 type gaugedFile struct {
-	ID        uint   `json:"id"`
-	Name      string `json:"name"`
-	ParentID  *uint  `json:"parentId,omitempty"`
-	IsDir     bool   `json:"isDir"`
-	Size      int64  `json:"size"`
-	PolicyID  uint   `json:"policyId"`
-	Source    string `json:"sourceName,omitempty"`
-	Deleted   bool   `json:"deleted"`
+	ID       uint   `json:"id"`
+	Name     string `json:"name"`
+	ParentID *uint  `json:"parentId,omitempty"`
+	IsDir    bool   `json:"isDir"`
+	Size     int64  `json:"size"`
+	PolicyID uint   `json:"policyId"`
+	Source   string `json:"sourceName,omitempty"`
+	Deleted  bool   `json:"deleted"`
 }
 
 // CreateBackup 生成备份包并触发 onBackup 钩子。
@@ -144,33 +144,38 @@ func CreateBackup(c *gin.Context) {
 		return
 	}
 
-	// onBackup 是异步通知钩子：插件可借此把包复制到 S3 / 异地，或落审计。
-	// 拿不到返回值是设计使然 —— 备份已经生成，不该因为插件没响应就失败。
+	// onBackup 用于通知插件把包复制到 S3 / 异地或落审计。
+	// 返回值不被读取 —— 备份已经生成，不该因为插件没响应就失败。
+	//
+	// 注意：钩子本身是 ModeSync（见 hooks_table.go），Fire 最多阻塞
+	// FireTimeout（生产默认 2 秒）。因此配了慢速 backup 插件（如复制大包）时，
+	// 本接口可能多等最多 2 秒；超时只记警告、不中断插件进程，复制仍会继续。
+	// 这里不因超时改变响应 —— 备份文件本身已经落盘，与插件是否完成无关。
 	plugin.Fire(plugin.HookBackup, map[string]any{
-		"kind":      "full",
-		"filename":  name,
-		"path":      full,
-		"size":      size,
-		"sha256":    sum,
-		"dbPath":    man.DBFile,
+		"kind":       "full",
+		"filename":   name,
+		"path":       full,
+		"size":       size,
+		"sha256":     sum,
+		"dbPath":     man.DBFile,
 		"dbIncluded": man.DBIncluded,
-		"fileCount": man.FileCount,
-		"createdAt": man.CreatedAt.Format(time.RFC3339),
-		"operator":  operatorName(c),
+		"fileCount":  man.FileCount,
+		"createdAt":  man.CreatedAt.Format(time.RFC3339),
+		"operator":   operatorName(c),
 	})
 
 	auditPluginOp(c, "backup_create", name,
 		fmt.Sprintf("size=%d,sha256=%s,files=%d", size, sum, man.FileCount))
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
-		"name":        name,
-		"size":        size,
-		"sha256":      sum,
-		"fileCount":   man.FileCount,
-		"dbIncluded":  man.DBIncluded,
-		"truncated":   man.Truncated,
-		"download":    "/api/admin/backup/download?name=" + name,
-		"message":     "备份已生成",
+		"name":       name,
+		"size":       size,
+		"sha256":     sum,
+		"fileCount":  man.FileCount,
+		"dbIncluded": man.DBIncluded,
+		"truncated":  man.Truncated,
+		"download":   "/api/admin/backup/download?name=" + name,
+		"message":    "备份已生成",
 	}})
 }
 
