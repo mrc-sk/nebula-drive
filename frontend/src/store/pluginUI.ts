@@ -56,7 +56,7 @@ export function normalizePageURL(raw: string): string {
     const loopback =
       h === '127.0.0.1' || h === 'localhost' || h === '0.0.0.0' ||
       h === '::1' || h === '[::1]'
-    if (loopback || u.origin === window.location.origin) {
+    if (loopback || u.host === window.location.host) {
       return u.pathname + u.search + u.hash
     }
     return u.toString()

@@ -201,8 +201,8 @@ export default function MainLayout(props: MainLayoutProps) {
     () => (pluginData?.sidebar.admin || []).slice().sort(byOrder),
     [pluginData],
   )
-  // 版本默认值与发布名 V26-11.2 对齐（后端 brand.version 同源，见 52c70a8）
-  const [brand, setBrand] = useState({ name: 'NebulaDrive', author: 'NebulaDrive Team', version: '26-11.2' })
+  // 版本默认值与发布名 V26-11.3 对齐（后端 brand.version 同源，见 52c70a8）
+  const [brand, setBrand] = useState({ name: 'NebulaDrive', author: 'NebulaDrive Team', version: '26-11.3' })
   // 智能时代入口按后台开关动态显示：AI 总开关 → AI 助手，代码空间开关 → 代码空间。
   // 没开启时不渲染入口，也不加载对应 chunk（App.tsx 里是 lazy 路由）。
   const [aiStatus, setAiStatus] = useState<AIStatus | null>(null)
@@ -257,7 +257,7 @@ export default function MainLayout(props: MainLayoutProps) {
           setBrand({
             name: d['brand.name'] || d.brandName || 'NebulaDrive',
             author: d['brand.author'] || d.brandAuthor || 'NebulaDrive Team',
-            version: d['brand.version'] || d.brandVersion || '26-11.2',
+            version: d['brand.version'] || d.brandVersion || '26-11.3',
           })
         }
       } catch {}
