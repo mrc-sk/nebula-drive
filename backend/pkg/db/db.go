@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -29,6 +30,24 @@ func Init(c *conf.DBConfig) error {
 		dsn := c.File
 		if dsn == "" {
 			dsn = "data/nebula.db"
+		}
+		// 相对路径基于数据目录解析，并确保父目录存在。
+		//
+		// 为什么必须这么做：安装向导的默认值是相对路径 "data/nebula.db"，
+		// 而 SQLite 会按**进程当前工作目录**解释它。容器里 WORKDIR 是 /data，
+		// 于是它实际去找 /data/data/nebula.db —— 目录不存在，SQLite 报
+		// "unable to open database file: out of memory (14)"（错误码 14 是
+		// CANTOPEN，"out of memory" 只是 SQLite 的误导性默认文案）。
+		//
+		// 解析到数据目录后，路径与工作目录无关：裸机、容器、systemd
+		// 三种部署下都指向同一个数据目录，用户填相对或绝对路径都对。
+		if !filepath.IsAbs(dsn) {
+			dsn = filepath.Join(conf.DataDir(), dsn)
+		}
+		if dir := filepath.Dir(dsn); dir != "" {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return fmt.Errorf("创建数据库目录失败 %s: %w", dir, err)
+			}
 		}
 		dialector = sqlite.Open(dsn)
 	case "mysql":

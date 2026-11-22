@@ -34,7 +34,7 @@ export default function Install({ onDone }: { onDone: () => void }) {
   const [testMsg, setTestMsg] = useState('')
 
   const [form, setForm] = useState<FormState>({
-    db: { type: 'sqlite', host: '127.0.0.1', port: 3306, name: 'nebula', user: 'root', password: '', file: 'data/nebula.db' },
+    db: { type: 'sqlite', host: '127.0.0.1', port: 3306, name: 'nebula', user: 'root', password: '', file: 'nebula.db' },
     admin: { userName: 'admin', password: '', email: '' },
     system: {
       siteName: 'NebulaDrive', domain: 'localhost', protocol: 'http', listen: ':5212',
