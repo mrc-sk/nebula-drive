@@ -5,6 +5,47 @@
 
 ---
 
+## 最快路径：用「从 Docker 导入」一键转换
+
+雨云的「从 Docker 导入」弹窗里选 **Docker Compose** 标签，把下面这段粘进输入框，点「转换」：
+
+```yaml
+version: '3'
+services:
+  web:
+    image: ghcr.io/mrc-sk/nebula-drive:latest
+    ports:
+      - "5212:5212"
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data:/data
+```
+
+仓库里也存了一份：`docker-compose.rainyun.yml`（可直接复制全文）。
+该 compose 已用 Docker Compose v2 的 `config` 命令验证语法通过。
+
+**刻意没写的东西**（避免雨云解析器不认）：
+- 没有 `build:` —— 镜像已推到 GHCR，雨云只需拉取；本地开发用的 `docker-compose.yml` 才带 build
+- 没有 `container_name` / `restart` / `healthcheck` —— K8s 里这些由平台管，compose 里写了反而可能被误解析
+
+**点「转换」后必须核对的字段**（自动导入未必完整）：
+
+| 位置 | 核对项 | 正确值 |
+|---|---|---|
+| 基本信息 | 镜像 | `ghcr.io/mrc-sk/nebula-drive:latest` |
+| Services | 内部端口 / 外部端口 | `5212` / `5212`，协议 `tcp`，类型「外部访问」 |
+| Env | `TZ` | `Asia/Shanghai` |
+| VolumeMounts | 挂载路径 | `/data`，内容类型「目录」，子路径建议 `nebula-drive` |
+| Command / Args | 留空 / `-data /data -listen :5212` | 镜像已带默认 CMD，不填也能跑 |
+| 最小 CPU / 内存 | | 1 核 / 512 MB |
+
+> ⚠️ 最关键的是 **VolumeMounts**：`./data:/data` 是 compose 的宿主机路径写法，
+> 雨云转成 K8s 持久化卷时，务必确认挂载路径是 `/data`、类型是「目录」。
+> 少了这一步，用户重启应用后数据会丢。如果转换器没自动生成，就按上表手动加一条。
+
+---
+
 ## 前置：镜像从哪来
 
 雨云的容器本质是 K8s Deployment，必须有一个**公网可拉取**的 Docker 镜像。
