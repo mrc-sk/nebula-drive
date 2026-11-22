@@ -7,7 +7,32 @@
 
 ## 最快路径：用「从 Docker 导入」一键转换
 
-雨云的「从 Docker 导入」弹窗里选 **Docker Compose** 标签，把下面这段粘进输入框，点「转换」：
+### 方式 A：Docker Run 命令（最稳，推荐）
+
+弹窗里选 **Docker Run 命令** 标签，粘这一行，点「转换」：
+
+```
+docker run -p 5212:5212 -e TZ=Asia/Shanghai ghcr.io/mrc-sk/nebula-drive:latest
+```
+
+**故意不带 `-v`**：雨云是 K8s 语义，`-v ./data:/data` 这种宿主机相对路径它解析不了，
+很可能就是「点转换没反应」的原因。先用最简命令转换成功，再在导入后的表单里
+**手动加一条 VolumeMounts**：
+
+| 字段 | 值 |
+|---|---|
+| 名称 | `data` |
+| 挂载路径 | `/data` |
+| 子路径 | `nebula-drive` |
+| 内容类型 | 目录 |
+
+⚠️ 这条不能省——`/data` 里是数据库、配置、密钥和上传文件，不加的话应用重启后数据全丢。
+
+其余转换后核对：镜像 = `ghcr.io/mrc-sk/nebula-drive:latest`；端口内部/外部都 `5212`、tcp、外部访问；Env `TZ=Asia/Shanghai`；Command 与 Args 留空（镜像已带默认 CMD）。
+
+### 方式 B：Docker Compose 标签
+
+如果方式 A 已成功，这段可跳过。选 **Docker Compose** 标签，把下面这段粘进输入框，点「转换」：
 
 ```yaml
 version: '3'
@@ -24,6 +49,10 @@ services:
 
 仓库里也存了一份：`docker-compose.rainyun.yml`（可直接复制全文）。
 该 compose 已用 Docker Compose v2 的 `config` 命令验证语法通过。
+
+> 如果这段点「转换」没反应：**删掉 `volumes:` 那两行再试**。
+> `./data:/data` 是宿主机相对路径写法，标准 Compose 认，但雨云的 K8s 转换器可能静默失败。
+> 删掉后转换成功，再按方式 A 里那张表手动补 VolumeMounts 即可。
 
 **刻意没写的东西**（避免雨云解析器不认）：
 - 没有 `build:` —— 镜像已推到 GHCR，雨云只需拉取；本地开发用的 `docker-compose.yml` 才带 build
