@@ -1,0 +1,24 @@
+services:
+  nebula-drive:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: V26-11.3
+    image: nebula-drive:V26-11.3
+    container_name: nebula-drive
+    restart: unless-stopped
+    ports:
+      - "5212:5212"
+    volumes:
+      # 所有数据（数据库/配置/上传文件/密钥）都在 /data，挂出来即可持久化
+      - ./data:/data
+    environment:
+      - TZ=Asia/Shanghai
+    healthcheck:
+      # 用根路径探活：未安装时前端安装向导也返回 200
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5212/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

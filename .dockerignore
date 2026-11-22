@@ -1,0 +1,30 @@
+# 版本控制与 IDE
+.git
+.gitignore
+.vscode
+.idea
+
+# 本地依赖与构建产物（镜像内会重新 npm ci / go build）
+**/node_modules
+backend/.ndbuild
+backend/nebula
+backend/nebula.exe
+frontend/dist
+
+# 运行数据：绝不能进镜像（含密钥/数据库/用户文件）
+data
+**/data/*.db
+*.key
+
+# CI/文档/示例等非构建必需，缩小上下文
+.github
+docs
+examples
+wiki-site
+wiki-src
+promo
+official-plugins
+llm-local
+ai-desk
+tools
+*.md
