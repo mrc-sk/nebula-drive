@@ -58,18 +58,34 @@ services:
 - 没有 `build:` —— 镜像已推到 GHCR，雨云只需拉取；本地开发用的 `docker-compose.yml` 才带 build
 - 没有 `container_name` / `restart` / `healthcheck` —— K8s 里这些由平台管，compose 里写了反而可能被误解析
 
-**点「转换」后必须核对的字段**（自动导入未必完整）：
+**转换后必须核对的字段**（自动导入未必完整）：
 
 | 位置 | 核对项 | 正确值 |
 |---|---|---|
 | 基本信息 | 镜像 | `ghcr.io/mrc-sk/nebula-drive:latest` |
-| Services | 内部端口 / 外部端口 | `5212` / `5212`，协议 `tcp`，类型「外部访问」 |
-| Env | `TZ` | `Asia/Shanghai` |
-| VolumeMounts | 挂载路径 | `/data`，内容类型「目录」，子路径建议 `nebula-drive` |
-| Command / Args | 留空 / `-data /data -listen :5212` | 镜像已带默认 CMD，不填也能跑 |
+| 服务配置 | 内部端口 / 外部端口 | `5212` / `5212`，协议 `tcp`，类型「外部访问」 |
+| 环境变量 | `TZ` | `Asia/Shanghai` |
+| **持久化卷** | 挂载路径 | `/data`，内容类型「目录」，子路径建议 `nebula-drive` |
+| 命令与参数 | **留空即可** | 镜像自带 ENTRYPOINT+CMD，见下 |
 | 最小 CPU / 内存 | | 1 核 / 512 MB |
 
-> ⚠️ 最关键的是 **VolumeMounts**：`./data:/data` 是 compose 的宿主机路径写法，
+### 镜像自带的运行参数（已从镜像 config 验证）
+
+从 GHCR 拉取的镜像 config 实测：
+
+```
+Entrypoint : ["/usr/local/bin/nebula"]
+Cmd        : ["-data", "/data", "-listen", ":5212"]
+User       : nebula            (uid 10001，非 root)
+WorkingDir : /data
+Volumes    : {"/data": {}}     (镜像自带卷声明)
+ExposedPorts: 5212/tcp
+```
+
+**所以「命令与参数」tab 什么都不用填** —— 雨云 UI 也写明「若不填写，将使用容器默认的命令和参数」，
+留空即等于 `nebula -data /data -listen :5212`，正是我们要的。
+
+> ⚠️ 最关键的是 **持久化卷**：`./data:/data` 是 compose 的宿主机路径写法，
 > 雨云转成 K8s 持久化卷时，务必确认挂载路径是 `/data`、类型是「目录」。
 > 少了这一步，用户重启应用后数据会丢。如果转换器没自动生成，就按上表手动加一条。
 
