@@ -542,7 +542,7 @@ func ensureBrandSettings() {
 	upsertSetting("brand.name", "NebulaDrive")
 	upsertSetting("brand.author", "NebulaDrive Team")
 	// 版本号跟随二进制强制刷新，避免已安装库残留旧版本导致前后端 / 发版口径不一致。
-	forceSetSetting("brand.version", "26-11.3")
+	forceSetSetting("brand.version", "26-11.4")
 	upsertSetting("trash.retention_days", "30")
 	upsertSetting("file.max_versions", "10")
 	// TLS

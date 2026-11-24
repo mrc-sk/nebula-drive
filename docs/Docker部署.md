@@ -43,7 +43,7 @@ compose 文件已配置：
 
 ```bash
 # 构建镜像（VERSION 会注入到二进制，供插件读取 HostVersion）
-docker build --build-arg VERSION=V26-11.3 -t nebula-drive:V26-11.3 .
+docker build --build-arg VERSION=V26-11.4 -t nebula-drive:V26-11.4 .
 
 # 准备数据目录（容器内以 uid 10001 运行，需要写权限）
 mkdir -p data && chmod 777 data
@@ -54,7 +54,7 @@ docker run -d --name nebula-drive \
   -v "$PWD/data:/data" \
   -e TZ=Asia/Shanghai \
   --restart unless-stopped \
-  nebula-drive:V26-11.3
+  nebula-drive:V26-11.4
 ```
 
 ---

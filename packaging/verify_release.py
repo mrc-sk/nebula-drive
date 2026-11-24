@@ -12,7 +12,7 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REL = os.path.join(ROOT, "release")
 # 当前发布版本，与 backend/main.go 的 brand.version 对齐。
-VERSION = "V26-11.2"
+VERSION = "V26-11.4"
 
 # 与 build-release.sh --all 的矩阵保持一致。
 # 顺序即报告顺序：先主流桌面平台，再 ARM。
@@ -129,8 +129,8 @@ for plat in PLATFORMS:
         # 2b. 版本号注入：build-release.sh 用 -X main.buildVersion 注入，
         # 插件宿主会把它作为 HostVersion 传给插件。漏注入的话插件拿到的
         # 是 "dev"，无法做版本判断。
-        # build-release.sh 注入的是 git tag（形如 V26-11.2），而 main.go 的
-        # brand.version 是不带 V 的 26-11.2；两种形式都算注入成功，
+        # build-release.sh 注入的是 git tag（形如 V26-11.4），而 main.go 的
+        # brand.version 是不带 V 的 26-11.4；两种形式都算注入成功，
         # 否则任一口径变化都会让校验误判失败。
         _ver_forms = [VERSION.encode(), VERSION.lstrip("V").encode()]
         check(any(v in blob for v in _ver_forms), "版本号已注入二进制 (%s)" % VERSION)

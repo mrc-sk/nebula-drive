@@ -4,8 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        VERSION: V26-11.3
-    image: nebula-drive:V26-11.3
+        VERSION: V26-11.4
+    image: nebula-drive:V26-11.4
     container_name: nebula-drive
     restart: unless-stopped
     ports:

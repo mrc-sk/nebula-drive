@@ -69,7 +69,7 @@ export interface BrandInfo {
 const DEFAULT_BRAND: BrandInfo = {
   name: 'NebulaDrive',
   author: 'NebulaDrive Team',
-  version: '26-11.3',
+  version: '26-11.4',
 }
 
 let globalBrand: BrandInfo = DEFAULT_BRAND

@@ -40,7 +40,7 @@ RELEASE = os.path.join(ROOT, "release")
 
 # 当前发布版本。必须与 backend/main.go 的 brand.version（无 V 前缀）保持一致，
 # 否则打包目录名与软件「关于」页显示的版本号对不上。历史值 V26-10.0-* 已过时。
-VERSION = "V26-11.2"
+VERSION = "V26-11.4"
 
 # (目录后缀, 编译产物名, 包内二进制名, 启动脚本名, 是否 windows, 是否带 Linux 上手说明)
 #
