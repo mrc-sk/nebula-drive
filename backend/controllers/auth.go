@@ -407,7 +407,8 @@ type registerReq struct {
 // Register 公开注册。
 //
 // 两条通路：
-//   - 自由注册：后台开启 security.allow_register 时，无需邀请码即可注册（沿用旧行为）。
+//   - 自由注册（默认）：security.allow_register 默认开启，无需邀请码即可注册。
+//     管理员可在后台关闭自由注册，配合邀请码实现「仅凭码进人」。
 //   - 邀请码注册：提交后台已创建且未失效的邀请码即可注册；即使自由注册关闭也放行，
 //     这样站点可以「关闭自由注册、只凭邀请码进人」。
 //
@@ -438,7 +439,7 @@ func Register(c *gin.Context) {
 
 	inviteCode := strings.ToUpper(strings.TrimSpace(req.InviteCode))
 	requireInvite := getSettingBool("security.require_invite_code", false)
-	allowFree := getSettingBool("security.allow_register", false)
+	allowFree := getSettingBool("security.allow_register", true)
 
 	var invite *models.RedemptionCode
 	var plan *models.Plan
@@ -561,7 +562,7 @@ func RegisterMode(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{
-			"allowRegister":     getSettingBool("security.allow_register", false),
+			"allowRegister":     getSettingBool("security.allow_register", true),
 			"requireInviteCode": getSettingBool("security.require_invite_code", false),
 			"plans":             list,
 		},

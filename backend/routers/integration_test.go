@@ -86,7 +86,7 @@ func bootstrapForTest(t *testing.T) *testEnv {
 		"security.password_require_digit":   "true",
 		"security.password_require_special": "false",
 		"security.captcha_enabled":          "false",
-		"security.allow_register":           "false",
+		"security.allow_register":           "true",
 	}
 	for k, v := range brand {
 		testutil.SeedSetting(k, v)

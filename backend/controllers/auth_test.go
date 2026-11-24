@@ -72,12 +72,25 @@ func TestHasSpecialChar(t *testing.T) {
 
 func TestRegisterDisabled(t *testing.T) {
 	testutil.SetupDB(t)
-	// 默认未开放注册
+	// 显式关闭自由注册后，未填邀请码应被拒绝
+	testutil.SeedSetting("security.allow_register", "false")
 	r := newTestRouter()
 	r.POST("/register", Register)
 	w := doJSON(r, http.MethodPost, "/register", map[string]string{"userName": "u", "password": "Abcdefg1"})
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", w.Code)
+	}
+}
+
+// TestRegisterOpenByDefault 验证默认开放自由注册：不填邀请码、也不依赖任何
+// 设置种子时即可注册成功。邀请码是可选增强（填了送套餐），不是准入门槛。
+func TestRegisterOpenByDefault(t *testing.T) {
+	testutil.SetupDB(t)
+	r := newTestRouter()
+	r.POST("/register", Register)
+	w := doJSON(r, http.MethodPost, "/register", map[string]string{"userName": "openuser", "password": "Abcdefg1"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
 	}
 }
 

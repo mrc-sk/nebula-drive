@@ -556,5 +556,7 @@ func ensureBrandSettings() {
 	upsertSetting("security.password_require_digit", "true")
 	upsertSetting("security.password_require_special", "false")
 	upsertSetting("security.captcha_enabled", "false")
-	upsertSetting("security.allow_register", "false")
+	// 默认开放自由注册：邀请码是可选增强（填了送套餐），不是准入门槛。
+	// 管理员可在后台关闭自由注册，改为「仅凭邀请码进人」。
+	upsertSetting("security.allow_register", "true")
 }
