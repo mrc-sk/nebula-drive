@@ -38,7 +38,8 @@ export default function ProfileSettings({ open, onClose }: { open: boolean; onCl
   const { t, i18n } = useTranslation()
   const theme = useThemeStore((s) => s.theme)
   const setTheme = useThemeStore((s) => s.setTheme)
-  const { eggMode, setEggMode, selectMode, setSelectMode } = useUserPrefsStore()
+  const prefs = useUserPrefsStore()
+  const { eggMode, setEggMode, selectMode, setSelectMode, set: setPref, reset: resetPrefs, set2FAHint } = prefs
   const [lang, setLang] = useState(i18n.language.slice(0, 5))
   const [tab, setTab] = useState<'prefs' | 'tokens' | 'security'>('prefs')
 
@@ -195,50 +196,112 @@ export default function ProfileSettings({ open, onClose }: { open: boolean; onCl
 
       <div className="max-h-[70vh] overflow-y-auto p-4">
         {tab === 'prefs' && (
-          <div className="space-y-4">
-            <Field label={t('language')}>
-              <div className="grid grid-cols-2 gap-2">
-                {LANGUAGES.map((l) => (
-                  <button
-                    key={l.code}
-                    type="button"
-                    onClick={() => applyLang(l.code)}
-                    className={`rounded-lg px-3 py-1.5 text-xs transition ${lang.startsWith(l.code.slice(0, 2)) || l.code === lang ? 'bg-nebula-500/30 text-white' : 'bg-white/5 hover:bg-white/10 text-slate-200'}`}
-                  >
-                    {l.label}
-                  </button>
-                ))}
-              </div>
-            </Field>
-            <Field label={t('theme')}>
-              <div className="grid grid-cols-3 gap-2">
-                {(['light', 'dark', 'auto'] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setTheme(m)}
-                    className={`rounded-lg px-2 py-1.5 text-xs transition ${theme === m ? 'bg-nebula-500/30 text-white' : 'bg-white/5 hover:bg-white/10 text-slate-200'}`}
-                  >
-                    {t(m === 'light' ? 'themeLight' : m === 'dark' ? 'themeDark' : 'themeAuto')}
-                  </button>
-                ))}
-              </div>
-            </Field>
-            <Field label={t('selectMode')}>
-              <select
-                value={selectMode}
-                onChange={(e) => setSelectMode(e.target.value as any)}
-                className="glass-input text-xs"
-              >
-                <option value="context">{t('selectModeContext')}</option>
-                <option value="floating">{t('selectModeFloating')}</option>
-                <option value="drawer">{t('selectModeDrawer')}</option>
-              </select>
-            </Field>
-            <label className="flex cursor-pointer items-center justify-between rounded-lg bg-white/5 px-3 py-2">
-              <span className="text-xs text-slate-200">彩蛋模式</span>
-              <input type="checkbox" className="h-4 w-4 accent-nebula-500" checked={eggMode} onChange={(e) => setEggMode(e.target.checked)} />
-            </label>
+          <div className="space-y-5">
+            {/* 基础：语言 / 主题 / 选择模式 / 彩蛋 */}
+            <PrefGroup title="基础">
+              <Field label={t('language')}>
+                <div className="grid grid-cols-2 gap-2">
+                  {LANGUAGES.map((l) => (
+                    <button
+                      key={l.code}
+                      type="button"
+                      onClick={() => applyLang(l.code)}
+                      className={`rounded-lg px-3 py-1.5 text-xs transition ${lang.startsWith(l.code.slice(0, 2)) || l.code === lang ? 'bg-nebula-500/30 text-white' : 'bg-white/5 hover:bg-white/10 text-slate-200'}`}
+                    >
+                      {l.label}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+              <Field label={t('theme')}>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['light', 'dark', 'auto'] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setTheme(m)}
+                      className={`rounded-lg px-2 py-1.5 text-xs transition ${theme === m ? 'bg-nebula-500/30 text-white' : 'bg-white/5 hover:bg-white/10 text-slate-200'}`}
+                    >
+                      {t(m === 'light' ? 'themeLight' : m === 'dark' ? 'themeDark' : 'themeAuto')}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+              <Field label={t('selectMode')}>
+                <select value={selectMode} onChange={(e) => setSelectMode(e.target.value as any)} className="glass-input text-xs">
+                  <option value="context">{t('selectModeContext')}</option>
+                  <option value="floating">{t('selectModeFloating')}</option>
+                  <option value="drawer">{t('selectModeDrawer')}</option>
+                </select>
+              </Field>
+              <Toggle label="彩蛋模式" checked={eggMode} onChange={setEggMode} />
+              <Toggle label="头像光晕" checked={prefs.avatarHalo} onChange={(v) => setPref('avatarHalo', v)} />
+            </PrefGroup>
+
+            {/* 界面 / 外观 */}
+            <PrefGroup title="界面与外观">
+              <Field label="列表密度">
+                <Segmented
+                  value={prefs.density}
+                  options={[{ value: 'compact', label: '紧凑' }, { value: 'normal', label: '标准' }, { value: 'comfortable', label: '宽松' }]}
+                  onChange={(v) => setPref('density', v as any)}
+                />
+              </Field>
+              <Toggle label="显示文件类型图标" checked={prefs.showFileIcons} onChange={(v) => setPref('showFileIcons', v)} />
+              <Toggle label="显示文件大小" checked={prefs.showFileSize} onChange={(v) => setPref('showFileSize', v)} />
+              <Toggle label="显示修改时间" checked={prefs.showFileDate} onChange={(v) => setPref('showFileDate', v)} />
+              <Toggle label="显示隐藏文件（. 开头）" checked={prefs.showHiddenFiles} onChange={(v) => setPref('showHiddenFiles', v)} />
+              <Toggle label="紧凑数字格式" checked={prefs.compactNumbers} onChange={(v) => setPref('compactNumbers', v)} />
+              <Toggle label="减少动画" checked={prefs.reduceMotion} onChange={(v) => setPref('reduceMotion', v)} />
+            </PrefGroup>
+
+            {/* 文件浏览 */}
+            <PrefGroup title="文件浏览">
+              <Field label="默认视图">
+                <Segmented
+                  value={prefs.fileView}
+                  options={[{ value: 'list', label: '列表' }, { value: 'grid', label: '网格' }]}
+                  onChange={(v) => setPref('fileView', v as any)}
+                />
+              </Field>
+              <Field label="排序字段">
+                <Segmented
+                  value={prefs.sortBy}
+                  options={[{ value: 'name', label: '名称' }, { value: 'size', label: '大小' }, { value: 'modified', label: '时间' }]}
+                  onChange={(v) => setPref('sortBy', v as any)}
+                />
+              </Field>
+              <Toggle label="降序排列" checked={prefs.sortDesc} onChange={(v) => setPref('sortDesc', v)} />
+              <Field label={`每页条数（${prefs.pageSize}）`}>
+                <input type="range" min={10} max={200} step={10} value={prefs.pageSize}
+                  onChange={(e) => setPref('pageSize', Number(e.target.value))} className="w-full accent-nebula-500" />
+              </Field>
+              <Field label={`网格图标尺寸（${prefs.gridSize}px）`}>
+                <input type="range" min={64} max={200} step={8} value={prefs.gridSize}
+                  onChange={(e) => setPref('gridSize', Number(e.target.value))} className="w-full accent-nebula-500" />
+              </Field>
+            </PrefGroup>
+
+            {/* 交互 */}
+            <PrefGroup title="交互">
+              <Toggle label="双击打开文件" checked={prefs.doubleClickOpen} onChange={(v) => setPref('doubleClickOpen', v)} />
+              <Toggle label="删除前确认" checked={prefs.confirmDelete} onChange={(v) => setPref('confirmDelete', v)} />
+              <Toggle label="自动播放预览" checked={prefs.autoPlayPreview} onChange={(v) => setPref('autoPlayPreview', v)} />
+              <Toggle label="记住上次目录" checked={prefs.rememberLastPath} onChange={(v) => setPref('rememberLastPath', v)} />
+              <Toggle label="启用键盘快捷键" checked={prefs.enableShortcuts} onChange={(v) => setPref('enableShortcuts', v)} />
+            </PrefGroup>
+
+            {/* 高级 */}
+            <PrefGroup title="高级">
+              <Toggle label="显示容量条" checked={prefs.showStorageBar} onChange={(v) => setPref('showStorageBar', v)} />
+              <Toggle label="显示版本数角标" checked={prefs.showVersionBadge} onChange={(v) => setPref('showVersionBadge', v)} />
+              <Toggle label="2FA 开启提示" checked={prefs.suggest2FAHint} onChange={set2FAHint} />
+              <button type="button" onClick={() => { resetPrefs(); applyLang('zh-CN'); setTheme('auto') }}
+                className="w-full rounded-lg border border-white/10 bg-white/5 py-2 text-xs text-slate-300 transition hover:bg-white/10">
+                恢复默认设置
+              </button>
+              <div className="text-center text-[10px] text-slate-500">共 24 项可自定义 · 自动保存在本机</div>
+            </PrefGroup>
           </div>
         )}
 
@@ -434,6 +497,45 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div>
       <div className="mb-1.5 text-xs font-medium text-slate-300">{label}</div>
       {children}
+    </div>
+  )
+}
+
+function PrefGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <div className="mb-2 border-b border-white/10 pb-1 text-[11px] font-semibold uppercase tracking-wide text-cyan-glow/80">{title}</div>
+      <div className="space-y-2.5">{children}</div>
+    </section>
+  )
+}
+
+function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex cursor-pointer items-center justify-between rounded-lg bg-white/5 px-3 py-2">
+      <span className="text-xs text-slate-200">{label}</span>
+      <input type="checkbox" className="h-4 w-4 accent-nebula-500" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    </label>
+  )
+}
+
+function Segmented({ value, options, onChange }: {
+  value: string
+  options: { value: string; label: string }[]
+  onChange: (v: string) => void
+}) {
+  return (
+    <div className="grid grid-cols-3 gap-1.5">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          className={`rounded-lg px-2 py-1.5 text-xs transition ${value === o.value ? 'bg-nebula-500/30 text-white' : 'bg-white/5 hover:bg-white/10 text-slate-200'}`}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   )
 }

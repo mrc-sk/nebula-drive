@@ -14,6 +14,7 @@
 |---|---|---|
 | 1 | 注册 | **默认开放自由注册**：`security.allow_register` 启动种子与 fallback 默认值由 `false` 改为 `true`。填邀请码 = 按码绑定套餐发放订阅；不填 = 正常注册。管理员仍可在后台关闭恢复旧行为，或装 `nd-invite-code` 插件把关 |
 | 2 | CI · 插件 | 恢复 `backend/cmd/pbclus-pack/`（V26-11.0 重构时误删），Smoke workflow 不再是红的；官方插件包 `pack/inspect/verify/unpack/keygen` 制作能力一并复活 |
+| 3 | 用户偏好 | 个人设置面板可自定义项从 4 项扩到 **24 项**，分基础 / 界面外观 / 文件浏览 / 交互 / 高级五组，全部持久化到 localStorage 并对旧配置自动补默认值。视图模式、排序、隐藏文件、减少动画、头像光晕等已接真实 UI 消费点 |
 
 ### 兼容说明
 

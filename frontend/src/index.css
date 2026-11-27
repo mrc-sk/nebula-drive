@@ -547,3 +547,13 @@ html:not(.dark) .crumb-sep::after {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* 用户偏好：减少动画 —— 由 App.tsx 根据 useUserPrefsStore.reduceMotion 切换 */
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}

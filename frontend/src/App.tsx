@@ -106,7 +106,14 @@ export default function App() {
   const wobbleTimerRef = useRef<number | null>(null)
 
   const eggMode = useUserPrefsStore((s) => s.eggMode)
+  const reduceMotion = useUserPrefsStore((s) => s.reduceMotion)
   const loc = useLocation()
+
+  // 减少动画：整站禁用 CSS 动画与过渡（用户偏好持久化）
+  useEffect(() => {
+    document.documentElement.classList.toggle('reduce-motion', reduceMotion)
+    return () => document.documentElement.classList.remove('reduce-motion')
+  }, [reduceMotion])
 
   const refreshInstall = async () => {
     try {

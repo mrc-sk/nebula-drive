@@ -860,7 +860,10 @@ export default function Files() {
   const [error, setError] = useState('')
   const [currentParent, setCurrentParent] = useState<number | null>(null)
   const [trashMode, setTrashMode] = useState(false)
-  const [view, setView] = useState<'list' | 'grid'>('list')
+  // 视图偏好持久化到用户设置；工具栏切换时同步写回
+  const prefs = useUserPrefsStore()
+  const [view, setViewState] = useState<'list' | 'grid'>(prefs.fileView)
+  const setView = (v: 'list' | 'grid') => { setViewState(v); prefs.set('fileView', v) }
   const [allExpanded, setAllExpanded] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [modal, setModal] = useState<ModalState>({ type: 'none' })
@@ -874,10 +877,25 @@ export default function Files() {
   const dragCounterRef = useRef(0)
 
   const rows: Row[] = useMemo(() => {
-    const base: Row[] = allExpanded && !trashMode ? expandedRows : files.map((f) => ({ file: f }))
-    if (filterTagId == null) return base
-    return base.filter((r) => (r.file.tags || []).some((tg) => tg.id === filterTagId))
-  }, [allExpanded, expandedRows, files, trashMode, filterTagId])
+    let base: Row[] = allExpanded && !trashMode ? expandedRows : files.map((f) => ({ file: f }))
+    if (!prefs.showHiddenFiles) {
+      base = base.filter((r) => !r.file.name.startsWith('.'))
+    }
+    if (filterTagId != null) {
+      base = base.filter((r) => (r.file.tags || []).some((tg) => tg.id === filterTagId))
+    }
+    // 用户自定义排序：目录始终在前
+    const key = prefs.sortBy
+    const dir = prefs.sortDesc ? -1 : 1
+    return [...base].sort((a, b) => {
+      if (a.file.isDir !== b.file.isDir) return a.file.isDir ? -1 : 1
+      let cmp = 0
+      if (key === 'name') cmp = a.file.name.localeCompare(b.file.name, 'zh-CN')
+      else if (key === 'size') cmp = (a.file.size || 0) - (b.file.size || 0)
+      else cmp = new Date(a.file.updatedAt || 0).getTime() - new Date(b.file.updatedAt || 0).getTime()
+      return cmp * dir
+    })
+  }, [allExpanded, expandedRows, files, trashMode, filterTagId, prefs.sortBy, prefs.sortDesc, prefs.showHiddenFiles])
 
   const loadTags = useCallback(async () => {
     try {
