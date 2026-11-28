@@ -559,4 +559,49 @@ func ensureBrandSettings() {
 	// 默认开放自由注册：邀请码是可选增强（填了送套餐），不是准入门槛。
 	// 管理员可在后台关闭自由注册，改为「仅凭邀请码进人」。
 	upsertSetting("security.allow_register", "true")
+
+	// --- 后台可配置项默认值（这些 key 后端确实读取）---
+	// 安全响应头（"off" 表示不发送该头）
+	upsertSetting("security.csp", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' ws: wss:")
+	upsertSetting("security.frame_options", "SAMEORIGIN")
+	upsertSetting("security.referrer_policy", "strict-origin-when-cross-origin")
+	upsertSetting("security.hsts_max_age", "31536000")
+	// 登录封禁 / 会话
+	upsertSetting("security.login_max_attempts", "10")
+	upsertSetting("security.ban_duration_hours", "24")
+	upsertSetting("security.session_ttl_minutes", "1440")
+	upsertSetting("security.require_2fa_admin", "false")
+	upsertSetting("security.hcaptcha_site_key", "")
+	upsertSetting("security.ip_blacklist", "")
+	// 限流（middleware/rate_limit.go 已读，此前后台无控件）
+	upsertSetting("rate_limit.login_per_min", "10")
+	upsertSetting("rate_limit.upload_per_min", "60")
+	upsertSetting("rate_limit.default_per_min", "600")
+	// 上传 / 文件
+	upsertSetting("upload.max_size_mb", "2048")
+	upsertSetting("upload.concurrency", "5")
+	// WebDAV
+	upsertSetting("webdav.path", "/dav")
+	upsertSetting("webdav.concurrency", "0")
+	upsertSetting("webdav.methods", `["GET","HEAD","POST","PUT","DELETE","MKCOL","COPY","MOVE","PROPFIND","PROPPATCH","LOCK","UNLOCK"]`)
+	// CORS 白名单（router.go 已读，此前后台无控件）
+	upsertSetting("cors.allowed_origins", "")
+	// 站点展示（前端读 GetSettings 全量 map 时可消费）
+	upsertSetting("site.default_lang", "zh-CN")
+	upsertSetting("site.timezone", "Asia/Shanghai")
+	upsertSetting("site.default_theme", "auto")
+	upsertSetting("site.custom_css", "")
+	upsertSetting("site.show_powered_by", "true")
+	upsertSetting("site.domain", "")
+	upsertSetting("site.protocol", "https")
+	// 插件策略
+	upsertSetting("plugin.auto_update", "false")
+	upsertSetting("plugin.allow_install", "true")
+	// 邮件（供 smtp-email 插件读取 indicators，宿主集中存）
+	upsertSetting("mail.enabled", "false")
+	upsertSetting("mail.smtp_host", "")
+	upsertSetting("mail.smtp_port", "587")
+	upsertSetting("mail.smtp_user", "")
+	upsertSetting("mail.smtp_password", "")
+	upsertSetting("mail.smtp_from", "")
 }

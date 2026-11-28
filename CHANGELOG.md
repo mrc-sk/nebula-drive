@@ -15,6 +15,7 @@
 | 1 | 注册 | **默认开放自由注册**：`security.allow_register` 启动种子与 fallback 默认值由 `false` 改为 `true`。填邀请码 = 按码绑定套餐发放订阅；不填 = 正常注册。管理员仍可在后台关闭恢复旧行为，或装 `nd-invite-code` 插件把关 |
 | 2 | CI · 插件 | 恢复 `backend/cmd/pbclus-pack/`（V26-11.0 重构时误删），Smoke workflow 不再是红的；官方插件包 `pack/inspect/verify/unpack/keygen` 制作能力一并复活 |
 | 3 | 用户偏好 | 个人设置面板可自定义项从 4 项扩到 **24 项**，分基础 / 界面外观 / 文件浏览 / 交互 / 高级五组，全部持久化到 localStorage 并对旧配置自动补默认值。视图模式、排序、隐藏文件、减少动画、头像光晕等已接真实 UI 消费点 |
+| 4 | 管理员设置 | 修复后台设置「存了没用」的结构性问题：前端驼峰 key 与后端点号 key 命名错位，导致 20+ 项保存后不生效。新增双向 key 映射层 + 值字符串化（后端绑定 `map[string]string`）；WebDAV 方法改存 JSON 数组对齐后端。新增 20+ 个后端真读的设置项：安全响应头（CSP/HSTS/Frame-Options/Referrer，支持 off 关闭）、登录失败阈值与封禁时长、手动 IP 黑名单（精确 IP + CIDR）、三类限流、CORS 白名单、TLS 模式/域名等，均有 seed 默认值与测试 |
 
 ### 兼容说明
 

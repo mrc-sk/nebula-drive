@@ -61,6 +61,21 @@ func settingInt(key string, def int) int {
 	return n
 }
 
+// settingStr 从 settings 表读取字符串配置，缺失时返回默认值
+func settingStr(key string, def string) string {
+	if db.Get() == nil {
+		return def
+	}
+	var s models.Setting
+	if err := db.Get().Where("`key` = ?", key).First(&s).Error; err != nil {
+		return def
+	}
+	if v := strings.TrimSpace(s.Value); v != "" {
+		return v
+	}
+	return def
+}
+
 // limitForCategory 根据 category 返回每分钟限额
 func limitForCategory(category string) int {
 	switch category {

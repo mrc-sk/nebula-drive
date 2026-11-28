@@ -27,6 +27,104 @@ const PRESET_COLORS = [
   { name: 'blue', value: '#3b82f6' },
 ]
 
+// UI 字段名 -> 后端真正读取的 setting key。
+// 历史原因两边命名不一致（驼峰 vs 点号），曾导致设置页大量项「存了没用」。
+// 这里集中映射，UI 仍用左侧短名，保存/加载时双向转换。
+const KEY_MAP: Record<string, string> = {
+  loginMaxAttempts: 'security.login_max_attempts',
+  minPasswordLen: 'security.password_min_length',
+  passwordMinLen: 'security.password_min_length',
+  passwordRequireUpper: 'security.password_require_upper',
+  passwordRequireDigit: 'security.password_require_digit',
+  passwordRequireSpecial: 'security.password_require_special',
+  captchaEnabled: 'security.captcha_enabled',
+  hcaptchaSiteKey: 'security.hcaptcha_site_key',
+  hcaptchaSecret: 'security.hcaptcha_secret',
+  allowedExtensions: 'upload.allowed_extensions',
+  enableMagicCheck: 'upload.enable_magic_check',
+  autoBanThreshold: 'security.login_max_attempts',
+  banDuration: 'security.ban_duration_hours',
+  manualIpBlacklist: 'security.ip_blacklist',
+  trashRetention: 'trash.retention_days',
+  maxVersions: 'file.max_versions',
+  maxFileSize: 'upload.max_size_mb',
+  uploadConcurrency: 'upload.concurrency',
+  webdavPath: 'webdav.path',
+  webdavConcurrency: 'webdav.concurrency',
+  webdavMethods: 'webdav.methods',
+  registerEnabled: 'security.allow_register',
+  twoFARequired: 'security.require_2fa_admin',
+  sessionTTL: 'security.session_ttl_minutes',
+  siteName: 'brand.name',
+  defaultLang: 'site.default_lang',
+  timezone: 'site.timezone',
+  defaultTheme: 'site.default_theme',
+  customCSS: 'site.custom_css',
+  showPoweredBy: 'site.show_powered_by',
+  pluginAutoUpdate: 'plugin.auto_update',
+  pluginAllowInstall: 'plugin.allow_install',
+  mailEnabled: 'mail.enabled',
+  smtpHost: 'mail.smtp_host',
+  smtpPort: 'mail.smtp_port',
+  smtpUser: 'mail.smtp_user',
+  smtpPassword: 'mail.smtp_password',
+  smtpFrom: 'mail.smtp_from',
+  domain: 'site.domain',
+  protocol: 'site.protocol',
+  // 安全响应头 / 限流 / CORS
+  securityCsp: 'security.csp',
+  securityFrameOptions: 'security.frame_options',
+  securityReferrerPolicy: 'security.referrer_policy',
+  securityHstsMaxAge: 'security.hsts_max_age',
+  loginRatePerMin: 'rate_limit.login_per_min',
+  uploadRatePerMin: 'rate_limit.upload_per_min',
+  defaultRatePerMin: 'rate_limit.default_per_min',
+  corsAllowedOrigins: 'cors.allowed_origins',
+  // TLS（main.go:207 读取，需重启生效）
+  tlsMode: 'tls.mode',
+  tlsDomain: 'tls.domain',
+}
+
+// 反查表：后端 key -> UI 名（load 时用）
+const REVERSE_KEY_MAP: Record<string, string> = Object.fromEntries(
+  Object.entries(KEY_MAP).map(([ui, real]) => [real, ui])
+)
+
+// 把后端 KV 铺进 UI data：真实 key 转回 UI 名，同时保留真实 key（如 cdn.*、brand.*）
+function fromBackend(raw: Record<string, string>): Record<string, any> {
+  const out: Record<string, any> = {}
+  for (const [k, v] of Object.entries(raw)) {
+    out[k] = v // 原样保留（含已是点号的 key）
+    const ui = REVERSE_KEY_MAP[k]
+    if (ui) out[ui] = v
+  }
+  // minPasswordLen 与 passwordMinLen 共用同一后端 key，REVERSE_KEY_MAP 只保留一个，这里补齐另一个
+  const minLen = raw['security.password_min_length']
+  if (minLen != null) {
+    if (out.minPasswordLen == null) out.minPasswordLen = minLen
+    if (out.passwordMinLen == null) out.passwordMinLen = minLen
+  }
+  // webdav.methods 后端存 JSON 数组字符串，UI 用数组
+  const methods = raw['webdav.methods']
+  if (methods) {
+    try { out.webdavMethods = JSON.parse(methods) } catch { out.webdavMethods = methods.split(',') }
+  }
+  return out
+}
+
+// 保存前：UI 名 -> 后端真实 key，所有值字符串化（后端绑定 map[string]string）
+function toBackend(data: Record<string, any>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(data)) {
+    const real = KEY_MAP[k] || k
+    if (Array.isArray(v)) out[real] = v.join(',')
+    else if (typeof v === 'boolean') out[real] = v ? 'true' : 'false'
+    else if (v == null) out[real] = ''
+    else out[real] = String(v)
+  }
+  return out
+}
+
 function fileToDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -50,7 +148,7 @@ export default function Settings() {
     setLoading(true)
     try {
       const r = await api.admin.settings()
-      if (r?.code === 0 && r.data) setData(r.data)
+      if (r?.code === 0 && r.data) setData(fromBackend(r.data))
     } finally {
       setLoading(false)
     }
@@ -114,8 +212,14 @@ export default function Settings() {
   const save = async () => {
     setSaving(true)
     try {
-      const payload = { ...data }
-      if (Array.isArray(payload.webdavMethods)) payload.webdavMethods = payload.webdavMethods.join(',')
+      // webdav.methods 后端要求 JSON 数组（webdav.go:208），不是逗号串
+      const payload = toBackend(data)
+      const methods = Array.isArray(data.webdavMethods) ? data.webdavMethods
+        : String(data.webdavMethods || '').split(',').map((s: string) => s.trim()).filter(Boolean)
+      if (methods.length) {
+        payload['webdav.methods'] = JSON.stringify(methods)
+        delete payload.webdavMethods
+      }
       await api.admin.saveSettings(payload)
       alert('Saved')
     } catch {
@@ -194,6 +298,16 @@ export default function Settings() {
               </Field>
               <Field label={t('ns_admin.timezone')} className="md:col-span-2">
                 <input className="glass-input" value={data.timezone || 'Asia/Shanghai'} onChange={(e) => set('timezone', e.target.value)} />
+              </Field>
+              <Field label="HTTPS 模式">
+                <select className="glass-input" value={data.tlsMode || 'off'} onChange={(e) => set('tlsMode', e.target.value)}>
+                  <option value="off">关闭（HTTP）</option>
+                  <option value="auto">自动证书（需重启生效）</option>
+                  <option value="custom">自定义证书（需重启生效）</option>
+                </select>
+              </Field>
+              <Field label="自动证书域名">
+                <input className="glass-input" placeholder="example.com" value={data.tlsDomain || ''} onChange={(e) => set('tlsDomain', e.target.value)} />
               </Field>
             </div>
           )}
@@ -361,6 +475,54 @@ export default function Settings() {
                       onChange={(e) => set('share.default_with_extract', e.target.checked)}
                     />
                   </label>
+                </div>
+              </div>
+
+              {/* 新增：安全响应头 / 限流（后端已接入，真生效） */}
+              <div className="border-t border-white/10 pt-4">
+                <div className="mb-2 text-sm font-semibold text-slate-200">安全响应头</div>
+                <p className="mb-3 text-[11px] text-slate-400">留 "off" 表示不发送该响应头。改完记得点保存。</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="HSTS 有效期（秒，0=关闭）">
+                    <input type="number" className="glass-input" value={data.securityHstsMaxAge ?? 31536000} onChange={(e) => set('securityHstsMaxAge', Number(e.target.value))} />
+                  </Field>
+                  <Field label="X-Frame-Options">
+                    <select className="glass-input" value={data.securityFrameOptions || 'SAMEORIGIN'} onChange={(e) => set('securityFrameOptions', e.target.value)}>
+                      <option value="SAMEORIGIN">SAMEORIGIN</option>
+                      <option value="DENY">DENY</option>
+                      <option value="off">关闭</option>
+                    </select>
+                  </Field>
+                  <Field label="Referrer-Policy">
+                    <select className="glass-input" value={data.securityReferrerPolicy || 'strict-origin-when-cross-origin'} onChange={(e) => set('securityReferrerPolicy', e.target.value)}>
+                      <option value="strict-origin-when-cross-origin">strict-origin-when-cross-origin</option>
+                      <option value="no-referrer">no-referrer</option>
+                      <option value="same-origin">same-origin</option>
+                      <option value="off">关闭</option>
+                    </select>
+                  </Field>
+                  <Field label="Content-Security-Policy">
+                    <input className="glass-input" placeholder="off 或自定义 CSP" value={data.securityCsp || ''} onChange={(e) => set('securityCsp', e.target.value)} />
+                  </Field>
+                </div>
+              </div>
+
+              {/* 新增：限流 / 会话 / CORS */}
+              <div className="border-t border-white/10 pt-4">
+                <div className="mb-2 text-sm font-semibold text-slate-200">限流与会话</div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="登录限流（次/分钟）">
+                    <input type="number" className="glass-input" value={data.loginRatePerMin ?? 10} onChange={(e) => set('loginRatePerMin', Number(e.target.value))} />
+                  </Field>
+                  <Field label="上传限流（次/分钟）">
+                    <input type="number" className="glass-input" value={data.uploadRatePerMin ?? 60} onChange={(e) => set('uploadRatePerMin', Number(e.target.value))} />
+                  </Field>
+                  <Field label="全局限流（次/分钟）">
+                    <input type="number" className="glass-input" value={data.defaultRatePerMin ?? 600} onChange={(e) => set('defaultRatePerMin', Number(e.target.value))} />
+                  </Field>
+                  <Field label="CORS 允许的来源（逗号分隔）">
+                    <input className="glass-input" placeholder="https://a.example.com,https://b.example.com" value={data.corsAllowedOrigins || ''} onChange={(e) => set('corsAllowedOrigins', e.target.value)} />
+                  </Field>
                 </div>
               </div>
             </div>

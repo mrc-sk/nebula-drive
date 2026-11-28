@@ -101,3 +101,43 @@ func TestRequireCaptchaEmptyIP(t *testing.T) {
 func TestRecordLoginFailureEmptyIP(t *testing.T) {
 	RecordLoginFailure("") // 不 panic
 }
+
+// TestManualIPBlacklist 验证后台 security.ip_blacklist 真生效：精确 IP 与 CIDR 都能封禁，# 注释忽略。
+func TestManualIPBlacklist(t *testing.T) {
+	testutil.SetupDB(t)
+	defer testutil.SeedSetting("security.ip_blacklist", "")
+	testutil.SeedSetting("security.ip_blacklist", "# 手工黑名单\n192.168.1.100\n10.0.0.0/8")
+
+	if !IsIPBanned("192.168.1.100") {
+		t.Error("精确 IP 应被封禁")
+	}
+	if !IsIPBanned("10.5.6.7") {
+		t.Error("CIDR 网段内 IP 应被封禁")
+	}
+	if IsIPBanned("192.168.1.101") {
+		t.Error("不在名单的 IP 不应被封禁")
+	}
+	if IsIPBanned("bad-ip") {
+		t.Error("非法 IP 不应 panic，也不应被封禁")
+	}
+}
+
+// TestLoginThresholdFromSetting 验证后台可调登录失败锁定阈值。
+func TestLoginThresholdFromSetting(t *testing.T) {
+	testutil.SetupDB(t)
+	defer testutil.SeedSetting("security.login_max_attempts", "10")
+	testutil.SeedSetting("security.login_max_attempts", "3")
+
+	ip := "4.4.4.4"
+	ClearLoginFailure(ip)
+	for i := 0; i < 2; i++ {
+		RecordLoginFailure(ip)
+	}
+	if IsIPBanned(ip) {
+		t.Fatal("2 次失败不应封禁（阈值 3）")
+	}
+	RecordLoginFailure(ip)
+	if !IsIPBanned(ip) {
+		t.Fatal("达到阈值 3 次应封禁")
+	}
+}

@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,9 +14,15 @@ import (
 
 const (
 	loginFailWindow      = 5 * time.Minute
-	loginFailThreshold   = 10
+	loginFailThreshold   = 10 // 兜底默认，实际读 security.login_max_attempts
 	captchaFailThreshold = 3
 )
+
+// loginMaxAttempts 从设置读取登录失败锁定阈值；管理员在后台可调。
+func loginMaxAttempts() int { return settingInt("security.login_max_attempts", loginFailThreshold) }
+
+// banHoursFromSetting 封禁时长（小时），默认 24（对齐后台设置页旧默认值）。
+func banHoursFromSetting() int { return settingInt("security.ban_duration_hours", 24) }
 
 type loginFailRecord struct {
 	count int
@@ -37,19 +45,45 @@ func IPGuard() gin.HandlerFunc {
 	}
 }
 
-// IsIPBanned 检查 IP 是否被封禁（命中且未过期）
+// isManuallyBanned 检查管理员在后台填的手动黑名单（security.ip_blacklist），
+// 每行一个 IP 或 CIDR，# 开头为注释。
+func isManuallyBanned(ip string) bool {
+	raw := settingStr("security.ip_blacklist", "")
+	if raw == "" {
+		return false
+	}
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	for _, line := range strings.Split(raw, "\n") {
+		entry := strings.TrimSpace(line)
+		if entry == "" || strings.HasPrefix(entry, "#") {
+			continue
+		}
+		if strings.Contains(entry, "/") {
+			if _, netw, err := net.ParseCIDR(entry); err == nil && netw.Contains(parsed) {
+				return true
+			}
+		} else if net.ParseIP(entry) != nil && net.ParseIP(entry).Equal(parsed) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsIPBanned 检查 IP 是否被封禁（自动封禁记录或管理员手动黑名单）
 func IsIPBanned(ip string) bool {
 	if db.Get() == nil || ip == "" {
 		return false
 	}
 	var ban models.IPBan
-	if err := db.Get().Where("ip = ?", ip).First(&ban).Error; err != nil {
-		return false
+	if err := db.Get().Where("ip = ?", ip).First(&ban).Error; err == nil {
+		if ban.ExpiresAt == nil || ban.ExpiresAt.After(time.Now()) {
+			return true
+		}
 	}
-	if ban.ExpiresAt != nil && ban.ExpiresAt.Before(time.Now()) {
-		return false
-	}
-	return true
+	return isManuallyBanned(ip)
 }
 
 // RequireCaptcha 连续失败 captchaFailThreshold 次后强制要求验证码
@@ -84,7 +118,7 @@ func RecordLoginFailure(ip string) {
 		rec.count++
 	}
 	count := rec.count
-	exceeded := count >= loginFailThreshold
+	exceeded := count >= loginMaxAttempts()
 	if exceeded {
 		delete(loginFailures, ip)
 	}
@@ -111,7 +145,7 @@ func autoBanIP(ip string) {
 	if err := db.Get().Where("ip = ?", ip).First(&existing).Error; err == nil {
 		return
 	}
-	exp := time.Now().Add(time.Hour)
+	exp := time.Now().Add(time.Duration(banHoursFromSetting()) * time.Hour)
 	db.Get().Create(&models.IPBan{
 		IP:        ip,
 		Reason:    "too many login failures",
